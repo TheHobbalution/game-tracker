@@ -554,18 +554,51 @@
 let USING_LOCAL_STORAGE_FALLBACK = false;
 if(typeof window.storage === 'undefined'){
   USING_LOCAL_STORAGE_FALLBACK = true;
-  const PREFIX = 'gst::';
+
+  // Hosted as a static site (e.g. GitHub Pages), the Claude host isn't here to provide
+  // window.storage, so we shim it. We back it with IndexedDB rather than localStorage:
+  // localStorage on iOS Safari is capped at only a few MB, which this dataset blows past once
+  // a few seasons are loaded. IndexedDB scales with device storage (hundreds of MB+), so the
+  // same interface keeps every call site below unchanged while removing that ceiling.
+  const DB_NAME = 'game-tracker';
+  const STORE = 'kv';
+  let dbPromise = null;
+
+  function openDb(){
+    if(dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject)=>{
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      };
+      req.onsuccess = ()=> resolve(req.result);
+      req.onerror = ()=> reject(req.error);
+    });
+    return dbPromise;
+  }
+
+  function idbRequest(mode, fn){
+    return openDb().then(db => new Promise((resolve, reject)=>{
+      const tx = db.transaction(STORE, mode);
+      const store = tx.objectStore(STORE);
+      const req = fn(store);
+      req.onsuccess = ()=> resolve(req.result);
+      req.onerror = ()=> reject(req.error);
+    }));
+  }
+
   window.storage = {
     async get(key){
-      const v = localStorage.getItem(PREFIX + key);
-      return v === null ? null : { key, value: v, shared: false };
+      const v = await idbRequest('readonly', store => store.get(key));
+      return (v === undefined || v === null) ? null : { key, value: v, shared: false };
     },
     async set(key, value){
-      localStorage.setItem(PREFIX + key, value);
+      await idbRequest('readwrite', store => store.put(value, key));
       return { key, value, shared: false };
     },
     async delete(key){
-      localStorage.removeItem(PREFIX + key);
+      await idbRequest('readwrite', store => store.delete(key));
       return { key, deleted: true, shared: false };
     }
   };
@@ -6401,7 +6434,7 @@ async function seedFromPublishedData(){
   try{
     // Even when hosted, never let a slow or hanging request hold up startup.
     const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 3000);
+    const timeout = setTimeout(()=>controller.abort(), 20000);
     let res;
     try{
       res = await fetch('data.json', { cache: 'no-store', signal: controller.signal });
@@ -6417,19 +6450,27 @@ async function seedFromPublishedData(){
     if(seen && seen.value === publishedStamp) return false; // already running this published version
 
     const put = (key, val) => window.storage.set(key, JSON.stringify(val), false);
-    await put(STORAGE_KEY, Array.isArray(payload.games) ? payload.games : []);
-    await put('fixtures', Array.isArray(payload.fixtures) ? payload.fixtures : []);
-    await put('byes', Array.isArray(payload.byes) ? payload.byes : []);
-    await put('playerAliases', payload.playerAliases || {});
-    await put('dismissedMatchGroups', payload.dismissedMatchGroups || []);
-    await put('dismissedBestMismatches', payload.dismissedBestMismatches || []);
-    if(Array.isArray(payload.knownClubs) && payload.knownClubs.length) await put('knownClubs', payload.knownClubs);
-    if(payload.teamClubOverrides) await put('teamClubOverrides', payload.teamClubOverrides);
-    if(payload.clubNicknames) await put('clubNicknames', payload.clubNicknames);
-    await window.storage.set('publishedDataStamp', publishedStamp, false);
+    try{
+      await put(STORAGE_KEY, Array.isArray(payload.games) ? payload.games : []);
+      await put('fixtures', Array.isArray(payload.fixtures) ? payload.fixtures : []);
+      await put('byes', Array.isArray(payload.byes) ? payload.byes : []);
+      await put('playerAliases', payload.playerAliases || {});
+      await put('dismissedMatchGroups', payload.dismissedMatchGroups || []);
+      await put('dismissedBestMismatches', payload.dismissedBestMismatches || []);
+      if(Array.isArray(payload.knownClubs) && payload.knownClubs.length) await put('knownClubs', payload.knownClubs);
+      if(payload.teamClubOverrides) await put('teamClubOverrides', payload.teamClubOverrides);
+      if(payload.clubNicknames) await put('clubNicknames', payload.clubNicknames);
+      await window.storage.set('publishedDataStamp', publishedStamp, false);
+    }catch(storageErr){
+      // IndexedDB backs hosted storage now, so a genuine quota hit is unlikely — but if the
+      // device's storage really is full or blocked (e.g. private-mode restrictions), surface it
+      // instead of failing silently and leaving the page mysteriously empty.
+      showToast('Could not save the published data on this device (storage may be full or blocked) — data.json downloaded but not saved locally');
+      return false;
+    }
     return true;
   }catch(e){
-    return false; // no published data file — carry on with whatever is stored locally
+    return false; // no published data file, or the fetch itself failed/timed out — carry on with whatever is stored locally
   }
 }
 
