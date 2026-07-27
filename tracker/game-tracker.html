@@ -357,6 +357,7 @@
   <section class="panel active" id="panel-home">
     <h2 style="font-size:22px;margin-bottom:6px;">Welcome to Game Stats Tracker</h2>
     <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across the AFL Barwon FNL, all pulled together in one place — goals, records, form trends, head-to-head history, and power rankings, updated as results come in.</p>
+    <div id="privacyBanner" class="warn-box" style="max-width:760px;margin-bottom:18px;"><strong>This is your own copy.</strong> Anything you add, edit or delete here changes only what <em>you</em> see — it isn't shared with anyone else, and it doesn't alter the real results.</div>
     <div id="homeSnapshot" class="home-snapshot"></div>
     <p class="hint" style="margin:22px 0 14px;">Pick where you want to go:</p>
     <div class="home-grid">
@@ -408,6 +409,9 @@
       <div class="toolbar-actions">
         <button class="text-link-btn" id="mergePlayersBtn" title="Merge duplicate player records — for typos or a player who switched clubs mid-season">Merge players</button>
         <button class="compare-btn" id="comparePlayersBtn">Compare players</button>
+      </div>
+      <div class="toolbar-actions" style="margin-top:10px;">
+        <button class="gold-btn" id="playerMovementBtn" style="margin-top:0;padding:11px 20px;font-size:14.5px;" title="Players who have changed clubs between seasons, and whether they moved to a higher or lower division than their old club fields">Player movement</button>
       </div>
     </div>
     <p class="hint" id="playersSortHint" style="margin:0 0 14px;">Click a column header to sort — click again to reverse</p>
@@ -476,6 +480,10 @@
   </section>
 
   <!-- MERGE PLAYERS -->
+  <section class="panel" id="panel-player-movement">
+    <div id="playerMovementWrap"></div>
+  </section>
+
   <section class="panel" id="panel-merge-players">
     <div id="mergePlayersWrap"></div>
   </section>
@@ -516,6 +524,11 @@
     <div id="fixturePreviewWrap"></div>
   </section>
 
+  <!-- PREDICTION ACCURACY -->
+  <section class="panel" id="panel-prediction-accuracy">
+    <div id="predictionAccuracyWrap"></div>
+  </section>
+
   <!-- PLAYER DETAIL -->
   <section class="panel" id="panel-player-detail">
     <div id="playerDetailWrap"></div>
@@ -536,6 +549,9 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// NOTE: games are not stored under a single key — see loadGames/saveGames for the chunked
+// layout ('games__meta' plus 'games__0', 'games__1', …), which exists because one storage value
+// is capped around 5MB and a full competition exceeds that.
 // ⚠ CHECKLIST — when adding a new piece of persisted state (a new window.storage key, or a
 // new field on games/fixtures/byes/etc that matters for stats), keep the spreadsheet export a
 // complete standalone backup by also updating:
@@ -623,6 +639,10 @@ let clubNicknames = { "ammos": "Geelong Amateur" }; // nickname word -> canonica
 let currentPlayerDetailKey = null;
 let currentGameDetailId = null;
 let currentTeamDetailKey = null;
+// 'season' = just this team-season; 'squad' = this group of players wherever they've appeared.
+// Age groups run two years, so a squad naturally holds together for two seasons (this year's
+// top-age players were last year's bottom-age players) before splitting as they age up.
+let teamSplitScope = 'season';
 let currentFixturePreviewId = null;
 let pendingParsed = null;
 let chartInstance = null;
@@ -692,7 +712,118 @@ function compareValues(a, b, key){
 }
 
 // ---------- Storage ----------
+// ---------- Compressed, chunked game storage ----------
+// The host caps a single storage value at ~5MB. A full competition's games serialise to about
+// 12.5MB once several seasons of player rows are in, so the write simply failed — which looked
+// like the app reverting to an older, smaller dataset on reload, because the last value that DID
+// fit was the one still sitting in storage. Nothing warned, because the failed write was caught
+// and the in-memory data still looked right until the next reload.
+//
+// Two defences, in order of importance:
+//  1. gzip. This JSON is enormously repetitive (the same keys on every game and every player row)
+//     and compresses about 8x, so 12.5MB becomes ~1.5MB, or ~2MB once base64-encoded for storage.
+//     That alone takes the whole dataset back under a single key's limit with room to spare.
+//  2. Chunking anyway. Compression buys headroom, not immunity — so the payload is still split
+//     across numbered keys with a manifest, and simply ends up as one chunk at current size.
+// Compression is skipped where CompressionStream isn't available, in which case chunking alone
+// carries it; the manifest records which encoding was used so load always knows what it has.
+const GAMES_META_KEY = STORAGE_KEY + '__meta';
+const gamesChunkKey = i => STORAGE_KEY + '__' + i;
+const GAMES_CHUNK_CHARS_COMPRESSED = 3000000;   // base64 is ASCII, so chars == bytes
+const GAMES_CHUNK_CHARS_PLAIN = 1200000;        // raw JSON may hold multi-byte chars — leave room
+const canCompressStorage = () => typeof CompressionStream !== 'undefined' && typeof Blob !== 'undefined';
+
+async function gzipToBase64(text){
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  // Build the base64 source in slices: one apply() over a multi-megabyte array blows the stack.
+  let binary = '';
+  const SLICE = 0x8000;
+  for(let i = 0; i < bytes.length; i += SLICE){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SLICE));
+  }
+  return btoa(binary);
+}
+
+async function base64ToUngzip(b64){
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(stream).text();
+}
+
+function splitPayload(payload, size){
+  const parts = [];
+  for(let i = 0; i < payload.length; i += size) parts.push(payload.slice(i, i + size));
+  return parts.length ? parts : [''];
+}
+
+// Every games__N key present in storage, whether or not the manifest still points at it.
+async function discoverGameChunkKeys(){
+  try{
+    const listed = await window.storage.list(STORAGE_KEY + '__', false);
+    if(listed && listed.keys) return listed.keys.filter(k=> /__\d+$/.test(k));
+  }catch(e){ /* host may not support listing — probe instead */ }
+  const found = [];
+  let misses = 0;
+  for(let i = 0; i < 64 && misses < 3; i++){
+    try{
+      const res = await window.storage.get(gamesChunkKey(i), false);
+      if(res && res.value != null){ found.push(gamesChunkKey(i)); misses = 0; continue; }
+      misses++;
+    }catch(e){ misses++; }
+  }
+  return found;
+}
+
+// Chunks left behind by a save that died partway are pure dead weight: nothing can read them,
+// because the manifest that would describe them was never written. They still occupy the quota
+// though, and since the quota is what killed that save in the first place, they have to go BEFORE
+// the next write is attempted — otherwise every future save fails against space held by rubbish
+// from the failure that started it.
+async function cleanupOrphanedGameChunks(keepChunks){
+  const keys = await discoverGameChunkKeys();
+  let freed = 0;
+  for(const key of keys){
+    const idx = parseInt(key.slice(key.lastIndexOf('__') + 2), 10);
+    if(Number.isFinite(idx) && idx < keepChunks) continue;
+    try{
+      const res = await window.storage.get(key, false);
+      if(res && res.value != null) freed += String(res.value).length;
+      await window.storage.delete(key, false);
+    }catch(e){}
+  }
+  return freed;
+}
+
 async function loadGames(){
+  // Manifest first; fall back to the old single-key layout so pre-existing data still opens.
+  try{
+    const meta = await window.storage.get(GAMES_META_KEY, false);
+    if(meta){
+      const info = JSON.parse(meta.value);
+      const parts = [];
+      for(let i = 0; i < info.chunks; i++){
+        const part = await window.storage.get(gamesChunkKey(i), false);
+        if(part) parts.push(part.value);
+      }
+      if(!info.encoding){
+        // Briefly-lived earlier format: each chunk was its own JSON array of games rather than a
+        // slice of one payload string, so they have to be parsed separately and concatenated.
+        const merged = [];
+        parts.forEach(part=>{
+          try{ const arr = JSON.parse(part); if(Array.isArray(arr)) merged.push(...arr); }catch(e){}
+        });
+        games = merged;
+        return;
+      }
+      let payload = parts.join('');
+      if(info.encoding === 'gzip-b64') payload = await base64ToUngzip(payload);
+      games = payload ? JSON.parse(payload) : [];
+      return;
+    }
+  }catch(e){ /* fall through to the legacy layout */ }
   try{
     const res = await window.storage.get(STORAGE_KEY, false);
     games = res ? JSON.parse(res.value) : [];
@@ -700,29 +831,53 @@ async function loadGames(){
     games = [];
   }
 }
-// Guards against two games ending up with the same id — e.g. after merging two backups of the
-// same season where one side's ids were regenerated. Any delete-by-id action (the duplicate
-// games checker, the regular game delete button) removes every game matching that id, so a
-// collision would silently delete more than intended. Called after loading and after any
-// restore/merge; reassigns a fresh id to every entry after the first with a given id.
-function ensureUniqueGameIds(){
-  const seen = new Set();
-  let changed = false;
-  games.forEach(g=>{
-    if(!g.id || seen.has(g.id)){
-      g.id = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-      changed = true;
-    }
-    seen.add(g.id);
-  });
-  return changed;
-}
+
 async function saveGames(){
   invalidateAggregateCache();
+  const count = games.length;
+  let previousChunks = 0;
   try{
-    await window.storage.set(STORAGE_KEY, JSON.stringify(games), false);
+    const meta = await window.storage.get(GAMES_META_KEY, false);
+    if(meta) previousChunks = JSON.parse(meta.value).chunks || 0;
+  }catch(e){ /* no manifest yet */ }
+
+  // Clear unreferenced chunks first. With no manifest, every chunk present is an orphan from a
+  // failed save, and reclaiming that space is what makes the write below possible at all.
+  try{ await cleanupOrphanedGameChunks(previousChunks); }catch(e){}
+
+  try{
+    const json = JSON.stringify(games);
+    let payload = json, encoding = 'json';
+    if(canCompressStorage()){
+      try{
+        payload = await gzipToBase64(json);
+        encoding = 'gzip-b64';
+      }catch(e){ payload = json; encoding = 'json'; }
+    }
+    const parts = splitPayload(payload, encoding === 'gzip-b64' ? GAMES_CHUNK_CHARS_COMPRESSED : GAMES_CHUNK_CHARS_PLAIN);
+
+    // Chunks before the manifest: load only trusts the manifest, so it must never point at
+    // chunks that weren't actually written.
+    for(let i = 0; i < parts.length; i++){
+      await window.storage.set(gamesChunkKey(i), parts[i], false);
+    }
+    await window.storage.set(GAMES_META_KEY, JSON.stringify({ chunks: parts.length, count, encoding }), false);
+
+    // Tidy up: chunks left over from a bigger previous save, and the pre-chunking single key.
+    for(let i = parts.length; i < previousChunks; i++){
+      try{ await window.storage.delete(gamesChunkKey(i), false); }catch(e){}
+    }
+    try{ await window.storage.delete(STORAGE_KEY, false); }catch(e){}
+
+    // Read the manifest back. A silently-dropped write is exactly the failure that made the app
+    // look like it was reverting on reload, so confirm it landed rather than assuming.
+    const check = await window.storage.get(GAMES_META_KEY, false);
+    const saved = check ? JSON.parse(check.value).count : null;
+    if(saved !== count){
+      showToast(`Save may not have stuck — storage reports ${saved==null?'nothing':saved+' games'} instead of ${count}. Export a backup before reloading.`);
+    }
   }catch(e){
-    showToast('Could not save — storage error');
+    showToast(`Could not save all ${count} games — storage error. Export a backup before reloading.`);
   }
 }
 async function loadFixtures(){
@@ -936,9 +1091,51 @@ function buildPendingRestore(payload, sourceLabel){
       const sig = g => `${g.dateTime}||${g.teamA.name}||${g.teamB.name}`;
       const payloadGamesList = (Array.isArray(payload.games) ? payload.games : []).filter(g=> g && g.teamA && g.teamB);
       const payloadGameSigs = new Set(payloadGamesList.map(sig));
-      const keptExisting = games.filter(g=> !payloadGameSigs.has(sig(g))); // dropped in favor of the richer backup version
+      const keptExisting = games.filter(g=> !payloadGameSigs.has(sig(g)));
       const replacedCount = games.length - keptExisting.length;
-      games = [...keptExisting, ...payloadGamesList];
+
+      // An incoming record isn't always the richer one. The PlayHQ GraphQL scrape carries no
+      // period scores, and rawText/predictionCheck only ever exist on records this app created
+      // itself — so replacing wholesale would silently downgrade those games. Instead, carry
+      // forward any field the incoming record simply doesn't have. A real incoming value always
+      // wins; only absent/blank/empty-array values get backfilled. false and 0 count as real
+      // values (a drawn game's margin IS 0), so they're never treated as missing.
+      const isMissing = v => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+      const GAME_FIELDS = ['quarterScores','rawText','predictionCheck','phase','venue','resultRaw',
+                           'roundLabel','competitionRaw','year','margin','winner','draw'];
+      const SIDE_FIELDS = ['players','best','ratio'];
+      // On a duplicate signature, keep whichever existing copy carries the most of the
+      // app-only fields, since that's the one with something worth rescuing.
+      const richness = g => (g.quarterScores?1:0) + (g.rawText?1:0) + (g.predictionCheck?1:0);
+      const existingBySig = new Map();
+      games.forEach(g=>{
+        const k = sig(g), prev = existingBySig.get(k);
+        if(!prev || richness(g) > richness(prev)) existingBySig.set(k, g);
+      });
+      let preservedCount = 0;
+      const withCarriedOverFields = incoming => {
+        const prev = existingBySig.get(sig(incoming));
+        if(!prev) return incoming;
+        const merged = { ...incoming };
+        let carried = false;
+        GAME_FIELDS.forEach(f=>{
+          if(isMissing(merged[f]) && !isMissing(prev[f])){ merged[f] = prev[f]; carried = true; }
+        });
+        // teamA/teamB are safe to align positionally: a matching signature means both sides
+        // were named in the same order in each source.
+        ['teamA','teamB'].forEach(side=>{
+          if(!merged[side] || !prev[side]) return;
+          const side2 = { ...merged[side] };
+          SIDE_FIELDS.forEach(f=>{
+            if(isMissing(side2[f]) && !isMissing(prev[side][f])){ side2[f] = prev[side][f]; carried = true; }
+          });
+          merged[side] = side2;
+        });
+        if(carried) preservedCount++;
+        return merged;
+      };
+
+      games = [...keptExisting, ...payloadGamesList.map(withCarriedOverFields)];
       ensureUniqueGameIds();
       const addedCount = payloadGamesList.length - replacedCount;
 
@@ -967,7 +1164,7 @@ function buildPendingRestore(payload, sourceLabel){
       }catch(e){
         showToast('Merged in memory, but saving to storage failed — reload with care');
       }
-      showToast(`Merged: ${replacedCount} game(s) upgraded with full data, ${addedCount} new game(s) added, ${extraCount} extra item(s) merged`);
+      showToast(`Merged: ${replacedCount} game(s) updated, ${addedCount} new game(s) added, ${extraCount} extra item(s) merged${preservedCount ? ` — kept existing detail (quarter scores/pastes/predictions) on ${preservedCount} game(s)` : ''}`);
       renderAll();
     }
   };
@@ -1050,6 +1247,16 @@ async function prepareRestoreFromXlsx(file){
       bestPlayersMissing: g.BestPlayersMissing!==undefined ? asBool(g.BestPlayersMissing) : (bestA.length===0 && bestB.length===0),
       playerStatsMissing: g.PlayerStatsMissing!==undefined ? asBool(g.PlayerStatsMissing) : (rowsA.length===0 && rowsB.length===0),
       isForfeit: asBool(g.IsForfeit), isAbandoned: asBool(g.IsAbandoned),
+      predictionCheck: (g.PredictedWinner !== undefined && g.PredictedWinner !== '') ? {
+        predictedWinner: g.PredictedWinner||'',
+        predictedSignedMargin: Number(g.PredictedSignedMargin)||0,
+        predictedTeamAProb: Number(g.PredictedTeamAProb)||0,
+        actualWinner: g.ActualWinner || null,
+        actualSignedMargin: Number(g.ActualSignedMargin)||0,
+        winnerCorrect: g.PredictionWinnerCorrect==='' ? null : asBool(g.PredictionWinnerCorrect),
+        marginError: Number(g.PredictionMarginError)||0,
+        gradedAt: g.PredictionGradedAt||null
+      } : undefined,
       teamA: { name:g.TeamA, total:Number(g.TeamAScore)||0, ratio:g.TeamARatio||null, players: toPlayers(rowsA),
         best: bestA.length ? bestA : (g.TeamABestPlayers ? String(g.TeamABestPlayers).split(',').map(s=>s.trim()).filter(Boolean) : []) },
       teamB: { name:g.TeamB, total:Number(g.TeamBScore)||0, ratio:g.TeamBRatio||null, players: toPlayers(rowsB),
@@ -1063,7 +1270,12 @@ async function prepareRestoreFromXlsx(file){
     fixtures: fixtureRows ? fixtureRows.map(f=>({
       id: f.FixtureId||undefined, roundLabel:f.RoundLabel||'', competitionRaw:f.CompetitionRaw||null,
       year: f.Year||null, date:f.Date||null, time:f.Time||null, venue:f.Venue||null,
-      teamA:f.TeamA||'', teamB:f.TeamB||'', isBye: asBool(f.IsBye)
+      teamA:f.TeamA||'', teamB:f.TeamB||'', isBye: asBool(f.IsBye),
+      prediction: (f.PredictionSignedMargin !== undefined && f.PredictionSignedMargin !== '') ? {
+        signedMargin: Number(f.PredictionSignedMargin)||0,
+        teamAProb: Number(f.PredictionTeamAProb)||0,
+        snapshotAt: f.PredictionSnapshotAt||null
+      } : undefined
     })) : [],
     byes: byeRows ? byeRows.map(b=>({ team:b.Team||'', roundLabel:b.RoundLabel||'', dateTime:b.DateTime||'', year:b.Year||null, phase:b.Phase||'' })) : [],
     playerAliases: aliasRows ? Object.fromEntries(aliasRows.map(r=>[r.RawKey, r.CanonicalKey])) : {},
@@ -1715,8 +1927,15 @@ function applyHeadToHeadOrdering(rows){
   return out;
 }
 
-function openPowerRankings(){
+// Set when the rankings are opened from a specific team's page, so the list arrives already
+// scoped to that team's season and age group rather than the default (latest year, no age group
+// chosen). Consumed by the next renderPowerRankings() call and then cleared, so it never sticks
+// around and overrides the person's own filter changes afterwards.
+let pendingRankPreset = null;
+
+function openPowerRankings(preset){
   rankSort = { key: 'rank', dir: 'asc' };
+  pendingRankPreset = preset || null;
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-power-rankings').classList.add('active');
@@ -1734,9 +1953,13 @@ function renderPowerRankings(){
   const wrap = document.getElementById('powerRankingsWrap');
   const { teamList } = computeAggregates();
 
+  // A preset only applies to this one render — read it, then clear it immediately.
+  const preset = pendingRankPreset;
+  pendingRankPreset = null;
+
   const years = [...new Set(teamList.map(t=>t.year).filter(Boolean))].sort((a,b)=>b-a);
   const yearSel = document.getElementById('rankYear');
-  const curYear = yearSel ? yearSel.value : (years[0]||'');
+  const curYear = (preset && preset.year != null) ? String(preset.year) : (yearSel ? yearSel.value : (years[0]||''));
 
   const inYear = teamList.filter(t=>String(t.year)===String(curYear));
   const ageGroups = [...new Set(inYear.map(t=>t.ageGroup))].sort();
@@ -1746,13 +1969,13 @@ function renderPowerRankings(){
   // against each other, and a leftover selection from a different year shouldn't silently carry
   // over. The person picks year, then age group, then optionally narrows to one division.
   const ageSel = document.getElementById('rankAgeGroup');
-  const requestedAge = ageSel ? ageSel.value : '';
+  const requestedAge = (preset && preset.ageGroup) ? preset.ageGroup : (ageSel ? ageSel.value : '');
   const curAge = ageGroups.includes(requestedAge) ? requestedAge : '';
 
   const inAge = curAge ? inYear.filter(t=>t.ageGroup===curAge) : [];
   const divisions = [...new Set(inAge.flatMap(t=>t.divisions))].sort();
   const divSel = document.getElementById('rankDivision');
-  const requestedDiv = divSel ? divSel.value : 'ALL';
+  const requestedDiv = preset ? 'ALL' : (divSel ? divSel.value : 'ALL');
   const curDiv = (requestedDiv==='ALL' || divisions.includes(requestedDiv)) ? requestedDiv : 'ALL';
 
   let rows = [], lowGamesRows = [], contradictions = 0, LOW_GAMES_PCT = 0.25;
@@ -1985,6 +2208,27 @@ const DIVISION_GAP = 30;          // Points of expected margin between adjacent 
 const DIVISION_ANCHOR_PULL = 0.09;
 const GRADING_GAME_WEIGHT = 2.5;  // Extra weight for grading-phase results — the actual cross-division evidence.
 
+// Age groups NEVER play each other, so unlike divisions there is no cross-over evidence anywhere
+// in the data to anchor them against one another — no grading round, no transitive chain, nothing.
+// Ratings are therefore centred within each age group (see computeMarginRatings), which makes a
+// rating read as "points better or worse than an average side in this grade". That's the honest
+// treatment, but it means raw ratings from two different grades are NOT comparable: without the
+// offsets below, a dominant Reserves side would show as beating a struggling Seniors side purely
+// because both sit near their own grade's centre.
+//
+// These offsets are an explicit assumption, not a measured result — there is no data that could
+// measure them. They encode the obvious ordering (senior football is stronger than reserves,
+// which is stronger than juniors, and each junior age group is stronger than the one below) and
+// give sane spacing. Adjust if they read wrong; nothing else in the app depends on the exact
+// numbers, and same-grade predictions are completely unaffected by them.
+const AGE_GROUP_TIER_BASELINE = {
+  'Seniors': 0, 'Reserves': -45, 'U18': -70, 'U16': -130, 'U14': -190, 'U12': -250
+};
+function tierBaselineFor(teamName){
+  const v = AGE_GROUP_TIER_BASELINE[getAgeGroupLabel(teamName)];
+  return v === undefined ? null : v;
+}
+
 function computeMarginRatings(){
   // The 300-pass fit below is the heaviest calculation in the app, and its result only changes
   // when the games/aliases/club data change or the season filters move — exactly the same
@@ -2062,12 +2306,18 @@ function computeMarginRatings(){
   }
 
   // Only rating DIFFERENCES are meaningful, so the whole scale can drift. Centre it on zero
-  // per season, so a rating reads as "points better or worse than an average side that year"
-  // rather than being an arbitrary number.
+  // per age group per season, so a rating reads as "points better or worse than an average side
+  // in THAT grade that year". Centring per season alone (pooling every grade together) was
+  // misleading: since no team ever plays outside its own age group, those pools are entirely
+  // disconnected, and a shared centre implied a comparability that doesn't exist — which is how
+  // a strong Reserves side ended up out-rating a weak Seniors side. Cross-grade comparisons now
+  // go through AGE_GROUP_TIER_BASELINE instead (see predictedMargin).
   const bySeason = {};
   Object.keys(ratings).forEach(k=>{
     const y = k.slice(k.lastIndexOf('__')+2);
-    (bySeason[y] = bySeason[y] || []).push(k);
+    const grade = getAgeGroupLabel(k.slice(0, k.lastIndexOf('__')));
+    const bucket = grade + '||' + y;
+    (bySeason[bucket] = bySeason[bucket] || []).push(k);
   });
   Object.values(bySeason).forEach(keys=>{
     const mean = keys.reduce((s,k)=>s+ratings[k],0) / keys.length;
@@ -2086,14 +2336,22 @@ function ordinal(n){
 // A team's power ranking within its own season. The underlying rating is in points and drives
 // the margin predictions, but it's shown as a rank — a raw negative number reads as a judgement
 // on a junior side, whereas a position is plain and hard to misread.
+// A team's rank among its peers. Scoped to the same age group AND season on purpose: age
+// groups never play each other, so their ratings sit on separate, unanchored scales with no
+// common reference point — ranking a U16 side among U12s, U18s and Seniors would be comparing
+// numbers that were never calibrated against one another. Divisions WITHIN an age group are
+// anchored to each other (grading-phase games cross them), so spanning divisions is fine.
 function getPowerRank(marginRatings, teamKey, year){
   const suffix = '__' + (year || 'Unknown');
-  const seasonKeys = Object.keys(marginRatings).filter(k=>k.endsWith(suffix));
+  const nameOf = k => k.slice(0, k.lastIndexOf('__'));
+  const ageGroup = getAgeGroupLabel(nameOf(teamKey));
+  const seasonKeys = Object.keys(marginRatings).filter(k=>
+    k.endsWith(suffix) && getAgeGroupLabel(nameOf(k)) === ageGroup);
   if(!seasonKeys.length) return null;
   const sorted = seasonKeys.sort((a,b)=> marginRatings[b]-marginRatings[a]);
   const idx = sorted.indexOf(teamKey);
   if(idx === -1) return null;
-  return { rank: idx+1, total: sorted.length };
+  return { rank: idx+1, total: sorted.length, ageGroup };
 }
 
 // Converts an expected margin (in points) into a win probability.
@@ -2119,7 +2377,805 @@ function predictedMargin(ratings, keyA, keyB, teamObjA, teamObjB){
   const base = (ratings[keyA] ?? 0) - (ratings[keyB] ?? 0);
   const rankA = teamDivisionRank(teamObjA), rankB = teamDivisionRank(teamObjB);
   const divAdj = (rankA!=null && rankB!=null) ? (rankB - rankA) * DIVISION_MARGIN_WEIGHT : 0;
-  return base + divAdj;
+  // Ratings are centred within each age group, so when the two sides come from different grades
+  // their raw difference says nothing on its own — the tier baselines supply the missing offset.
+  // A no-op whenever both teams are in the same grade, which is every real fixture.
+  const nameA = teamObjA && teamObjA.name, nameB = teamObjB && teamObjB.name;
+  let tierAdj = 0;
+  if(nameA && nameB && getAgeGroupLabel(nameA) !== getAgeGroupLabel(nameB)){
+    const tA = tierBaselineFor(nameA), tB = tierBaselineFor(nameB);
+    if(tA != null && tB != null) tierAdj = tA - tB;
+  }
+  return base + divAdj + tierAdj;
+}
+
+// True when two teams have no shared basis for comparison — different age groups never play each
+// other, so any predicted margin between them rests on the assumed tier offsets rather than on
+// evidence. Used to label such comparisons honestly rather than presenting them as predictions.
+function isCrossGradeComparison(nameA, nameB){
+  return !!(nameA && nameB && getAgeGroupLabel(nameA) !== getAgeGroupLabel(nameB));
+}
+
+// ---------- Prediction accuracy tracking ----------
+// Keeps each fixture's predicted result (signed margin + win probability) up to date on every
+// render — a whole season's fixtures can be loaded well ahead of time, so a fixture's prediction
+// should keep tracking the model as more results come in and ratings firm up, not freeze at
+// whatever the model said the day the fixture was added. What matters for grading is only the
+// most recent prediction available immediately before the actual result is entered — once that
+// happens, tryGradePrediction() below copies it onto the game as a permanent record, and further
+// updates to the fixture's prediction (or the fixture being deleted) no longer affect it. Only
+// fixtures that had a prediction recorded before their result was entered can ever be graded — a
+// game entered before this feature existed, or whose fixture never had a computable prediction,
+// is simply never graded rather than having one backfilled after the fact.
+function updateFixturePrediction(f, signedMargin, teamAProb){
+  if(!f || f.isBye) return false;
+  const prev = f.prediction;
+  if(prev && prev.signedMargin === signedMargin && prev.teamAProb === teamAProb) return false; // unchanged
+  f.prediction = { signedMargin, teamAProb, snapshotAt: new Date().toISOString() };
+  return true;
+}
+let _fixtureSnapshotDirty = false;
+function flushFixtureSnapshots(){
+  if(!_fixtureSnapshotDirty) return;
+  _fixtureSnapshotDirty = false;
+  saveFixtures();
+}
+
+// Matches a just-saved game back to the fixture it came from (same round label, year, and team
+// pair) and, if that fixture currently carries a prediction, copies it onto the game as a
+// permanent grading record. Only called at the point a game is newly saved — it never rescans
+// existing games — so results entered before this feature existed, or against fixtures that
+// never had a prediction, are simply never graded.
+function tryGradePrediction(game){
+  if(!game || game.predictionCheck || !game.teamA || !game.teamB) return;
+  const round = game.roundLabel;
+  if(!round) return;
+  const year = getGameYear(game);
+  const teamsG = [game.teamA.name, game.teamB.name].slice().sort().join('|');
+  const fixture = fixtures.find(f=> !f.isBye && f.prediction &&
+    (f.year||null) === year && (f.roundLabel||'') === round &&
+    [f.teamA, f.teamB].slice().sort().join('|') === teamsG);
+  if(!fixture) return;
+  const draw = !!game.draw || game.teamA.total === game.teamB.total;
+  const actualSignedMargin = game.teamA.total - game.teamB.total;
+  const actualWinner = draw ? null : (actualSignedMargin > 0 ? game.teamA.name : game.teamB.name);
+  const predictedWinner = fixture.prediction.signedMargin >= 0 ? fixture.teamA : fixture.teamB;
+  game.predictionCheck = {
+    predictedWinner,
+    predictedSignedMargin: fixture.prediction.signedMargin,
+    predictedTeamAProb: fixture.prediction.teamAProb,
+    actualWinner,
+    actualSignedMargin,
+    winnerCorrect: draw ? null : (predictedWinner === actualWinner),
+    marginError: Math.abs(fixture.prediction.signedMargin - actualSignedMargin),
+    gradedAt: new Date().toISOString()
+  };
+}
+
+// Builds the per-round accuracy report from every graded game (predictionCheck present) —
+// winner hit-rate, average margin error, and win-probability calibration (predicted-probability
+// buckets vs how often the favoured side actually won).
+function computePredictionAccuracy(){
+  const graded = games.filter(g=>g.predictionCheck);
+  const byRound = {};
+  graded.forEach(g=>{
+    const year = getGameYear(g);
+    const key = `${g.roundLabel}||${year||''}`;
+    (byRound[key] = byRound[key] || { roundLabel:g.roundLabel, year, games:[] }).games.push(g);
+  });
+  const summarize = list => {
+    const decided = list.filter(g=>g.predictionCheck.winnerCorrect !== null);
+    const hits = decided.filter(g=>g.predictionCheck.winnerCorrect).length;
+    const marginErrors = list.map(g=>g.predictionCheck.marginError);
+    const avgMarginError = marginErrors.length ? marginErrors.reduce((s,v)=>s+v,0)/marginErrors.length : null;
+    return { count:list.length, decidedCount:decided.length, hits, hitRate: decided.length ? hits/decided.length : null, avgMarginError };
+  };
+  const rounds = Object.values(byRound)
+    .map(r=>({ roundLabel:r.roundLabel, year:r.year, ...summarize(r.games) }))
+    .sort((a,b)=>{
+      if((a.year||0) !== (b.year||0)) return (b.year||0)-(a.year||0);
+      const na = parseInt(String(a.roundLabel).match(/\d+/)?.[0] ?? '0',10);
+      const nb = parseInt(String(b.roundLabel).match(/\d+/)?.[0] ?? '0',10);
+      return nb - na;
+    });
+
+  // Calibration: bucket the probability assigned to whichever side was favoured, then compare
+  // against how often that favoured side actually won — a well-calibrated model's "70%"
+  // predictions should come true about 70% of the time.
+  const buckets = [
+    { label:'50–60%', min:0.50, max:0.60 }, { label:'60–70%', min:0.60, max:0.70 },
+    { label:'70–80%', min:0.70, max:0.80 }, { label:'80–90%', min:0.80, max:0.90 },
+    { label:'90–100%', min:0.90, max:1.001 }
+  ];
+  const calibration = buckets.map(b=>({ ...b, count:0, favouredWon:0 }));
+  graded.forEach(g=>{
+    const pc = g.predictionCheck;
+    if(pc.winnerCorrect === null) return; // draws don't confirm or deny a favourite
+    const favouredProb = pc.predictedTeamAProb >= 0.5 ? pc.predictedTeamAProb : 1 - pc.predictedTeamAProb;
+    const bucket = calibration.find(b=> favouredProb >= b.min && favouredProb < b.max);
+    if(!bucket) return;
+    bucket.count++;
+    if(pc.winnerCorrect) bucket.favouredWon++;
+  });
+
+  return { overall: summarize(graded), rounds, calibration };
+}
+
+// Shared display summary for a graded game's prediction — used by both the compact games-list
+// row and the fuller game detail card, so the two stay consistent.
+function predictionCheckSummary(g){
+  const pc = g.predictionCheck;
+  if(!pc) return null;
+  const pts = Math.abs(Math.round(pc.predictedSignedMargin));
+  const predictedText = pts === 0 ? 'too close to call' : `${pc.predictedWinner} by ~${pts} pts`;
+  const favouredProb = pc.predictedTeamAProb >= 0.5 ? pc.predictedTeamAProb : 1 - pc.predictedTeamAProb;
+  return { predictedText, favouredPct: Math.round(favouredProb*100), correct: pc.winnerCorrect, marginError: pc.marginError };
+}
+
+// ---------- On-demand retrospective check (separate from the automatic tracker above) ----------
+// The automatic report above only grades a game if its fixture had a prediction recorded before
+// the result came in — which means games completed before this feature existed (or whose fixture
+// was never previewed) never get graded, by design. This is a manually-triggered alternative for
+// exactly that gap: it runs today's power ratings against already-decided games on demand. It
+// uses TODAY's ratings — built from everything on file, including games played after the ones
+// being checked — so it has the benefit of hindsight the automatic report doesn't; it's a sanity
+// check of the model, not a genuine forecast test. Nothing here is written back to the games.
+let retroCheckFilters = { year:'ALL', ageGroup:'ALL', round:'ALL' };
+let retroCheckOpen = false;
+
+// Temporarily widens the year/phase filters to cover every game on file for the duration of fn,
+// then restores whatever the Games tab's own filter bar had selected. Synchronous only — must
+// never straddle an await, or another render could see the widened filters mid-flight.
+function withAllDataFilters(fn){
+  const savedYear = yearFilter, savedPhase = phaseFilter;
+  yearFilter = new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null));
+  phaseFilter = new Set(['Grading','Regular Season','Finals']);
+  try{ return fn(); } finally { yearFilter = savedYear; phaseFilter = savedPhase; }
+}
+
+function computeRetroPredictions(filterFn){
+  return withAllDataFilters(()=>{
+    const { teamList } = computeAggregates();
+    const ratings = computeMarginRatings();
+    const candidates = games.filter(g=>
+      !g.isAbandoned && !g.isForfeit && g.teamA && g.teamB &&
+      typeof g.teamA.total==='number' && typeof g.teamB.total==='number' && filterFn(g));
+    const rows = candidates.map(g=>{
+      const year = getGameYear(g);
+      const teamA = teamList.find(t=>t.name===g.teamA.name && t.year===year);
+      const teamB = teamList.find(t=>t.name===g.teamB.name && t.year===year);
+      if(!teamA || !teamB) return null; // no rating available for this team-season
+      const m = predictedMargin(ratings, teamA.key, teamB.key, teamA, teamB);
+      const probA = marginToWinProbability(m);
+      const draw = !!g.draw || g.teamA.total === g.teamB.total;
+      const actualMargin = g.teamA.total - g.teamB.total;
+      const actualWinner = draw ? null : (actualMargin > 0 ? g.teamA.name : g.teamB.name);
+      const predictedWinner = m >= 0 ? g.teamA.name : g.teamB.name;
+      const favouredProb = probA >= 0.5 ? probA : 1 - probA;
+      return {
+        game:g, predictedWinner, predictedMarginPts: Math.abs(Math.round(m)), favouredPct: Math.round(favouredProb*100),
+        actualWinner, actualMargin, marginError: Math.abs(m - actualMargin),
+        correct: draw ? null : (predictedWinner === actualWinner)
+      };
+    }).filter(Boolean);
+    const decided = rows.filter(r=>r.correct!==null);
+    const hits = decided.filter(r=>r.correct).length;
+    const avgMarginError = rows.length ? rows.reduce((s,r)=>s+r.marginError,0)/rows.length : null;
+    return { rows, count:rows.length, decidedCount:decided.length, hits, hitRate: decided.length ? hits/decided.length : null, avgMarginError };
+  });
+}
+
+function renderRetroPredictionCheck(){
+  const wrap = document.getElementById('retroPredictionWrap');
+  if(!wrap) return;
+  if(!retroCheckOpen){ wrap.innerHTML = ''; return; }
+
+  const years = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
+  const ageGroups = [...new Set(games.map(getAgeGroup))].sort();
+  const roundNumOf = label => { const m = String(label).match(/\d+/); return m ? parseInt(m[0],10) : Infinity; };
+  const rounds = [...new Set(games.map(g=>g.roundLabel).filter(Boolean))].sort((a,b)=> roundNumOf(a)-roundNumOf(b));
+
+  const filterFn = g =>
+    (retroCheckFilters.year==='ALL' || getGameYear(g)===retroCheckFilters.year) &&
+    (retroCheckFilters.ageGroup==='ALL' || getAgeGroup(g)===retroCheckFilters.ageGroup) &&
+    (retroCheckFilters.round==='ALL' || g.roundLabel===retroCheckFilters.round);
+
+  const { rows, count, hitRate, avgMarginError } = computeRetroPredictions(filterFn);
+  const pct = v => v==null ? '—' : `${Math.round(v*100)}%`;
+  const pts = v => v==null ? '—' : `${v.toFixed(1)} pts`;
+
+  const rowsHtml = rows.length===0 ? '<div class="empty">No completed games match those filters (or neither team has a rated season on file).</div>' : `
+    <table><thead><tr><th>Game</th><th>Round</th><th>Predicted</th><th>Actual</th><th class="num">Margin error</th><th class="num">Correct</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td>${r.game.teamA.name} vs ${r.game.teamB.name}</td>
+      <td>${r.game.roundLabel||'—'}</td>
+      <td>${r.predictedWinner} by ~${r.predictedMarginPts} pts (${r.favouredPct}%)</td>
+      <td>${r.game.draw ? 'Draw' : `${r.actualWinner} by ${Math.abs(r.actualMargin)}`}</td>
+      <td class="num">${r.marginError.toFixed(1)}</td>
+      <td class="num" style="color:${r.correct===null?'var(--muted)':(r.correct?'var(--green)':'var(--red)')};">${r.correct===null?'—':(r.correct?'✓':'✕')}</td>
+    </tr>`).join('')}</tbody></table>`;
+
+  wrap.innerHTML = `
+    <div class="warn-box" style="margin:14px 0 10px;">This uses today's power ratings — built from every game on file, including anything played after these games — so it's a hindsight sanity-check of the model, not a genuine forecast test. The automatic "Prediction accuracy" report (Upcoming fixtures tab) only grades predictions frozen before each result came in.</div>
+    <div class="controls-row" style="margin-bottom:14px;">
+      <select id="retroYearFilter"><option value="ALL">All years</option>${years.map(y=>`<option value="${y}" ${retroCheckFilters.year===y?'selected':''}>${y}</option>`).join('')}</select>
+      <select id="retroAgeGroupFilter"><option value="ALL">All age groups</option>${ageGroups.map(a=>`<option value="${a}" ${retroCheckFilters.ageGroup===a?'selected':''}>${a}</option>`).join('')}</select>
+      <select id="retroRoundFilter"><option value="ALL">All rounds</option>${rounds.map(r=>`<option value="${r}" ${retroCheckFilters.round===r?'selected':''}>${r}</option>`).join('')}</select>
+    </div>
+    <div class="card-grid" style="margin-bottom:14px;">
+      <div class="stat-card"><div class="label">Games checked</div><div class="value">${count}</div></div>
+      <div class="stat-card"><div class="label">Winner hit-rate</div><div class="value">${pct(hitRate)}</div></div>
+      <div class="stat-card"><div class="label">Avg margin error</div><div class="value">${pts(avgMarginError)}</div></div>
+    </div>
+    ${rowsHtml}
+  `;
+  document.getElementById('retroYearFilter').onchange = e=>{ const v = e.target.value; retroCheckFilters.year = v==='ALL' ? 'ALL' : parseInt(v,10); renderRetroPredictionCheck(); };
+  document.getElementById('retroAgeGroupFilter').onchange = e=>{ retroCheckFilters.ageGroup = e.target.value; renderRetroPredictionCheck(); };
+  document.getElementById('retroRoundFilter').onchange = e=>{ retroCheckFilters.round = e.target.value; renderRetroPredictionCheck(); };
+}
+
+// ---------- Player movement between clubs ----------
+// Detecting a club change means matching a player by NAME across clubs, because identity keys are
+// club-scoped by design (club||name) — the same person at two clubs is two records. Name matching
+// is inherently fuzzy, so everything here is INFERRED, not confirmed, and the view says so.
+//
+// Three things this deliberately guards against, each of which produced wrong answers when tested
+// against the real data:
+//  1. Shared names. "jack kelly" appears at six clubs and is obviously several different boys, so
+//     any name seen at more than two clubs is dropped rather than read as a serial mover.
+//  2. Merged teams. Only ~0.5% of players in a combined side (e.g. "Newcomb / Belmont Power
+//     Lions") carry the 'sp' tag that says which half they belong to; everyone else defaults to
+//     the first-named club, which silently counted every Belmont boy as a Newcomb player. A
+//     merged-team season is therefore treated as UNKNOWN club and can never start or end a move.
+//  3. Division numbers aren't comparable. In 2026 U14 runs to 7 divisions, U16 to 5 and U18 to 3,
+//     so "Division 4" is mid-table in one grade and near-bottom in another. Direction is judged on
+//     relative level (0 = top division of that grade-season, 1 = bottom) instead.
+const AGE_GROUP_ORDER = { 'U8':0,'U10':1,'U12':2,'U14':3,'U16':4,'U18':5,'Reserves':6,'Seniors':6 };
+
+function computePlayerMovement(){
+  return withAllDataFilters(()=>{
+    const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
+
+    // How many divisions each grade-season actually runs, so a division can be expressed as a
+    // relative level rather than a bare number.
+    const maxDiv = {};
+    gamesList.forEach(g=>{
+      const yr = getGameYear(g); if(!yr) return;
+      const rank = divisionRank(getDivision(g)); if(rank==null) return;
+      const grade = getAgeGroupLabel(g.teamA.name) !== 'Other' ? getAgeGroupLabel(g.teamA.name) : getAgeGroupLabel(g.teamB.name);
+      const k = grade + '||' + yr;
+      if(maxDiv[k]==null || rank > maxDiv[k]) maxDiv[k] = rank;
+    });
+    // Some grades simply aren't graded into divisions — U12 and below are unstreamed, and senior
+    // and reserves football runs as a single tier. A move into or out of one of those has no
+    // higher-or-lower to report, which is different from a division existing but being unknown.
+    const gradeHasDivisions = (grade, yr) => maxDiv[grade + '||' + yr] != null;
+
+    // Which divisions each club fields in each grade and season. This is the yardstick a move is
+    // judged against: the question worth answering isn't "was their old division a bigger number"
+    // but "are they now playing higher than they would be had they stayed?" — so the comparison is
+    // against the old club's side in the SAME grade and the SAME season they've moved into. Both
+    // sides then sit in one competition, which makes the raw division numbers directly comparable
+    // and sidesteps the fact that grades run different numbers of divisions. Merged teams are
+    // skipped, since their club can't be pinned down.
+    const clubGradeDivisions = {};
+    gamesList.forEach(g=>{
+      const yr = getGameYear(g); if(!yr) return;
+      const rank = divisionRank(getDivision(g)); if(rank==null) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side];
+        if(isMergedTeam(t.name)) return;
+        const k = getClub(t.name) + '||' + getAgeGroupLabel(t.name) + '||' + yr;
+        (clubGradeDivisions[k] = clubGradeDivisions[k] || new Set()).add(rank);
+      });
+    });
+
+    // name -> year -> what we know about that player's season
+    const trail = {};
+    gamesList.forEach(g=>{
+      const yr = getGameYear(g); if(!yr) return;
+      const rank = divisionRank(getDivision(g));
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side];
+        const merged = isMergedTeam(t.name);
+        const grade = getAgeGroupLabel(t.name);
+        (t.players||[]).forEach(row=>{
+          const raw = (row.name||'').trim();
+          if(isPlaceholderPlayerName(raw)) return;
+          const nm = raw.toLowerCase();
+          const byYear = (trail[nm] = trail[nm] || {});
+          const e = (byYear[yr] = byYear[yr] || { clubs:new Set(), teams:new Set(), grades:new Set(), divGames:{}, display:raw, ambiguous:false });
+          e.teams.add(t.name); e.grades.add(grade);
+          // Count games per division rather than just noting which ones were played: a player who
+          // swaps between a club's sides mid-season has a division they MOSTLY play in, and that's
+          // the one worth reporting.
+          if(rank != null) e.divGames[rank] = (e.divGames[rank] || 0) + 1;
+          if(merged && !(row.tag||'').toLowerCase().includes('sp')){
+            e.ambiguous = true;      // can't tell which half of the merge this player belongs to
+          } else {
+            e.clubs.add(playerClubForTeam(t.name, row.tag));
+          }
+        });
+      });
+    });
+
+    const gradeIdx = e => {
+      const list = [...e.grades].map(a=>AGE_GROUP_ORDER[a]).filter(v=>v!=null);
+      return list.length ? Math.min(...list) : null;
+    };
+    // Divisions this player turned out in that season, most-played first. Ties go to the stronger
+    // (lower-numbered) division. The first entry is treated as "the division they play in".
+    const divisionsOf = e => Object.keys(e.divGames)
+      .map(r=>({ rank:Number(r), games:e.divGames[r] }))
+      .sort((a,b)=> b.games - a.games || a.rank - b.rank);
+    const moves = [];
+    Object.keys(trail).forEach(nm=>{
+      const byYear = trail[nm];
+      const years = Object.keys(byYear).map(Number).sort((a,b)=>a-b);
+      // Seasons where we can actually name the club with confidence.
+      const solid = years.filter(y=> !byYear[y].ambiguous && byYear[y].clubs.size === 1);
+      const clubsSeen = new Set(solid.map(y=>[...byYear[y].clubs][0]));
+      if(clubsSeen.size !== 2) return;   // 0-1 = never moved; 3+ = almost certainly a shared name
+      for(let i=0;i<solid.length-1;i++){
+        const y1 = solid[i], y2 = solid[i+1];
+        const e1 = byYear[y1], e2 = byYear[y2];
+        const c1 = [...e1.clubs][0], c2 = [...e2.clubs][0];
+        if(c1 === c2) continue;
+        const g1 = gradeIdx(e1), g2 = gradeIdx(e2);
+        // Grades span two years, so across a gap of N seasons a player can climb at most N grades
+        // and can never go backwards. Anything else is a different person with the same name.
+        if(g1==null || g2==null || g2 < g1 || g2 > g1 + (y2 - y1)) continue;
+        const toGrade = [...e2.grades][0];
+        const myDivs = divisionsOf(e2);
+        const benchSet = clubGradeDivisions[c1 + '||' + toGrade + '||' + y2];
+        const bench = benchSet ? [...benchSet].sort((a,b)=>a-b) : null;
+        let direction, benchmark = null;
+        if(!myDivs.length || !gradeHasDivisions(toGrade, y2)){
+          direction = 'na';        // they're at an ungraded level now — nothing to compare
+        } else if(!bench || !bench.length){
+          direction = 'unknown';   // old club runs no side in this grade that season
+        } else {
+          const mine = myDivs[0].rank;   // the division they mostly play in now
+          benchmark = bench;
+          if(mine < bench[0]) direction = 'up';
+          else if(mine > bench[bench.length-1]) direction = 'down';
+          else direction = 'same';       // inside the range the old club fields
+        }
+        moves.push({
+          name: nm, display: e2.display || e1.display,
+          fromYear: y1, toYear: y2, gap: y2 - y1,
+          fromClub: c1, toClub: c2,
+          fromTeams: [...e1.teams], toTeams: [...e2.teams],
+          fromGrade: [...e1.grades][0], toGrade: [...e2.grades][0],
+          direction, benchmark, benchmarkClub: c1,
+          fromDivisions: divisionsOf(e1), toDivisions: divisionsOf(e2),
+          signature: [nm, c1, c2, y1, y2].join('||')
+        });
+      }
+    });
+
+    // Full season-by-season trail for any player in the results, for the expandable detail row.
+    const trailFor = nm => {
+      const byYear = trail[nm] || {};
+      return Object.keys(byYear).map(Number).sort((a,b)=>a-b).map(y=>{
+        const e = byYear[y];
+        const grade = [...e.grades][0];
+        return {
+          year: y,
+          club: e.ambiguous ? null : ([...e.clubs][0] || null),
+          ambiguous: e.ambiguous,
+          teams: [...e.teams],
+          grade,
+          divisions: divisionsOf(e),
+          ungraded: !gradeHasDivisions(grade, y)
+        };
+      });
+    };
+    return { moves, trailFor };
+  });
+}
+
+// Renders the division(s) a player actually turned out in that season. Where they split time
+// between a club's sides, the most-played one leads and the rest follow, so a Div 2 regular who
+// filled in twice for Div 4 doesn't read as a Div 4 player.
+function movementDivisionLabel(divisions, ungraded){
+  if(ungraded) return '<span style="color:var(--muted);">no divisions</span>';
+  if(!divisions || !divisions.length) return '<span style="color:var(--muted);">—</span>';
+  const main = `Div ${divisions[0].rank}`;
+  if(divisions.length === 1) return main;
+  const rest = divisions.slice(1).map(d=>`Div ${d.rank} (${d.games})`).join(', ');
+  return `${main} <span style="color:var(--muted);" title="Split the season across sides — games per division shown">· ${divisions[0].games} games, also ${rest}</span>`;
+}
+
+// Reports what is ACTUALLY in storage right now, rather than what the app thinks it has in
+// memory. Exists because a rejected write leaves the in-memory data looking perfectly fine until
+// the next reload, so "did that save?" was previously unanswerable without guessing.
+async function renderStorageCheck(){
+  const wrap = document.getElementById('storageCheckWrap');
+  if(!wrap) return;
+  wrap.innerHTML = '<p class="hint">Reading storage…</p>';
+  const rows = [];
+  let note = '';
+  try{
+    let keys = [];
+    try{
+      const listed = await window.storage.list('', false);
+      keys = (listed && listed.keys) ? listed.keys : [];
+    }catch(e){ note = 'This build of the host does not support listing keys, so only the known keys are shown.'; }
+    if(!keys.length){
+      keys = [GAMES_META_KEY, STORAGE_KEY, 'fixtures', 'byes', 'playerAliases',
+              'dismissedMatchGroups', 'dismissedBestMismatches', 'knownClubs',
+              'teamClubOverrides', 'clubNicknames'];
+      for(let i = 0; i < 12; i++) keys.push(gamesChunkKey(i));
+    }
+    for(const k of keys){
+      try{
+        const res = await window.storage.get(k, false);
+        if(res && res.value != null) rows.push({ key:k, chars:String(res.value).length });
+      }catch(e){ /* key absent */ }
+    }
+  }catch(e){
+    wrap.innerHTML = `<div class="warn-box">Couldn't read storage: ${e && e.message ? e.message : e}</div>`;
+    return;
+  }
+  rows.sort((a,b)=> b.chars - a.chars);
+  const totalChars = rows.reduce((sum,r)=>sum+r.chars, 0);
+
+  let manifest = null;
+  try{
+    const meta = await window.storage.get(GAMES_META_KEY, false);
+    if(meta) manifest = JSON.parse(meta.value);
+  }catch(e){}
+
+  const activeChunks = manifest ? manifest.chunks : 0;
+  const orphanKeys = rows.filter(r=>{
+    const m = /__(\d+)$/.exec(r.key);
+    return m && r.key.startsWith(STORAGE_KEY + '__') && parseInt(m[1], 10) >= activeChunks;
+  });
+  const orphanBytes = orphanKeys.reduce((sum,r)=>sum+r.chars, 0);
+
+  const mb = n => (n/1024/1024).toFixed(2) + ' MB';
+  const agrees = manifest && manifest.count === games.length;
+  wrap.innerHTML = `
+    <h3 style="font-size:14px;margin-top:18px;">Storage check</h3>
+    ${note ? `<p class="hint">${note}</p>` : ''}
+    <div class="card-grid" style="margin-bottom:12px;">
+      <div class="stat-card"><div class="label">Games in memory</div><div class="value">${games.length}</div></div>
+      <div class="stat-card"><div class="label">Games recorded as saved</div><div class="value" style="color:${manifest ? (agrees?'var(--green)':'var(--red)') : 'var(--muted)'};">${manifest ? manifest.count : '—'}</div></div>
+      <div class="stat-card"><div class="label">Total stored</div><div class="value">${mb(totalChars)}</div></div>
+    </div>
+    ${manifest
+      ? `<p class="hint" style="margin:0 0 10px;${agrees?'':'color:var(--red);'}">${agrees
+          ? `Saved and verified — ${manifest.chunks} chunk${manifest.chunks===1?'':'s'}, ${manifest.encoding==='gzip-b64'?'compressed':'uncompressed'}.`
+          : `Mismatch: memory holds ${games.length} games but storage recorded ${manifest.count}. The last save did not land — export a backup now, before reloading.`}</p>`
+      : `<p class="hint" style="margin:0 0 10px;color:var(--gold);">No games manifest found, so games are still in the old single-key layout (or nothing has been saved yet).</p>`}
+    <table style="max-width:560px;"><thead><tr><th>Key</th><th class="num">Size</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr><td>${r.key}</td><td class="num">${r.chars > 20000 ? mb(r.chars) : (r.chars+' chars')}</td></tr>`).join('')}</tbody></table>
+    <p class="hint">Compression means the games keys should be far smaller than the raw data — roughly 2MB for a full competition.</p>
+    ${orphanKeys.length ? `
+      <div class="warn-box" style="margin-top:12px;">
+        ${orphanKeys.length} leftover game chunk${orphanKeys.length===1?'':'s'} (${mb(orphanBytes)}) ${orphanKeys.length===1?'is':'are'} taking up space and can't be read by anything — ${manifest ? 'the manifest doesn\'t reach them' : 'there\'s no manifest at all'}, so they're debris from a save that ran out of room. Storage appears to cap out near 15MB in total, so clearing these is what makes the next save fit.
+      </div>
+      <button class="danger" id="freeOrphanedBtn" style="margin-top:10px;">Free ${mb(orphanBytes)} of unreadable data</button>
+    ` : ''}
+  `;
+  const freeBtn = document.getElementById('freeOrphanedBtn');
+  if(freeBtn){
+    freeBtn.onclick = async ()=>{
+      const freed = await cleanupOrphanedGameChunks(manifest ? manifest.chunks : 0);
+      showToast(`Freed ${(freed/1024/1024).toFixed(2)} MB. Save your games again to write them back properly.`);
+      renderStorageCheck();
+    };
+  }
+}
+
+// ---------- Player movement panel ----------
+let movementFilters = { mode:'league', club:'ALL', transition:'ALL', grade:'ALL', direction:'ALL', includeGaps:false, sort:'grade', chart:'agegroup' };
+// Junior football is graded U12 up to U18; Reserves and Seniors are the open-age tiers. Used by
+// the "All junior ages" filter, which is just every age group minus those two.
+function isJuniorGrade(g){ return /^U\d{1,2}$/.test(g || ''); }
+// Display order only. AGE_GROUP_ORDER deliberately gives Reserves and Seniors the SAME rank,
+// because players move between those two in both directions and the age-progression check must
+// not treat a drop from seniors to reserves as impossible. That tie leaves their order arbitrary
+// when sorting for the eye, so list reserves below the junior grades and seniors last.
+const GRADE_DISPLAY_ORDER = { 'U8':0,'U10':1,'U12':2,'U14':3,'U16':4,'U18':5,'Reserves':6,'Seniors':7 };
+function gradeDisplayRank(g){ return GRADE_DISPLAY_ORDER[g] ?? 99; }
+
+function openPlayerMovement(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-player-movement').classList.add('active');
+  renderPlayerMovement();
+}
+function backToPlayersFromMovement(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  const tab = document.querySelector('nav.tabs button[data-tab="players"]');
+  if(tab) tab.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-players').classList.add('active');
+}
+
+function renderPlayerMovement(){
+  const wrap = document.getElementById('playerMovementWrap');
+  const { moves, trailFor } = computePlayerMovement();
+  const live = moves.filter(m=> !dismissedMatchGroups.has(m.signature));
+
+  const transitions = [...new Set(live.map(m=>`${m.fromYear}→${m.toYear}`))].sort();
+  const grades = [...new Set(live.flatMap(m=>[m.fromGrade,m.toGrade]).filter(Boolean))]
+    .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  const clubs = [...new Set(live.flatMap(m=>[m.fromClub,m.toClub]).filter(Boolean))].sort();
+
+  const f = movementFilters;
+  const matchesExceptGap = m =>
+    (f.transition==='ALL' || `${m.fromYear}→${m.toYear}`===f.transition) &&
+    (f.grade==='ALL'
+      || (f.grade==='JUNIORS' ? (isJuniorGrade(m.fromGrade) && isJuniorGrade(m.toGrade))
+                              : (m.fromGrade===f.grade || m.toGrade===f.grade))) &&
+    (f.direction==='ALL' || m.direction===f.direction);
+  const inClubScope = m => !(f.mode==='club' && f.club!=='ALL') || m.fromClub===f.club || m.toClub===f.club;
+  const scoped = live.filter(m=> (f.includeGaps || m.gap === 1) && matchesExceptGap(m) && inClubScope(m));
+  const gradeRank = gradeDisplayRank;
+  const DIRECTION_RANK = { up:0, same:1, down:2, unknown:3, na:4 };
+  const sorters = {
+    // Age group ascending, then most recent season first within each — so a grade reads as a
+    // block with the newest movement at the top of it.
+    grade:  (a,b)=> gradeRank(a.toGrade)-gradeRank(b.toGrade) || b.toYear-a.toYear || a.name.localeCompare(b.name),
+    season: (a,b)=> b.toYear-a.toYear || b.fromYear-a.fromYear || gradeRank(a.toGrade)-gradeRank(b.toGrade),
+    player: (a,b)=> a.name.localeCompare(b.name),
+    from:   (a,b)=> a.fromClub.localeCompare(b.fromClub) || a.name.localeCompare(b.name),
+    to:     (a,b)=> a.toClub.localeCompare(b.toClub) || a.name.localeCompare(b.name),
+    dir:    (a,b)=> (DIRECTION_RANK[a.direction]??9)-(DIRECTION_RANK[b.direction]??9) || gradeRank(a.toGrade)-gradeRank(b.toGrade)
+  };
+  scoped.sort(sorters[f.sort] || sorters.grade);
+  // Seasons still being backfilled leave holes, so a lot of real moves span a missing year. Those
+  // are hidden by default (they're the least certain), but silently hiding most of a club's
+  // departures looks like the feature is broken — so say how many are being held back.
+  const hiddenByGap = f.includeGaps ? 0
+    : live.filter(m=> m.gap > 1 && matchesExceptGap(m) && inClubScope(m)).length;
+
+  // Percentages are of moves that CAN be judged — ungraded levels and unknown divisions are
+  // excluded from the denominator rather than counted as "same".
+  const withDir = scoped.filter(m=> m.direction==='up' || m.direction==='same' || m.direction==='down');
+  const pctOf = dir => withDir.length ? Math.round(withDir.filter(m=>m.direction===dir).length/withDir.length*100)+'%' : '—';
+
+  const trailHtml = nm => {
+    const rows = trailFor(nm);
+    if(!rows.length) return '';
+    return `<div style="font-size:12px;color:var(--muted);padding:6px 0 2px;">` + rows.map(r=>{
+      const where = r.ambiguous ? '<em>combined team — club unclear</em>' : (r.club || '—');
+      const lvl = r.ungraded ? ' · no divisions at this level'
+                : (!r.divisions || !r.divisions.length ? '' : ` · ${movementDivisionLabel(r.divisions, false)}`);
+      return `<div>${r.year}: ${where} — ${r.teams.join(', ')}${lvl}</div>`;
+    }).join('') + `</div>`;
+  };
+
+  const dirCell = m => {
+    const benchTxt = m.benchmark
+      ? `${m.benchmarkClub} run ${m.benchmark.length===1 ? 'Div '+m.benchmark[0] : 'Div '+m.benchmark[0]+'–'+m.benchmark[m.benchmark.length-1]} in ${m.toGrade} ${m.toYear}`
+      : '';
+    const note = benchTxt ? `<div style="font-size:11px;color:var(--muted);">vs ${benchTxt}</div>` : '';
+    if(m.direction==='up')   return `<span style="color:var(--green);">▲ higher</span>${note}`;
+    if(m.direction==='down') return `<span style="color:var(--red);">▼ lower</span>${note}`;
+    if(m.direction==='same') return `<span style="color:var(--muted);">— same</span>${note}`;
+    if(m.direction==='na')   return `<span style="color:var(--muted);" title="They're at an ungraded level now — U12 and below are unstreamed, and seniors/reserves run as a single tier — so there's no division to compare">n/a</span>`;
+    return `<span style="color:var(--muted);" title="Their old club doesn't field a side in this age group that season, so there's nothing to measure against">no side to compare</span>`;
+  };
+
+  const moveRows = list => list.length===0
+    ? '<div class="empty">No moves match those filters.</div>'
+    : `<table><thead><tr><th>Player</th><th>Seasons</th><th>From</th><th>To</th><th>Level</th><th></th></tr></thead>
+      <tbody>${list.slice(0,400).map(m=>`
+        <tr class="clickable-row" data-trail="${m.name.replace(/"/g,'&quot;')}">
+          <td>${m.display}</td>
+          <td>${m.fromYear} → ${m.toYear}${m.gap>1?` <span class="hint" style="margin:0;">(gap)</span>`:''}</td>
+          <td>${m.fromClub}<div style="font-size:11.5px;color:var(--muted);">${m.fromGrade||''} · ${movementDivisionLabel(m.fromDivisions, m.direction==='na' && !m.fromDivisions.length)}</div></td>
+          <td>${m.toClub}<div style="font-size:11.5px;">${m.toGrade||''} · ${movementDivisionLabel(m.toDivisions, m.direction==='na' && !m.toDivisions.length)}</div></td>
+          <td>${dirCell(m)}</td>
+          <td class="num"><button class="ghost mini" data-dismiss-move="${m.signature.replace(/"/g,'&quot;')}" title="Not the same player — hide this match">✕</button></td>
+        </tr>
+        <tr class="trail-row" data-trail-for="${m.name.replace(/"/g,'&quot;')}" style="display:none;"><td colspan="6">${trailHtml(m.name)}</td></tr>
+      `).join('')}</tbody></table>
+      ${list.length>400?`<p class="hint">Showing the first 400 of ${list.length}.</p>`:''}`;
+
+  let body;
+  if(f.mode==='club' && f.club!=='ALL'){
+    const out = scoped.filter(m=>m.fromClub===f.club);
+    const inn = scoped.filter(m=>m.toClub===f.club);
+    body = `
+      <h3 style="font-size:14px;margin-top:20px;">Left ${f.club} (${out.length})</h3>
+      ${moveRows(out)}
+      <h3 style="font-size:14px;margin-top:24px;">Joined ${f.club} (${inn.length})</h3>
+      ${moveRows(inn)}`;
+  } else if(f.mode==='club'){
+    body = '<div class="empty">Pick a club to see who left and who joined.</div>';
+  } else {
+    body = moveRows(scoped);
+  }
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToPlayersFromMovement">&larr; Back to players</span>
+    <h2 style="font-size:20px;">Player movement</h2>
+    <div class="warn-box" style="margin:0 0 14px;">Inferred by matching player names across clubs, so treat it as a lead rather than a record — the app keys players per club, so a genuine move and two boys sharing a name look alike. Names seen at more than two clubs are excluded, and seasons in a combined team are treated as club-unknown (only about 0.5% of combined-team players are tagged to their own club, so the rest can't be told apart). Use ✕ to hide a pair that isn't the same player.</div>
+    <p class="hint" style="margin:0 0 12px;">Higher/lower compares the division a player turns out in now against the side their old club fields in the <em>same</em> age group that season — i.e. would they be playing at a higher level than if they'd stayed. Both sit in one competition, so the division numbers are directly comparable.</p>
+    <p class="hint" style="margin:0 0 12px;">The season and phase filters at the top of the page don't apply here — spotting a move needs both seasons visible at once, so this panel always reads every season on file. Use the season dropdown below to narrow it instead.</p>
+    <div class="controls-row" style="margin-bottom:12px;">
+      <select id="mvMode">
+        <option value="league" ${f.mode==='league'?'selected':''}>All movement</option>
+        <option value="club" ${f.mode==='club'?'selected':''}>By club</option>
+      </select>
+      <select id="mvClub" ${f.mode!=='club'?'disabled':''}>
+        <option value="ALL">Pick a club…</option>
+        ${clubs.map(c=>`<option value="${c}" ${f.club===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select id="mvTransition"><option value="ALL">All seasons</option>${transitions.map(t=>`<option value="${t}" ${f.transition===t?'selected':''}>${t}</option>`).join('')}</select>
+      <select id="mvGrade">
+        <option value="ALL">All age groups</option>
+        <option value="JUNIORS" ${f.grade==='JUNIORS'?'selected':''}>All junior ages (no seniors/reserves)</option>
+        ${grades.map(g=>`<option value="${g}" ${f.grade===g?'selected':''}>${g}</option>`).join('')}
+      </select>
+      <select id="mvDirection">
+        <option value="ALL" ${f.direction==='ALL'?'selected':''}>Any direction</option>
+        <option value="up" ${f.direction==='up'?'selected':''}>Higher than old club</option>
+        <option value="same" ${f.direction==='same'?'selected':''}>Same as old club</option>
+        <option value="down" ${f.direction==='down'?'selected':''}>Lower than old club</option>
+        <option value="na" ${f.direction==='na'?'selected':''}>No divisions at that level</option>
+        <option value="unknown" ${f.direction==='unknown'?'selected':''}>Old club has no side there</option>
+      </select>
+      <select id="mvChart" title="What the graph above shows">
+        <option value="agegroup" ${f.chart==='agegroup'?'selected':''}>Graph: age group by season</option>
+        <option value="direction" ${f.chart==='direction'?'selected':''}>Graph: higher/lower by age group</option>
+        <option value="clubs" ${f.chart==='clubs'?'selected':''}>Graph: club in vs out</option>
+        <option value="net" ${f.chart==='net'?'selected':''}>Graph: net club gain/loss</option>
+        <option value="trend" ${f.chart==='trend'?'selected':''}>Graph: trend by season (lines)</option>
+      </select>
+      <select id="mvSort" title="Order of the tables below">
+        <option value="grade" ${f.sort==='grade'?'selected':''}>Sort: age group</option>
+        <option value="season" ${f.sort==='season'?'selected':''}>Sort: season (newest first)</option>
+        <option value="player" ${f.sort==='player'?'selected':''}>Sort: player name</option>
+        <option value="from" ${f.sort==='from'?'selected':''}>Sort: club left</option>
+        <option value="to" ${f.sort==='to'?'selected':''}>Sort: club joined</option>
+        <option value="dir" ${f.sort==='dir'?'selected':''}>Sort: higher/lower</option>
+      </select>
+      <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px;" title="A move with a missing season in between — more likely to be a name clash or a year out, so it's off by default">
+        <input type="checkbox" id="mvGaps" ${f.includeGaps?'checked':''}> include gap years
+      </label>
+    </div>
+    ${(()=>{
+      const unresolved = withAllDataFilters(()=>unresolvedTeamClubs());
+      if(!unresolved.length) return '';
+      return `<p class="hint" style="margin:0 0 10px;color:var(--gold);">${unresolved.length} team name${unresolved.length===1?'':'s'} in the club list ${unresolved.length===1?'is':'are'} not a recognised club — ${unresolved.map(u=>u.club).join(', ')} — so ${unresolved.length===1?'it appears':'they appear'} as separate clubs and split that club's movement in two. Fix under Teams &rarr; Manage clubs.</p>`;
+    })()}
+    ${hiddenByGap ? `<p class="hint" style="margin:0 0 10px;color:var(--gold);">${hiddenByGap} more move${hiddenByGap===1?'':'s'} hidden because ${hiddenByGap===1?'it spans':'they span'} a missing season — common while earlier years are still being backfilled. Tick "include gap years" to show ${hiddenByGap===1?'it':'them'}.</p>` : ''}
+    <div class="card-grid">
+      <div class="stat-card" title="Players matched at two different clubs in different seasons"><div class="label">Moves</div><div class="value">${scoped.length}</div></div>
+      <div class="stat-card" title="Now playing in a higher division than any side their old club fields in the same age group and season"><div class="label">Higher than old club</div><div class="value">${pctOf('up')}</div></div>
+      <div class="stat-card" title="Playing within the range of divisions their old club fields in that age group"><div class="label">Same</div><div class="value">${pctOf('same')}</div></div>
+      <div class="stat-card" title="Now playing lower than any side their old club fields in that age group"><div class="label">Lower than old club</div><div class="value">${pctOf('down')}</div></div>
+    </div>
+    <div id="movementChartWrap" style="height:${f.chart==='clubs'||f.chart==='net'?'420':'300'}px;margin:18px 0 6px;${scoped.length?'':'display:none;'}">
+      <canvas id="movementChart"></canvas>
+    </div>
+    ${scoped.length?`<p class="hint" style="margin:0 0 16px;">${
+      f.chart==='trend' ? 'One line per age group across season transitions. Thin for now — nearly every move on file is 2025→2026, so this only becomes readable once earlier seasons are backfilled.'
+      : f.chart==='direction' ? 'Of the players who moved into each age group, how many landed higher, level with, or lower than the side their old club fields. Ungraded levels (U12, seniors, reserves) can only ever be "not judgeable".'
+      : f.chart==='clubs' ? 'Busiest clubs by total movement, showing departures against arrivals. A club with far more out than in may simply have thinner player data that season rather than an exodus.'
+      : f.chart==='net' ? 'Arrivals minus departures. Read it as a lead to check rather than a fact — a club folding an age group, or a season with patchy player lists, both look like a heavy net loss.'
+      : 'Counted by the age group each player moved <em>into</em>.'
+    } Follows the filters set above; combined teams are never counted, since there's no way to tell which club those players belong to.</p>`:''}
+    ${body}
+  `;
+
+  document.getElementById('backToPlayersFromMovement').onclick = backToPlayersFromMovement;
+  const bind = (id, key, cast) => {
+    const el = document.getElementById(id);
+    if(el) el.onchange = e=>{ movementFilters[key] = cast ? cast(e.target) : e.target.value; renderPlayerMovement(); };
+  };
+  bind('mvMode','mode'); bind('mvClub','club'); bind('mvTransition','transition');
+  bind('mvGrade','grade'); bind('mvDirection','direction'); bind('mvSort','sort'); bind('mvChart','chart');
+  bind('mvGaps','includeGaps', el=>el.checked);
+
+  wrap.querySelectorAll('[data-trail]').forEach(row=>{
+    row.style.cursor = 'pointer';
+    row.onclick = e=>{
+      if(e.target.closest('[data-dismiss-move]')) return;
+      const nm = row.dataset.trail;
+      wrap.querySelectorAll(`[data-trail-for="${CSS.escape(nm)}"]`).forEach(tr=>{
+        tr.style.display = tr.style.display === 'none' ? '' : 'none';
+      });
+    };
+  });
+  wrap.querySelectorAll('[data-dismiss-move]').forEach(btn=>{
+    btn.onclick = async e=>{
+      e.stopPropagation();
+      dismissedMatchGroups.add(btn.dataset.dismissMove);
+      await saveDismissedMatches();
+      renderPlayerMovement();
+    };
+  });
+
+  // Several ways to read the same filtered set — none is obviously the "right" one, so it's a
+  // choice rather than a fixed view.
+  if(window._movementChartInstance){ window._movementChartInstance.destroy(); window._movementChartInstance = null; }
+  const canvas = document.getElementById('movementChart');
+  if(canvas && typeof Chart !== 'undefined' && scoped.length){
+    const AXIS = { ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+    const AXIS_N = { beginAtZero:true, ticks:{ color:'#8FA0A3', precision:0 }, grid:{ color:'#2E3A3E' } };
+    const palette = ['#3F8556','#4A7FB5','#C08A3F','#8A5FA8','#C0473F','#4FA3A0','#94A34F','#B5658F','#6F7DBF'];
+    const gradeOrder = [...new Set(scoped.map(m=>m.toGrade).filter(Boolean))]
+      .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+    const seasons = [...new Set(scoped.map(m=>`${m.fromYear}→${m.toYear}`))].sort();
+    const countWhere = fn => scoped.filter(fn).length;
+    let cfg;
+
+    if(f.chart === 'direction'){
+      // Not just how many move, but whether moving got them a higher level than their old club runs.
+      const parts = [
+        { key:'up',   label:'Higher than old club', color:'#3F8556' },
+        { key:'same', label:'Same',                 color:'#6F7DBF' },
+        { key:'down', label:'Lower than old club',  color:'#C0473F' },
+        { key:'rest', label:'Not judgeable',        color:'#4A5459' }
+      ];
+      cfg = { type:'bar',
+        data:{ labels:gradeOrder, datasets:parts.map(p=>({
+          label:p.label, backgroundColor:p.color,
+          data:gradeOrder.map(gr=> countWhere(m=> m.toGrade===gr &&
+            (p.key==='rest' ? (m.direction!=='up'&&m.direction!=='same'&&m.direction!=='down') : m.direction===p.key)))
+        }))},
+        options:{ responsive:true, maintainAspectRatio:false,
+          scales:{ x:{ stacked:true, ...AXIS }, y:{ stacked:true, ...AXIS_N } },
+          plugins:{ legend:{ labels:{ color:'#EDF1F0' } },
+            title:{ display:true, text:'Where movers ended up, by age group moved into', color:'#EDF1F0' } } } };
+
+    } else if(f.chart === 'clubs' || f.chart === 'net'){
+      const out = {}, inn = {};
+      scoped.forEach(m=>{ out[m.fromClub]=(out[m.fromClub]||0)+1; inn[m.toClub]=(inn[m.toClub]||0)+1; });
+      const names = [...new Set([...Object.keys(out), ...Object.keys(inn)])];
+      const net = c => (inn[c]||0) - (out[c]||0);
+      const top = f.chart==='net'
+        ? names.sort((a,b)=> net(b)-net(a)).slice(0, 16)
+        : names.sort((a,b)=> ((out[b]||0)+(inn[b]||0)) - ((out[a]||0)+(inn[a]||0))).slice(0, 12);
+      cfg = f.chart==='net'
+        ? { type:'bar',
+            data:{ labels:top, datasets:[{ label:'Net players gained (+) or lost (−)',
+              data:top.map(net), backgroundColor:top.map(c=> net(c) >= 0 ? '#3F8556' : '#C0473F') }]},
+            options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+              scales:{ x:{ ...AXIS, grid:{ color:'#2E3A3E' } }, y:AXIS },
+              plugins:{ legend:{ display:false },
+                title:{ display:true, text:'Net club gain/loss from player movement', color:'#EDF1F0' } } } }
+        : { type:'bar',
+            data:{ labels:top, datasets:[
+              { label:'Left the club', backgroundColor:'#C0473F', data:top.map(c=>out[c]||0) },
+              { label:'Joined the club', backgroundColor:'#3F8556', data:top.map(c=>inn[c]||0) } ]},
+            options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+              scales:{ x:AXIS_N, y:AXIS },
+              plugins:{ legend:{ labels:{ color:'#EDF1F0' } },
+                title:{ display:true, text:'Players in vs out, busiest clubs', color:'#EDF1F0' } } } };
+
+    } else if(f.chart === 'trend'){
+      cfg = { type:'line',
+        data:{ labels:seasons, datasets:gradeOrder.map((gr,i)=>({
+          label:gr, borderColor:palette[i%palette.length], backgroundColor:palette[i%palette.length],
+          tension:0.25, spanGaps:true,
+          data:seasons.map(sn=> countWhere(m=> m.toGrade===gr && `${m.fromYear}→${m.toYear}`===sn))
+        }))},
+        options:{ responsive:true, maintainAspectRatio:false,
+          scales:{ x:AXIS, y:AXIS_N },
+          plugins:{ legend:{ labels:{ color:'#EDF1F0' } },
+            title:{ display:true, text:'Club changes per season, by age group', color:'#EDF1F0' } } } };
+
+    } else {
+      cfg = { type:'bar',
+        data:{ labels:gradeOrder, datasets:seasons.map((sn,i)=>({
+          label:sn, backgroundColor:palette[i%palette.length],
+          data:gradeOrder.map(gr=> countWhere(m=> m.toGrade===gr && `${m.fromYear}→${m.toYear}`===sn))
+        }))},
+        options:{ responsive:true, maintainAspectRatio:false,
+          scales:{ x:{ stacked:true, ...AXIS }, y:{ stacked:true, ...AXIS_N } },
+          plugins:{ legend:{ labels:{ color:'#EDF1F0' } },
+            title:{ display:true, text:'Club changes by age group moved into', color:'#EDF1F0' } } } };
+    }
+    window._movementChartInstance = new Chart(canvas.getContext('2d'), cfg);
+  }
 }
 
 function computeEloRatings(){
@@ -2213,7 +3269,7 @@ function normalizeWords(s){
 }
 
 function stripAgeToken(s){
-  return (s||'').replace(/\bU\d{1,2}\b/gi, ' ').replace(/\s+/g,' ').trim();
+  return (s||'').replace(/\bU(?:nder)?\s*\d{1,2}(?:'?s)?\b/gi, ' ').replace(/\s+/g,' ').trim();
 }
 
 function hasMergeSeparator(s){
@@ -2237,9 +3293,19 @@ function matchClubPlain(text){
     }
   }
   if(best) return { matched:true, club:best };
-  for(const word of teamWords){
-    if(clubNicknames[word]) return { matched:true, club: clubNicknames[word] };
+  // Nicknames are matched the same way clubs are — every word of the nickname must appear in the
+  // team name, longest nickname wins. Looking each team word up in the map directly would only
+  // ever find single-word nicknames ("ammos"), silently ignoring anything longer that someone
+  // entered through Manage clubs ("geelong west hannan"), which is exactly the case that needs it:
+  // a side named after its coach shares no distinctive single word with its club.
+  let nickBest = null, nickLen = 0;
+  for(const nick of Object.keys(clubNicknames)){
+    const nickWords = normalizeWords(nick);
+    if(nickWords.length && nickWords.length > nickLen && nickWords.every(w => teamWords.includes(w))){
+      nickBest = clubNicknames[nick]; nickLen = nickWords.length;
+    }
   }
+  if(nickBest) return { matched:true, club: nickBest };
   return { matched:false, club: stripped };
 }
 
@@ -2267,6 +3333,107 @@ function getAllClubsForTeam(teamName){
 // "Thomson/East Geelong" reads as "Thomson"), used for stats grouping so a merged team
 // doesn't create its own pseudo-club. Use getAllClubsForTeam when you need every club it
 // belongs to (e.g. for browsing/filtering).
+// ---------- Match context: ground, timeslot, home/away ----------
+// The venue string arrives as "Reserve name / Oval name"; the part before the slash is the
+// ground itself, which is what matters for a home-ground or ground-history split.
+function venueOf(g){
+  return String(g.venue || '').split('/')[0].trim();
+}
+
+function gameStartHour(g){
+  const m = /^\s*(\d{1,2}):(\d{2})\s*([AP]M)/i.exec(g.dateTime || '');
+  if(!m) return null;
+  const h = parseInt(m[1], 10) % 12;
+  return /pm/i.test(m[3]) ? h + 12 : h;
+}
+function timeslotLabel(g){
+  const h = gameStartHour(g);
+  if(h == null) return 'Unknown';
+  if(h < 9)  return 'Early (before 9am)';
+  if(h < 11) return 'Mid-morning (9–11am)';
+  if(h < 13) return 'Late morning (11am–1pm)';
+  if(h < 17) return 'Afternoon (1–5pm)';
+  return 'Twilight/night (5pm+)';
+}
+const TIMESLOT_ORDER = ['Early (before 9am)','Mid-morning (9–11am)','Late morning (11am–1pm)','Afternoon (1–5pm)','Twilight/night (5pm+)','Unknown'];
+
+// The grounds each club calls home. The fixture source lists the home side first, so the grounds
+// a club regularly appears at as the listed-first team are its home grounds. Deliberately a SET,
+// not a single ground: two thirds of clubs here host across more than one venue (Ocean Grove
+// splits almost evenly between two), so picking only the most-used ground mislabelled a lot of
+// genuine home games as neutral. A ground counts as home if the club hosts at least 5% of its
+// home games there — low enough to catch a genuine second or third ground, high enough to ignore
+// one-off relocations. Tuned against the data: at this threshold only ~5% of home-and-away games
+// come out neutral, while finals (which are played at a third party's ground) all do.
+const HOME_GROUND_MIN_SHARE = 0.05;
+let _homeVenueCache = null, _homeVenueCacheSig = null;
+function inferHomeVenues(){
+  const sig = aggregateCacheSignature();
+  if(sig && _homeVenueCacheSig === sig && _homeVenueCache) return _homeVenueCache;
+  const hosted = {}, totals = {};
+  getVisibleGames().forEach(g=>{
+    const v = venueOf(g);
+    if(!v || !g.teamA) return;
+    const club = getClub(g.teamA.name);
+    if(!club) return;
+    (hosted[club] = hosted[club] || {});
+    hosted[club][v] = (hosted[club][v] || 0) + 1;
+    totals[club] = (totals[club] || 0) + 1;
+  });
+  const home = {};
+  Object.keys(hosted).forEach(club=>{
+    home[club] = new Set(Object.keys(hosted[club]).filter(v=>
+      hosted[club][v] >= 2 && hosted[club][v] / totals[club] >= HOME_GROUND_MIN_SHARE));
+  });
+  _homeVenueCache = home; _homeVenueCacheSig = sig;
+  return home;
+}
+
+// Home/Away/Neutral from the GROUND rather than from who's listed first. That distinction matters
+// in finals, which are regularly played at a third club's ground — listed-first would call that a
+// home game, whereas by ground it's correctly neutral.
+function homeAwayFor(g, teamName, homeVenues){
+  const v = venueOf(g);
+  if(!v) return 'Neutral';
+  const myClub = getClub(teamName);
+  const oppName = g.teamA.name === teamName ? g.teamB.name : g.teamA.name;
+  const oppClub = getClub(oppName);
+  const mineHere = !!(myClub && homeVenues[myClub] && homeVenues[myClub].has(v));
+  const oppHere  = !!(oppClub && homeVenues[oppClub] && homeVenues[oppClub].has(v));
+  if(mineHere && !oppHere) return 'Home';
+  if(oppHere && !mineHere) return 'Away';
+  return 'Neutral';
+}
+
+// Shared W-L-D + scoring summary for an arbitrary grouping of a team's games. Forfeits and
+// abandoned games are excluded from the scoring averages the same way the rest of the app treats
+// them — no football was actually played, so their scores would distort any average.
+// nameFor may be a plain team name, or a function(game) returning our side's name in that game —
+// the latter matters in squad scope, where the same group of players appears under a different
+// team name in an earlier season or a lower age group.
+function summariseTeamSplit(gamesList, nameFor){
+  const ourName = typeof nameFor === 'function' ? nameFor : (()=>nameFor);
+  const played = gamesList.filter(g=> !g.isForfeit && !g.isAbandoned);
+  let w=0,l=0,dr=0,pf=0,pa=0;
+  gamesList.forEach(g=>{
+    const n = ourName(g);
+    if(g.draw) dr++; else if(g.winner===n) w++; else l++;
+  });
+  played.forEach(g=>{
+    const n = ourName(g);
+    const mine = g.teamA.name===n ? g.teamA.total : g.teamB.total;
+    const theirs = g.teamA.name===n ? g.teamB.total : g.teamA.total;
+    pf += mine; pa += theirs;
+  });
+  const n = played.length;
+  const decided = w + l;
+  return {
+    count: gamesList.length, scored: n, w, l, d: dr,
+    winPct: (w+l+dr) ? w/(w+l+dr) : null,
+    avgFor: n ? pf/n : null, avgAgainst: n ? pa/n : null, avgMargin: n ? (pf-pa)/n : null
+  };
+}
+
 function getClub(teamName){
   return getAllClubsForTeam(teamName)[0];
 }
@@ -2274,8 +3441,10 @@ function getClub(teamName){
 // Recognizes junior age groups (U14, U16 etc) as well as Seniors and Reserves (Open Age grades).
 function getAgeGroupLabel(teamName){
   const name = teamName || '';
-  const uMatch = name.match(/U\d{1,2}/i);
-  if(uMatch) return uMatch[0].toUpperCase();
+  // Most teams use the U16 shorthand, but a few are entered longhand ("Barwon Heads Under 18's"),
+  // which previously fell through to 'Other' and left them out of every age-group grouping.
+  const uMatch = name.match(/\bU(?:nder)?\s*(\d{1,2})\b/i);
+  if(uMatch) return 'U' + uMatch[1];
   if(/reserves?/i.test(name)) return 'Reserves';
   if(/seniors?/i.test(name)) return 'Seniors';
   return 'Other';
@@ -2287,6 +3456,38 @@ function getAgeGroupLabel(teamName){
 function resolveMergedClubs(teamName){
   if(!isMergedTeam(teamName)) return null;
   return getAllClubsForTeam(teamName);
+}
+
+// The club a player turned out for, decided from the TEAM they played in. Deliberately does not
+// go through resolvePlayerKey: player aliases exist to merge duplicate PLAYER records, and their
+// target key carries whatever club prefix was typed when the alias was made — several point at
+// strings that aren't real clubs at all ("Newcomb Power", "Bell Post Hill/Anakie"). Reading a club
+// back out of an alias-resolved key therefore invents clubs and splits one club into several.
+// Team names that don't match any known club. matchClubPlain falls back to the team's own name
+// when nothing matches, so these quietly become extra "clubs" in every club dropdown — a coach's
+// surname where the club word is missing ("Geelong West Hannan"), or a team entered under just a
+// nickname ("Rosellas"). Surfacing them is the fix; guessing the right club for them isn't.
+function unresolvedTeamClubs(){
+  const known = new Set(knownClubs);
+  const out = {};
+  getVisibleGames().forEach(g=>{
+    ['teamA','teamB'].forEach(side=>{
+      const t = g[side];
+      if(!t || !t.name || isMergedTeam(t.name)) return;
+      const club = getClub(t.name);
+      if(club && !known.has(club)) (out[club] = out[club] || new Set()).add(t.name);
+    });
+  });
+  return Object.keys(out).sort().map(club=>({ club, teams:[...out[club]].sort() }));
+}
+
+function playerClubForTeam(teamName, tag){
+  const merged = resolveMergedClubs(teamName);
+  if(merged){
+    const isSP = tag && String(tag).toLowerCase().includes('sp');
+    return (isSP ? merged[1] : merged[0]) || merged[0] || getClub(teamName);
+  }
+  return getClub(teamName);
 }
 
 function resolvePlayerKey(rawKey){
@@ -2509,6 +3710,7 @@ async function saveGameAndRefresh(game, replaceId){
   } else {
     games.push(game);
   }
+  tryGradePrediction(replaceId ? games.find(g=>g.id===replaceId) : game);
   await saveGames();
   document.getElementById('pasteBox').value = '';
   document.getElementById('parseResult').innerHTML = '';
@@ -3207,6 +4409,13 @@ function gameRowHtml(g){
             ${phases.map(ph=>`<option value="${ph}" ${(g.phase||'Regular Season')===ph?'selected':''}>${ph}</option>`).join('')}
           </select>
         </div>
+        ${(()=>{
+          const s = predictionCheckSummary(g);
+          if(!s) return '';
+          const icon = s.correct === null ? '—' : (s.correct ? '✓' : '✕');
+          const color = s.correct === null ? 'var(--muted)' : (s.correct ? 'var(--green)' : 'var(--red)');
+          return `<div style="color:${color};font-size:12px;margin-top:3px;" title="Predicted before this result was entered — margin error ${s.marginError.toFixed(1)} pts">${icon} Predicted: ${s.predictedText} (${s.favouredPct}%)</div>`;
+        })()}
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
         <span class="win-tag">${g.draw ? 'Draw' : (g.isForfeit ? g.winner + ' won by forfeit' : g.winner + ' won by ' + g.margin)}</span>
@@ -3240,9 +4449,13 @@ function renderGamesSubView(){
         <button class="ghost" id="findBestMismatchBtn" style="margin:0;">Check best-player mismatches</button>
         <button class="ghost" id="findCrossClubMatchesBtn" style="margin:0;">Check for possible player matches across clubs</button>
         <button class="ghost" id="findDuplicateGamesBtn" style="margin:0;">Check for duplicate games</button>
+        <button class="ghost" id="storageCheckBtn" style="margin:0;" title="What's actually saved in storage right now, key by key — use this if the app looks like it lost data after a reload">Storage check</button>
+        <button class="ghost" id="retroCheckBtn" style="margin:0;" title="Runs today's power-rating model against already-completed games, for games whose result came in before the automatic prediction tracker existed (or whose fixture never got a prediction recorded)">Check past predictions</button>
         <span class="hint" style="margin:0;">Only re-parses games saved after this feature was added — older ones need a manual re-paste (Add game → paste → Update existing game)</span>
       </div>
       <div id="placeholderResultsWrap"></div>
+      <div id="retroPredictionWrap"></div>
+      <div id="storageCheckWrap"></div>
       <div id="gamesListWrap"></div>
     `;
     document.getElementById('reparseAllBtn').onclick = reparseAllGames;
@@ -3250,9 +4463,17 @@ function renderGamesSubView(){
     document.getElementById('findBestMismatchBtn').onclick = renderBestMismatchResults;
     document.getElementById('findCrossClubMatchesBtn').onclick = renderCrossClubMatchResults;
     document.getElementById('findDuplicateGamesBtn').onclick = renderDuplicateGameResults;
+    document.getElementById('storageCheckBtn').onclick = renderStorageCheck;
+    document.getElementById('retroCheckBtn').onclick = ()=>{ retroCheckOpen = !retroCheckOpen; renderRetroPredictionCheck(); };
     renderGames();
+    renderRetroPredictionCheck();
   } else if(gamesSubView === 'upcoming'){
-    wrap.innerHTML = `<div id="fixturesListWrap" style="margin-top:22px;"></div>`;
+    wrap.innerHTML = `
+      <div class="mini-actions" style="margin:22px 0 0;">
+        <button class="ghost" id="predictionAccuracyBtn" style="margin:0;" title="How well the power-rating model's predictions have held up against actual results, since prediction tracking started recording">Prediction accuracy</button>
+      </div>
+      <div id="fixturesListWrap" style="margin-top:14px;"></div>`;
+    document.getElementById('predictionAccuracyBtn').onclick = openPredictionAccuracy;
     renderFixturesList();
   } else {
     wrap.innerHTML = '';
@@ -3428,7 +4649,7 @@ async function reparseAllGames(){
     try{
       const fresh = parseGameText(g.rawText);
       updated++;
-      return { ...fresh, id: g.id, rawText: g.rawText };
+      return { ...fresh, id: g.id, rawText: g.rawText, predictionCheck: g.predictionCheck };
     }catch(e){
       failed++; return g;
     }
@@ -3691,16 +4912,52 @@ function refreshCurrentDetailView(){
   if(document.getElementById('panel-fixture-preview').classList.contains('active') && currentFixturePreviewId){
     renderFixturePreview(currentFixturePreviewId);
   }
+  if(document.getElementById('panel-prediction-accuracy').classList.contains('active')){
+    renderPredictionAccuracy();
+  }
+  if(document.getElementById('panel-player-movement').classList.contains('active')){
+    renderPlayerMovement();
+  }
+  // Both of these read computeAggregates(), so they go stale on a filter change too — they were
+  // simply never added here.
+  if(document.getElementById('panel-suggest-divisions').classList.contains('active')){
+    renderSuggestDivisions();
+  }
+  if(document.getElementById('panel-manage-clubs').classList.contains('active')){
+    renderManageClubs();
+  }
 }
 
 function renderAll(){
   renderPhaseFilterBar();
   renderYearFilterBar();
+  renderPrivacyBanner();
   renderHomeSnapshot();
   renderPlayers();
   renderTeams();
   renderGamesLanding();
   refreshCurrentDetailView();
+}
+
+// Says plainly that this copy is the viewer's own. True in both deployments, but for different
+// reasons and with a different catch, so the wording is chosen per deployment rather than making
+// one vague claim that's only half-right in each:
+//  - Hosted (GitHub Pages): storage is IndexedDB on that device, so edits never leave the browser.
+//    But publishing a newer dataset replaces them, which is worth saying so nobody carefully
+//    corrects records only to lose the lot on the next publish.
+//  - In the Claude artifact: storage is per-user and every call is personal-scope (never shared),
+//    so there's nothing for other people to see, and nothing overwrites it on a schedule.
+function renderPrivacyBanner(){
+  const el = document.getElementById('privacyBanner');
+  if(!el || el.dataset.extended) return;
+  // The base sentence is in the markup so it shows even if scripting fails part-way. Only the
+  // hosted deployment gets the extra warning: there, a newer published dataset overwrites local
+  // storage, so edits are genuinely temporary — worth saying before someone carefully corrects a
+  // batch of records and loses the lot on the next publish. In the artifact nothing overwrites.
+  if(USING_LOCAL_STORAGE_FALLBACK){
+    el.innerHTML += ` Your changes are stored in this browser only, and are replaced whenever an updated dataset is published.`;
+  }
+  el.dataset.extended = '1';
 }
 
 function renderHomeSnapshot(){
@@ -3755,7 +5012,15 @@ function exportToXlsx(){
       TeamBQ1: qb[0] ?? '', TeamBQ2: qb[1] ?? '', TeamBQ3: qb[2] ?? '', TeamBQ4: qb[3] ?? '',
       Phase: g.phase||'', CompetitionRaw: g.competitionRaw||'', RoundLabel: g.roundLabel||'', Year: g.year||'',
       BestPlayersMissing: !!g.bestPlayersMissing, PlayerStatsMissing: !!g.playerStatsMissing,
-      IsForfeit: !!g.isForfeit, IsAbandoned: !!g.isAbandoned
+      IsForfeit: !!g.isForfeit, IsAbandoned: !!g.isAbandoned,
+      PredictedWinner: g.predictionCheck ? g.predictionCheck.predictedWinner||'' : '',
+      PredictedSignedMargin: g.predictionCheck ? g.predictionCheck.predictedSignedMargin : '',
+      PredictedTeamAProb: g.predictionCheck ? g.predictionCheck.predictedTeamAProb : '',
+      ActualWinner: g.predictionCheck ? g.predictionCheck.actualWinner||'' : '',
+      ActualSignedMargin: g.predictionCheck ? g.predictionCheck.actualSignedMargin : '',
+      PredictionWinnerCorrect: g.predictionCheck ? (g.predictionCheck.winnerCorrect===null ? '' : !!g.predictionCheck.winnerCorrect) : '',
+      PredictionMarginError: g.predictionCheck ? g.predictionCheck.marginError : '',
+      PredictionGradedAt: g.predictionCheck ? g.predictionCheck.gradedAt||'' : ''
     };
   });
   const gamesSheet = XLSX.utils.json_to_sheet(gameRows);
@@ -3787,7 +5052,10 @@ function exportToXlsx(){
 
   const fixturesSheet = XLSX.utils.json_to_sheet(fixtures.map(f=>({
     FixtureId:f.id||'', RoundLabel:f.roundLabel||'', CompetitionRaw:f.competitionRaw||'', Year:f.year||'',
-    Date:f.date||'', Time:f.time||'', Venue:f.venue||'', TeamA:f.teamA||'', TeamB:f.teamB||'', IsBye:!!f.isBye
+    Date:f.date||'', Time:f.time||'', Venue:f.venue||'', TeamA:f.teamA||'', TeamB:f.teamB||'', IsBye:!!f.isBye,
+    PredictionSignedMargin: f.prediction ? f.prediction.signedMargin : '',
+    PredictionTeamAProb: f.prediction ? f.prediction.teamAProb : '',
+    PredictionSnapshotAt: f.prediction ? f.prediction.snapshotAt||'' : ''
   })));
   const byesSheet = XLSX.utils.json_to_sheet(byes.map(b=>({
     Team:b.team||'', RoundLabel:b.roundLabel||'', DateTime:b.dateTime||'', Year:b.year||'', Phase:b.phase||''
@@ -4084,7 +5352,9 @@ function renderFixturesList(){
     const a = findLatestTeam(f.teamA), b = findLatestTeam(f.teamB);
     if(!a || !b) return ''; // no history for one side — nothing to base a prediction on
     const m = predictedMargin(predRatings, a.key, b.key, a, b);
-    const probA = Math.round(marginToWinProbability(m) * 100);
+    const rawProbA = marginToWinProbability(m);
+    if(updateFixturePrediction(f, m, rawProbA)) _fixtureSnapshotDirty = true;
+    const probA = Math.round(rawProbA * 100);
     const winner = m >= 0 ? f.teamA : f.teamB;
     const pct = m >= 0 ? probA : 100 - probA;
     const pts = Math.abs(Math.round(m));
@@ -4187,6 +5457,7 @@ function renderFixturesList(){
       renderFixturesList();
     };
   });
+  flushFixtureSnapshots();
 }
 
 function openFixturePreview(fixtureId){
@@ -4232,7 +5503,9 @@ function renderFixturePreview(fixtureId){
     teamAHist ? teamAHist.key : '__none_a',
     teamBHist ? teamBHist.key : '__none_b',
     teamAHist, teamBHist);
-  const winProbA = Math.round(marginToWinProbability(expMargin) * 100);
+  const rawWinProbA = marginToWinProbability(expMargin);
+  if(teamAHist && teamBHist && updateFixturePrediction(f, expMargin, rawWinProbA)) saveFixtures();
+  const winProbA = Math.round(rawWinProbA * 100);
   const winProbB = 100 - winProbA;
 
   const h2hPlayerList = computeAggregates().playerList;
@@ -4290,6 +5563,57 @@ function renderFixturePreview(fixtureId){
     </div>
   `;
   document.getElementById('backToFixturesList').onclick = backToFixturesList;
+}
+
+function openPredictionAccuracy(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-prediction-accuracy').classList.add('active');
+  renderPredictionAccuracy();
+}
+function backToFixturesFromAccuracy(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelector('nav.tabs button[data-tab="games"]').classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-games').classList.add('active');
+  gamesSubView = 'upcoming';
+  renderGamesLanding();
+}
+
+function renderPredictionAccuracy(){
+  const wrap = document.getElementById('predictionAccuracyWrap');
+  const { overall, rounds, calibration } = computePredictionAccuracy();
+
+  const pct = v => v==null ? '—' : `${Math.round(v*100)}%`;
+  const pts = v => v==null ? '—' : `${v.toFixed(1)} pts`;
+
+  const overallHtml = `
+    <div class="card-grid">
+      <div class="stat-card" title="Games graded — only fixtures that had a prediction recorded before their result was entered count here, so this only grows going forward"><div class="label">Games graded</div><div class="value">${overall.count}</div></div>
+      <div class="stat-card" title="Share of decided games (draws excluded) where the favoured team actually won"><div class="label">Winner hit-rate</div><div class="value">${pct(overall.hitRate)}</div></div>
+      <div class="stat-card" title="Average absolute difference between the predicted margin and the actual margin"><div class="label">Avg margin error</div><div class="value">${pts(overall.avgMarginError)}</div></div>
+    </div>`;
+
+  const roundsHtml = rounds.length===0 ? '<div class="empty">No graded predictions yet — results entered from now on will start filling this in.</div>' : `
+    <table><thead><tr><th>Round</th><th>Year</th><th class="num">Games</th><th class="num">Hit-rate</th><th class="num">Avg margin error</th></tr></thead>
+    <tbody>${rounds.map(r=>`<tr><td>${r.roundLabel||'—'}</td><td>${r.year||'—'}</td><td class="num">${r.count}</td><td class="num">${pct(r.hitRate)}</td><td class="num">${pts(r.avgMarginError)}</td></tr>`).join('')}</tbody></table>`;
+
+  const calibratedRows = calibration.filter(b=>b.count>0);
+  const calibrationHtml = calibratedRows.length===0 ? '<div class="empty">Not enough graded predictions yet to check calibration.</div>' : `
+    <table><thead><tr><th>Predicted probability</th><th class="num">Predictions</th><th class="num">Favourite actually won</th></tr></thead>
+    <tbody>${calibratedRows.map(b=>`<tr><td>${b.label}</td><td class="num">${b.count}</td><td class="num">${pct(b.favouredWon/b.count)}</td></tr>`).join('')}</tbody></table>`;
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToFixturesFromAccuracy">&larr; Back to fixtures</span>
+    <h2 style="font-size:20px;">Prediction accuracy</h2>
+    <p class="hint" style="margin:0 0 16px;">Graded by comparing each fixture's most recent prediction — as of right before its result was entered — against the actual result. Predictions keep tracking the model as more games are played, so this only reflects fixtures that had a prediction recorded before their result went in, and grading only ever moves forward from here.</p>
+    ${overallHtml}
+    <h3 style="font-size:14px;margin-top:20px;">By round</h3>
+    ${roundsHtml}
+    <h3 style="font-size:14px;margin-top:20px;">Win-probability calibration</h3>
+    ${calibrationHtml}
+  `;
+  document.getElementById('backToFixturesFromAccuracy').onclick = backToFixturesFromAccuracy;
 }
 
 let teamDetailSort = { key:'totalGoals', dir:'desc' };
@@ -4423,8 +5747,83 @@ function renderTeamDetail(teamKey){
       })()}
       <div class="stat-card" title="Total points scored this season"><div class="label">Points for</div><div class="value">${t.pointsFor}</div></div>
       <div class="stat-card" title="Total points conceded this season"><div class="label">Points against</div><div class="value">${t.pointsAgainst}</div></div>
-      <div class="stat-card" title="Ranked on strength of results — every game counts with its margin, so beating a good side by plenty rates higher than scraping past a weak one. Covers every team logged for this season, across all divisions."><div class="label">Power ranking</div><div class="value">${powerInfo ? ordinal(powerInfo.rank) : '—'}</div>${powerInfo?`<div style="font-size:11.5px;color:var(--muted);">of ${powerInfo.total} teams in ${t.year||'this season'}</div>`:''}</div>
+      <div class="stat-card${powerInfo?' clickable-card':''}"${powerInfo?' id="teamPowerRankCard"':''} title="${powerInfo?'Click to open the full power rankings for this age group and season. ':''}Ranked on strength of results — every game counts with its margin, so beating a good side by plenty rates higher than scraping past a weak one. Covers every team in the same age group and season, across all divisions. Age groups are ranked separately because they never play each other, so their ratings aren't comparable."><div class="label">Power ranking</div><div class="value">${powerInfo ? ordinal(powerInfo.rank) : '—'}</div>${powerInfo?`<div style="font-size:11.5px;color:var(--muted);">of ${powerInfo.total} ${powerInfo.ageGroup==='Other'?'':powerInfo.ageGroup+' '}teams in ${t.year||'this season'}</div>`:''}</div>
     </div>
+    ${(()=>{
+      const homeVenues = inferHomeVenues();
+      const fmtPts = v => v==null ? '—' : v.toFixed(1);
+      const fmtPct = v => v==null ? '—' : Math.round(v*100)+'%';
+      const splitTable = (title, hint, groups) => {
+        const rows = groups.filter(gr=>gr.games.length>0);
+        if(rows.length<=1) return '';   // a single bucket tells you nothing a split would add
+        return `
+        <h3 style="font-size:14px;margin-top:24px;" title="${hint}">${title}</h3>
+        <table><thead><tr><th>${title}</th><th class="num">Games</th><th class="num">W-L-D</th><th class="num">Win %</th><th class="num">Avg for</th><th class="num">Avg against</th><th class="num">Avg margin</th></tr></thead>
+        <tbody>${rows.map(gr=>{
+          const s = summariseTeamSplit(gr.games, nameFor);
+          const mColor = s.avgMargin==null ? 'var(--muted)' : (s.avgMargin>=0 ? 'var(--green)' : 'var(--red)');
+          return `<tr><td>${gr.label}</td><td class="num">${s.count}</td><td class="num">${s.w}-${s.l}-${s.d}</td><td class="num">${fmtPct(s.winPct)}</td><td class="num">${fmtPts(s.avgFor)}</td><td class="num">${fmtPts(s.avgAgainst)}</td><td class="num" style="color:${mColor};">${s.avgMargin==null?'—':(s.avgMargin>=0?'+':'')+s.avgMargin.toFixed(1)}</td></tr>`;
+        }).join('')}</tbody></table>`;
+      };
+
+      // Squad scope follows the same group of players rather than the team name, so it survives a
+      // rename, a squad splitting in two, or the group aging up into the next grade. It has to be
+      // computed with the year/phase filters widened, otherwise the very seasons it exists to
+      // reach would be filtered out before it could find them.
+      const useSquad = teamSplitScope === 'squad';
+      const squadScope = useSquad ? withAllDataFilters(()=>{
+        const allPlayers = computeAggregates().playerList;
+        const rawCohort = getTeamCohort(allPlayers, t);
+        // A player turns out for one squad in a given season, so keep at most one team-season per
+        // year. Where a club runs two sides in the same grade and players float between them, the
+        // shared-player rule legitimately matches both — but counting both would fold a sibling
+        // team's games in as if this squad had played them. Keep whichever season entry shares the
+        // most players with the selected squad; the selected squad itself always wins its own year.
+        const rosters = buildTeamSeasonRosters(allPlayers);
+        const seedKey = t.name + '__' + t.year;
+        const seedRoster = rosters.get(seedKey) || new Set();
+        const bestPerYear = new Map();
+        rawCohort.forEach(k=>{
+          const yr = k.slice(k.lastIndexOf('__') + 2);
+          const score = (k === seedKey) ? Infinity : overlapRatio(rosters.get(k) || new Set(), seedRoster);
+          const cur = bestPerYear.get(yr);
+          if(!cur || score > cur.score) bestPerYear.set(yr, { key:k, score });
+        });
+        const cohort = new Set([...bestPerYear.values()].map(v=>v.key));
+        const isOurs = (g, side) => cohort.has(g[side].name + '__' + (getGameYear(g) || 'Unknown'));
+        const gamesIn = getVisibleGames()
+          .filter(g=> g.teamA && g.teamB && (isOurs(g,'teamA') || isOurs(g,'teamB')))
+          .sort((a,b)=> extractGameDate(b) - extractGameDate(a));
+        return { cohort, gamesIn, nameFor: g=> isOurs(g,'teamA') ? g.teamA.name : g.teamB.name };
+      }) : null;
+
+      const scopeGames = useSquad ? squadScope.gamesIn : teamGamesDesc;
+      const nameFor = useSquad ? squadScope.nameFor : (()=>teamName);
+      const seasonsCovered = new Set(scopeGames.map(g=>getGameYear(g)).filter(Boolean)).size;
+
+      const byHomeAway = ['Home','Away','Neutral'].map(label=>({
+        label, games: scopeGames.filter(g=> homeAwayFor(g, nameFor(g), homeVenues)===label)
+      }));
+      const bySlot = TIMESLOT_ORDER.map(label=>({
+        label, games: scopeGames.filter(g=> timeslotLabel(g)===label)
+      }));
+      const venueNames = [...new Set(scopeGames.map(venueOf).filter(Boolean))];
+      const byGround = venueNames
+        .map(v=>({ label: v + ((homeVenues[getClub(teamName)] && homeVenues[getClub(teamName)].has(v)) ? ' (home ground)' : ''), games: scopeGames.filter(g=>venueOf(g)===v) }))
+        .sort((a,b)=> b.games.length - a.games.length);
+
+      const scopeToggle = `
+        <div class="mini-actions" style="margin-top:24px;align-items:center;">
+          <span class="hint" style="margin:0;">Splits cover:</span>
+          <button class="ghost" id="splitScopeSeason" style="margin:0;${!useSquad?'border-color:var(--gold);color:var(--gold);':''}" title="Only this team's games this season">This season</button>
+          <button class="ghost" id="splitScopeSquad" style="margin:0;${useSquad?'border-color:var(--gold);color:var(--gold);':''}" title="This group of players wherever they've played — matched on shared squad members, so it follows them across a rename, a split, or aging up into the next grade. One squad per season: if the club runs a second side in the same grade, only the closer match counts.">This squad</button>
+          <span class="hint" style="margin:0;">${scopeGames.length} game${scopeGames.length===1?'':'s'}${useSquad?` across ${seasonsCovered} season${seasonsCovered===1?'':'s'}`:''}</span>
+        </div>`;
+
+      return scopeToggle + splitTable('Home / away', 'Worked out from the ground itself, not from who is listed first — so a final at a third club\'s ground counts as neutral rather than a home game', byHomeAway)
+           + splitTable('By timeslot', 'Start time of the game. Compare within this team only — across grades, timeslot mostly reflects which grade plays when', bySlot)
+           + splitTable('By ground', 'Every ground this team has played at. Grounds and opponents usually go together via home grounds, so read this alongside the opponent record rather than instead of it', byGround);
+    })()}
     <h3 style="font-size:14px;margin-top:8px;">Leaderboards</h3>
     <div class="card-grid">
       ${leaderboardBox('Top goal kickers', 'Most total goals this season', topGoals, p=>p.totalGoals+' gls')}
@@ -4477,6 +5876,15 @@ function renderTeamDetail(teamKey){
         `).join('')}
       </tbody>
     </table>`;
+
+  const powerRankCard = document.getElementById('teamPowerRankCard');
+  if(powerRankCard && powerInfo){
+    powerRankCard.onclick = ()=> openPowerRankings({ year: t.year, ageGroup: powerInfo.ageGroup });
+  }
+  const scopeSeasonBtn = document.getElementById('splitScopeSeason');
+  const scopeSquadBtn = document.getElementById('splitScopeSquad');
+  if(scopeSeasonBtn) scopeSeasonBtn.onclick = ()=>{ teamSplitScope = 'season'; renderTeamDetail(currentTeamDetailKey); };
+  if(scopeSquadBtn) scopeSquadBtn.onclick = ()=>{ teamSplitScope = 'squad'; renderTeamDetail(currentTeamDetailKey); };
 
   renderTeamRoster(teamName);
   renderTeamGameLog(teamName, teamGamesDesc, resultFor);
@@ -4874,8 +6282,25 @@ function renderManageClubs(){
 
     <h3 style="font-size:14px;margin-top:20px;">Clubs currently showing (from your saved games)</h3>
     <div class="chip-list" style="max-height:140px;">
-      ${liveClubs.length===0 ? '<div class="picker-empty">No games yet</div>' : liveClubs.map(c=>`<span class="chip active">${c}</span>`).join('')}
+      ${liveClubs.length===0 ? '<div class="picker-empty">No games yet</div>' : liveClubs.map(c=>{
+        const unknown = !knownClubs.includes(c);
+        return `<span class="chip active"${unknown?' style="border-color:var(--gold);color:var(--gold);" title="Not a known club — this is a team name falling back on itself, so it shows up as an extra club everywhere"':''}>${c}${unknown?' ⚠':''}</span>`;
+      }).join('')}
     </div>
+
+    ${(()=>{
+      const unresolved = unresolvedTeamClubs();
+      if(!unresolved.length) return '';
+      return `
+      <h3 style="font-size:14px;margin-top:20px;">Teams not matching a known club (${unresolved.length})</h3>
+      <p class="hint" style="margin:0 0 8px;">Each of these shows up as its own club in every club dropdown. Either add the real club below, or add an override/nickname pointing the team at it.</p>
+      <table style="max-width:700px;">
+        <thead><tr><th>Showing as</th><th>Team name(s)</th></tr></thead>
+        <tbody>${unresolved.map(u=>`
+          <tr><td style="color:var(--gold);">${u.club}</td><td>${u.teams.join('<br>')}</td></tr>
+        `).join('')}</tbody>
+      </table>`;
+    })()}
 
     <h3 style="font-size:14px;margin-top:20px;">Team-specific overrides (${overrideEntries.length})</h3>
     <p class="hint" style="margin:0 0 8px;">Exact team name &rarr; club it's forced to resolve to.</p>
@@ -5853,7 +7278,8 @@ function renderTeamComparisonResult(teamList){
       <div class="label">Predicted result (if played today)</div>
       <div class="value" style="font-size:18px;">${expMargin>=0 ? tA.name : tB.name} by ~${Math.abs(Math.round(expMargin))} pts</div>
       <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">${tA.name} ${winProbA}% &middot; ${tB.name} ${winProbB}%</div>
-      <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">Power ranking: ${tA.name} ${powerRankA?ordinal(powerRankA.rank):'—'} &middot; ${tB.name} ${powerRankB?ordinal(powerRankB.rank):'—'}${powerRankA?` (of ${powerRankA.total} teams)`:''}</div>
+      ${isCrossGradeComparison(tA.name, tB.name) ? `<div style="font-size:11.5px;color:var(--gold);margin-top:6px;">Different grades — these sides never play each other, so there's no result anywhere in the data linking them. This figure rests on an assumed gap between grades, not on evidence, and should be read as a rough guide only.</div>` : ''}
+      <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">Power ranking: ${tA.name} ${powerRankA?`${ordinal(powerRankA.rank)} of ${powerRankA.total}`:'—'} &middot; ${tB.name} ${powerRankB?`${ordinal(powerRankB.rank)} of ${powerRankB.total}`:'—'}${(powerRankA && powerRankB && powerRankA.ageGroup !== powerRankB.ageGroup) ? ' — each ranked within its own age group, so these two are not directly comparable' : ''}</div>
     </div>
     <div class="stat-card" title="Counts only games between these two groups of players — teams are linked across seasons by shared squad members, so a cohort is followed as it ages up (U14 to U16 etc), and a club's separate squads stay separate." style="max-width:520px;margin:0 auto 16px;">
       <div class="label">Head-to-head — this squad vs that squad</div>
@@ -6103,6 +7529,13 @@ function renderGameDetail(id, editMode){
         <button class="ghost" id="editGameBtn" style="margin:0;">Edit game</button>
       </div>
       <div class="result-line" style="margin-bottom:18px;">${g.draw ? 'Draw' : (g.isForfeit ? g.winner + ' won by forfeit — no game was played, so this only counts on the ladder, not toward points, margins, or player stats' : g.winner + ' won by ' + g.margin + ' points')}</div>
+      ${(()=>{
+        const s = predictionCheckSummary(g);
+        if(!s) return '';
+        const verdict = s.correct === null ? 'Draw — no winner to check' : (s.correct ? 'Winner correct' : 'Winner incorrect');
+        const color = s.correct === null ? 'var(--muted)' : (s.correct ? 'var(--green)' : 'var(--red)');
+        return `<div class="stat-card" style="margin-bottom:18px;" title="Recorded from the power-rating model using its most recent prediction right before this result was entered"><div class="label">Prediction vs result</div><div class="value" style="font-size:17px;color:${color};">${verdict}</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">Predicted ${s.predictedText} (${s.favouredPct}%) &middot; margin error ${s.marginError.toFixed(1)} pts</div></div>`;
+      })()}
       ${g.quarterScores ? `
         <div class="chart-wrap" style="height:auto;padding:16px;margin-bottom:20px;">
           <table>
@@ -6302,6 +7735,7 @@ document.getElementById('parseBtn').onclick = async ()=>{
         .filter(nb => !byes.some(b => b.team===nb.team && b.roundLabel===nb.roundLabel && b.year===nb.year));
 
       const commit = async ()=>{
+        newOnes.forEach(tryGradePrediction);
         games.push(...newOnes);
         byes.push(...newByes);
         await saveGames();
@@ -6394,6 +7828,7 @@ function openAddGame(){
 document.getElementById('addGameHeaderBtn').onclick = openAddGame;
 document.getElementById('comparePlayersBtn').onclick = openComparePlayers;
 document.getElementById('mergePlayersBtn').onclick = openMergePlayers;
+document.getElementById('playerMovementBtn').onclick = openPlayerMovement;
 document.getElementById('manageClubsBtn').onclick = openManageClubs;
 document.getElementById('topPlayersBtn').onclick = openTopPlayers;
 document.getElementById('showAllPlayersBtn').onclick = ()=>{ playersShowAllOverride = true; renderPlayers(); };
@@ -6409,7 +7844,7 @@ function goToTab(tabName){
 document.getElementById('homeCardPlayers').onclick = ()=> goToTab('players');
 document.getElementById('homeCardTeams').onclick = ()=> goToTab('teams');
 document.getElementById('homeCardGames').onclick = ()=> goToTab('games');
-document.getElementById('gamesCardCompleted').onclick = ()=>{ gamesSubView = 'completed'; renderGamesLanding(); };
+document.getElementById('gamesCardCompleted').onclick = ()=>{ gamesSubView = 'completed'; retroCheckOpen = false; renderGamesLanding(); };
 document.getElementById('gamesCardUpcoming').onclick = ()=>{ gamesSubView = 'upcoming'; renderGamesLanding(); };
 
 // Hide the phase/year filter bar on the Home page — it doesn't filter anything there
@@ -6460,6 +7895,11 @@ async function seedFromPublishedData(){
       if(Array.isArray(payload.knownClubs) && payload.knownClubs.length) await put('knownClubs', payload.knownClubs);
       if(payload.teamClubOverrides) await put('teamClubOverrides', payload.teamClubOverrides);
       if(payload.clubNicknames) await put('clubNicknames', payload.clubNicknames);
+      // loadGames prefers the chunked/compressed layout over this legacy single key, so a
+      // manifest left on this device from an earlier visit would shadow the data just seeded and
+      // silently pin the visitor to their old snapshot. Clear it; the next save rebuilds it.
+      try{ await window.storage.delete(GAMES_META_KEY, false); }catch(e){}
+      try{ await cleanupOrphanedGameChunks(0); }catch(e){}
       await window.storage.set('publishedDataStamp', publishedStamp, false);
     }catch(storageErr){
       // IndexedDB backs hosted storage now, so a genuine quota hit is unlikely — but if the
@@ -6476,15 +7916,39 @@ async function seedFromPublishedData(){
 
 // ---------- Init ----------
 (async function init(){
-  await seedFromPublishedData();
-  await loadGames();
-  if(ensureUniqueGameIds()) await saveGames();
-  await loadPlayerAliases();
-  await loadDismissedMatches();
-  await loadFixtures();
-  await loadByes();
-  await loadClubData();
-  renderAll();
+  // Every step here is awaited, so one thrown error used to skip renderAll() entirely and leave a
+  // page that looked broken rather than errored — static markup rendered, every JS-filled region
+  // blank, and no clue as to why. Load each piece independently so a single failure costs only
+  // that piece, and always render regardless.
+  const step = async (label, fn) => {
+    try{ await fn(); }
+    catch(e){ console.error('Startup step failed:', label, e); return label; }
+    return null;
+  };
+  const failures = [];
+  for(const [label, fn] of [
+    ['published data', seedFromPublishedData],
+    ['games', loadGames],
+    ['player aliases', loadPlayerAliases],
+    ['dismissed matches', loadDismissedMatches],
+    ['fixtures', loadFixtures],
+    ['byes', loadByes],
+    ['club settings', loadClubData]
+  ]){
+    const failed = await step(label, fn);
+    if(failed) failures.push(failed);
+  }
+  try{ if(ensureUniqueGameIds()) await saveGames(); }
+  catch(e){ console.error('Startup step failed: id backfill', e); }
+
+  try{ renderAll(); }
+  catch(e){
+    console.error('Initial render failed', e);
+    showToast('Something went wrong drawing the page — try reloading. Your data is untouched.');
+  }
+  if(failures.length){
+    showToast(`Couldn't load: ${failures.join(', ')}. Everything else loaded normally.`);
+  }
 })();
 </script>
 </body>
