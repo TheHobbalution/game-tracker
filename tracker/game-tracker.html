@@ -319,7 +319,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 2026-07-24</span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 2026-07-27</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div style="display:flex;gap:10px;flex-wrap:wrap;">
     <button class="ghost" id="backupBtn" title="Downloads a JSON file with every game, fixture, alias and club setting — use this to move all your data into a new copy of this app" style="margin-top:0;">Backup all data</button>
     <button class="ghost" id="restoreBtn" title="Restore all data from a JSON backup, or rebuild games from an exported .xlsx spreadsheet. This replaces everything currently saved here." style="margin-top:0;">Restore from backup</button>
@@ -635,7 +635,15 @@ let knownClubs = [
   "Surf Coast Suns","Thomson","Torquay","Werribee Centrals","Winchelsea"
 ];
 let teamClubOverrides = {}; // exact team name -> chosen club, for names generic matching can't work out
-let clubNicknames = { "ammos": "Geelong Amateur" }; // nickname word -> canonical club, for names that share no real words (e.g. "Ammos" = "Amateur")
+let clubNicknames = {
+  "ammos": "Geelong Amateur",
+  // Geelong West Giants' two U18 sides were entered under their coaches' surnames for the 2026
+  // season rather than "Giants" — baked in here rather than left as ordinary Manage Clubs config,
+  // since it's a permanent fact about the club rather than something a Replace-everything restore
+  // should be able to wipe out from under it.
+  "geelong west hannan": "Geelong West Giants",
+  "geelong west wilkie": "Geelong West Giants"
+}; // nickname word(s) -> canonical club, for names that share no real words (e.g. "Ammos" = "Amateur")
 let currentPlayerDetailKey = null;
 let currentGameDetailId = null;
 let currentTeamDetailKey = null;
@@ -830,6 +838,23 @@ async function loadGames(){
   }catch(e){
     games = [];
   }
+}
+
+// Called after games is replaced wholesale (a JSON/xlsx restore) or at every startup, to guard
+// against duplicate or missing ids — a restore from an older export, or two games merged from
+// different sources, could otherwise collide. Returns whether anything changed, since every call
+// site uses that to decide whether a save is needed.
+function ensureUniqueGameIds(){
+  const seen = new Set();
+  let changed = false;
+  games.forEach(g=>{
+    if(!g.id || seen.has(g.id)){
+      g.id = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+      changed = true;
+    }
+    seen.add(g.id);
+  });
+  return changed;
 }
 
 async function saveGames(){
@@ -4932,6 +4957,7 @@ function renderAll(){
   renderPhaseFilterBar();
   renderYearFilterBar();
   renderPrivacyBanner();
+  renderDataCoverageStamp();
   renderHomeSnapshot();
   renderPlayers();
   renderTeams();
@@ -4947,6 +4973,21 @@ function renderAll(){
 //    corrects records only to lose the lot on the next publish.
 //  - In the Claude artifact: storage is per-user and every call is personal-scope (never shared),
 //    so there's nothing for other people to see, and nothing overwrites it on a schedule.
+// The earliest/latest game actually on file, computed live rather than hand-maintained, so it
+// can never go stale the way the build date above it just did. Deliberately just a date RANGE,
+// not a claim of completeness — 2022/2023 are still being backfilled and have real gaps within
+// that range, so "100% loaded" would be a promise this data can't back up. A plain span of what's
+// present is honest and doesn't need updating by hand every time more seasons land.
+function renderDataCoverageStamp(){
+  const el = document.getElementById('dataCoverageStamp');
+  if(!el) return;
+  const dates = games.map(extractGameDate).filter(d=>d>0);
+  if(!dates.length){ el.textContent = ''; return; }
+  const fmt = ts => new Date(ts).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
+  el.textContent = `Games on file: ${fmt(Math.min(...dates))} – ${fmt(Math.max(...dates))}`;
+}
+
+
 function renderPrivacyBanner(){
   const el = document.getElementById('privacyBanner');
   if(!el || el.dataset.extended) return;
