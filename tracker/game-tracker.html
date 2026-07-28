@@ -194,8 +194,9 @@
              border-bottom:2px solid var(--line); margin:8px auto 0; }
   .cmp-head-name{ text-align:center; font-family:'Oswald',sans-serif; font-size:13px;
                   text-transform:uppercase; letter-spacing:0.04em; }
-  .cmp-group{ text-align:center; font-family:'Oswald',sans-serif; font-size:10.5px;
-              text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); padding:16px 0 6px; }
+  .cmp-group{ text-align:center; font-family:'Oswald',sans-serif; font-size:14px; font-weight:700;
+              text-transform:uppercase; letter-spacing:0.08em; color:var(--gold);
+              padding:22px 0 9px; border-bottom:1px solid var(--line); margin-bottom:2px; }
   .cmp-row{ display:grid; grid-template-columns:1fr 150px 1fr; align-items:center;
             padding:9px 0; border-bottom:1px solid var(--line); gap:10px; }
   .cmp-side{ display:flex; align-items:center; }
@@ -208,11 +209,21 @@
   .cmp-label{ text-align:center; font-size:11.5px; color:var(--muted); text-transform:uppercase;
               font-family:'Oswald',sans-serif; letter-spacing:0.05em; }
 
-  .ctx-row{ padding:11px 0; border-bottom:1px solid var(--line); }
+  .ctx-row{ padding:13px 0; border-bottom:1px solid var(--line); }
   .ctx-label{ font-size:11.5px; color:var(--muted); text-transform:uppercase;
-              font-family:'Oswald',sans-serif; letter-spacing:0.05em; margin-bottom:7px; }
-  .ctx-track{ position:relative; height:20px; background:var(--surface-2); border-radius:4px; }
-  .ctx-marker{ position:absolute; top:-3px; width:3px; height:26px; border-radius:2px; }
+              font-family:'Oswald',sans-serif; letter-spacing:0.05em; margin-bottom:6px; }
+  .ctx-readout{ display:flex; justify-content:space-between; flex-wrap:wrap; gap:3px 14px;
+                font-size:11.5px; font-family:'IBM Plex Mono',monospace; margin-bottom:22px; }
+  .ctx-pct{ color:var(--muted); font-family:'Oswald',sans-serif; font-size:10px; }
+  .ctx-track{ position:relative; height:20px; background:var(--surface-2); border-radius:4px; margin-bottom:20px; }
+  .ctx-marker-wrap{ position:absolute; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; }
+  .ctx-marker-wrap.a{ top:-21px; }
+  .ctx-marker-wrap.b{ top:20px; }
+  .ctx-marker{ width:3px; height:26px; border-radius:2px; }
+  .ctx-marker-tag{ font-size:9px; font-family:'Oswald',sans-serif; text-transform:uppercase;
+                   letter-spacing:0.03em; white-space:nowrap; line-height:1.3; }
+  .ctx-marker-wrap.a .ctx-marker-tag{ margin-bottom:2px; }
+  .ctx-marker-wrap.b .ctx-marker-tag{ margin-top:2px; }
   .ctx-scale{ display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-top:5px; }
   .gl-cell{ display:inline-flex; align-items:center; justify-content:flex-end; gap:6px; white-space:nowrap; }
   .gl-num{ font-family:'IBM Plex Mono',monospace; }
@@ -319,7 +330,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 2026-07-27</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 2026-07-29</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div style="display:flex;gap:10px;flex-wrap:wrap;">
     <button class="ghost" id="backupBtn" title="Downloads a JSON file with every game, fixture, alias and club setting — use this to move all your data into a new copy of this app" style="margin-top:0;">Backup all data</button>
     <button class="ghost" id="restoreBtn" title="Restore all data from a JSON backup, or rebuild games from an exported .xlsx spreadsheet. This replaces everything currently saved here." style="margin-top:0;">Restore from backup</button>
@@ -1987,7 +1998,7 @@ function renderPowerRankings(){
   const curYear = (preset && preset.year != null) ? String(preset.year) : (yearSel ? yearSel.value : (years[0]||''));
 
   const inYear = teamList.filter(t=>String(t.year)===String(curYear));
-  const ageGroups = [...new Set(inYear.map(t=>t.ageGroup))].sort();
+  const ageGroups = [...new Set(inYear.map(t=>t.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
 
   // Age group starts unselected — ratings and division anchoring are computed per age group, so
   // mixing age groups into one ranked list would compare things that were never actually anchored
@@ -2146,7 +2157,7 @@ function backToTeamsFromDivisions(){
 function renderSuggestDivisions(){
   const wrap = document.getElementById('suggestDivisionsWrap');
   const { teamList } = computeAggregates();
-  const ageGroups = [...new Set(teamList.map(t=>t.ageGroup))].sort();
+  const ageGroups = [...new Set(teamList.map(t=>t.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const years = [...new Set(games.map(g=>getGameYear(g)).filter(Boolean))].sort((a,b)=>b-a);
 
   const ageSel = document.getElementById('suggestAgeGroup');
@@ -2596,7 +2607,7 @@ function renderRetroPredictionCheck(){
   if(!retroCheckOpen){ wrap.innerHTML = ''; return; }
 
   const years = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
-  const ageGroups = [...new Set(games.map(getAgeGroup))].sort();
+  const ageGroups = [...new Set(games.map(getAgeGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const roundNumOf = label => { const m = String(label).match(/\d+/); return m ? parseInt(m[0],10) : Infinity; };
   const rounds = [...new Set(games.map(g=>g.roundLabel).filter(Boolean))].sort((a,b)=> roundNumOf(a)-roundNumOf(b));
 
@@ -2903,7 +2914,12 @@ function isJuniorGrade(g){ return /^U\d{1,2}$/.test(g || ''); }
 // because players move between those two in both directions and the age-progression check must
 // not treat a drop from seniors to reserves as impossible. That tie leaves their order arbitrary
 // when sorting for the eye, so list reserves below the junior grades and seniors last.
-const GRADE_DISPLAY_ORDER = { 'U8':0,'U10':1,'U12':2,'U14':3,'U16':4,'U18':5,'Reserves':6,'Seniors':7 };
+// The one ordering used everywhere an age group is listed or grouped — dropdowns, fixture/game
+// groupings, chart axes. Requested order: Seniors and Reserves first, then juniors oldest-to-
+// youngest (U18 down to U12). Kept separate from AGE_GROUP_ORDER above, which ties Reserves and
+// Seniors to the same rank for the move-detection age-progression check — that's a correctness
+// rule, not a display preference, and must not change with this.
+const GRADE_DISPLAY_ORDER = { 'Seniors':0,'Reserves':1,'U18':2,'U16':3,'U14':4,'U12':5,'U10':6,'U8':7 };
 function gradeDisplayRank(g){ return GRADE_DISPLAY_ORDER[g] ?? 99; }
 
 function openPlayerMovement(){
@@ -3888,7 +3904,7 @@ function renderPlayers(){
 
   const clubs = [...new Set(playerList.filter(p=>matches(p,'club')).map(p=>p.club))].sort((a,b)=>a.localeCompare(b));
   const teamNames = [...new Set(playerList.filter(p=>matches(p,'team')).flatMap(p=>p.teams))].sort((a,b)=>a.localeCompare(b));
-  const ageGroups = [...new Set(playerList.filter(p=>matches(p,'age')).map(p=>p.ageGroup))].sort();
+  const ageGroups = [...new Set(playerList.filter(p=>matches(p,'age')).map(p=>p.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const divisions = [...new Set(playerList.filter(p=>matches(p,'div')).flatMap(p=>p.divisions))].sort();
 
   clubSel.innerHTML = `<option value="ALL">All clubs</option>` + clubs.map(c=>`<option value="${c}">${c}</option>`).join('');
@@ -4203,7 +4219,7 @@ function renderTeams(){
   // Age Group / Division cross-constrained (secondary filters for browsing the full table)
   const forAgeOptions = teamList.filter(t => curDiv==='ALL' || t.divisions.includes(curDiv));
   const forDivOptions = teamList.filter(t => curAge==='ALL' || t.ageGroup===curAge);
-  const ageGroups = [...new Set(forAgeOptions.map(t=>t.ageGroup))].sort();
+  const ageGroups = [...new Set(forAgeOptions.map(t=>t.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const divisions = [...new Set(forDivOptions.flatMap(t=>t.divisions))].sort();
   ageSel.innerHTML = `<option value="ALL">All age groups</option>` + ageGroups.map(a=>`<option value="${a}" ${curAge===a?'selected':''}>${a}</option>`).join('');
   divSel.innerHTML = `<option value="ALL">All divisions</option>` + divisions.map(d=>`<option value="${d}" ${curDiv===d?'selected':''}>${d}</option>`).join('');
@@ -4555,7 +4571,7 @@ function renderGames(){
     const ageGroups = groups[year];
     const yearKey = 'year::'+year;
     const yearTotal = Object.values(ageGroups).reduce((s,divs)=>s+Object.values(divs).reduce((s2,rounds)=>s2+countIn(rounds),0),0);
-    const ageKeys = Object.keys(ageGroups).sort();
+    const ageKeys = Object.keys(ageGroups).sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
     return `
       <details class="group-details" data-group-key="${yearKey}" ${openGameGroups.has(yearKey)?'open':''}>
         <summary class="group-summary">${year} <span class="hint" style="margin:0;">(${yearTotal} game${yearTotal!==1?'s':''})</span></summary>
@@ -5145,6 +5161,69 @@ function openPlayerDetail(key){
   renderPlayerDetail(key);
 }
 
+// Shared pool math for "how does this player sit against their peers" — used by the two-player
+// compare page's League Context and the single-player page's own version of it. Pool = players in
+// the given age group(s), qualified by games played; the threshold adapts to how far the season
+// has progressed (whatever the most games anyone's played is, capped at 3) rather than a flat
+// cutoff that would leave an empty pool in a season's first couple of rounds.
+const LEAGUE_CONTEXT_STATS = [
+  ['Total goals','totalGoals'], ['Goals per game','avgGoals'],
+  ['Best points','weightedBest'], ['Form score','formScore'], ['MVP points','mvpScore']
+];
+function buildLeagueContextPool(playerList, ageGroups){
+  const groups = Array.isArray(ageGroups) ? ageGroups : [ageGroups];
+  const ageGroupPlayers = playerList.filter(p=> groups.includes(p.ageGroup));
+  const maxGames = ageGroupPlayers.reduce((m,p)=> Math.max(m, p.gamesPlayed||0), 0);
+  const minGamesThreshold = Math.min(3, maxGames) || 1;
+  const pool = ageGroupPlayers.filter(p=> p.gamesPlayed >= minGamesThreshold);
+  const percentileOf = (player, key) => {
+    const vals = pool.map(p=>p[key]||0);
+    if(!vals.length) return 0;
+    const below = vals.filter(v=> v < (player[key]||0)).length;
+    return Math.round((below / vals.length) * 100);
+  };
+  // Where the player's actual value sits between 0 and the league leader — unlike percentile
+  // (rank among players), this reflects real distance: two players tied near the top but far
+  // above a long tail of low scorers still show close together, not spread across the bar.
+  const valuePositionOf = (player, key, poolMax) => {
+    if(!poolMax) return 0;
+    return Math.max(0, Math.min(100, ((player[key]||0) / poolMax) * 100));
+  };
+  return { pool, minGamesThreshold, percentileOf, valuePositionOf };
+}
+
+// The single-player version — one marker per row instead of two, gold rather than green/blue
+// since there's no "other side" to contrast against.
+function playerLeagueContextHtml(p, playerList){
+  const { pool, minGamesThreshold, percentileOf, valuePositionOf } = buildLeagueContextPool(playerList, p.ageGroup);
+  if(pool.length < 2) return ''; // not enough peers logged yet for this to mean anything
+  let aboveMedian = 0;
+  LEAGUE_CONTEXT_STATS.forEach(([,key])=>{ if(percentileOf(p,key) >= 50) aboveMedian++; });
+  return `
+    <h3 style="font-size:14px;margin-top:24px;">League context</h3>
+    <p class="hint">Where ${p.name} sits against every player in ${p.ageGroup} with at least ${minGamesThreshold} game${minGamesThreshold!==1?'s':''} played.</p>
+    <p class="hint">Above the median on ${aboveMedian} of ${LEAGUE_CONTEXT_STATS.length} tracked stats.</p>
+    ${LEAGUE_CONTEXT_STATS.map(([label,key])=>{
+      const poolMax = pool.reduce((m,pp)=> Math.max(m, pp[key]||0), 0);
+      const pos = valuePositionOf(p,key,poolMax);
+      const pct = percentileOf(p,key);
+      return `<div class="ctx-row">
+        <div class="ctx-label">${label}</div>
+        <div class="ctx-readout" style="justify-content:flex-start;">
+          <span style="color:var(--gold);">${p.name}: ${p[key]} <span class="ctx-pct">(${pct}th pct.)</span></span>
+        </div>
+        <div class="ctx-track">
+          <div class="ctx-marker-wrap a" style="left:${pos}%;">
+            <div class="ctx-marker-tag" style="color:var(--gold);">${p.name}</div>
+            <div class="ctx-marker" style="background:var(--gold);"></div>
+          </div>
+        </div>
+        <div class="ctx-scale"><span>0</span><span>League leader: ${poolMax}</span></div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
 function renderPlayerDetail(key){
   const { playerList } = computeAggregates();
   const p = playerList.find(pl => pl.key === key);
@@ -5196,6 +5275,8 @@ function renderPlayerDetail(key){
     <div class="chart-wrap"><canvas id="playerBestChart"></canvas></div>
     <h3 style="font-size:14px;margin-top:24px;">Season history</h3>
     <div id="playerSeasonHistoryWrap"></div>
+    <div id="playerSplitsWrap"></div>
+    <div id="playerLeagueContextWrap"></div>
     <h3 style="font-size:14px;margin-top:24px;">Game log</h3>
     <div id="playerGameLogWrap"></div>
   `;
@@ -5218,6 +5299,52 @@ function renderPlayerDetail(key){
         `).join('')}
       </tbody>
     </table>`;
+
+  // Same match-context splits as the team page — home/away, timeslot, ground — scoped to this
+  // player. The timeline only carries the fields aggregation needed (no venue), so each entry is
+  // matched back to its actual game via gameId to get that.
+  const homeVenues = inferHomeVenues();
+  const withGame = p.timeline
+    .map(t=>({ t, g: t.gameId ? games.find(gm=>gm.id===t.gameId) : null }))
+    .filter(x=>x.g);
+
+  const summarisePlayerSplit = rows => {
+    let w=0,l=0,d=0,goals=0,best=0;
+    rows.forEach(({t})=>{
+      if(t.result==='W') w++; else if(t.result==='L') l++; else if(t.result==='D') d++;
+      goals += t.goals; if(t.isBest) best++;
+    });
+    const n = rows.length;
+    return { count:n, w,l,d, goals, avgGoals: n ? +(goals/n).toFixed(2) : null, best };
+  };
+  const playerSplitTable = (title, hint, groups) => {
+    const rows = groups.filter(gr=>gr.rows.length>0);
+    if(rows.length<=1) return ''; // a single bucket tells you nothing a split would add
+    return `
+      <h3 style="font-size:14px;margin-top:24px;" title="${hint}">${title}</h3>
+      <table><thead><tr><th>${title}</th><th class="num">Games</th><th class="num">W-L-D</th><th class="num">Goals</th><th class="num">Avg/gm</th><th class="num">Bests</th></tr></thead>
+      <tbody>${rows.map(gr=>{
+        const s = summarisePlayerSplit(gr.rows);
+        return `<tr><td>${gr.label}</td><td class="num">${s.count}</td><td class="num">${s.w}-${s.l}-${s.d}</td><td class="num">${s.goals}</td><td class="num">${s.avgGoals}</td><td class="num">${s.best}</td></tr>`;
+      }).join('')}</tbody></table>`;
+  };
+
+  const byHomeAway = ['Home','Away','Neutral'].map(label=>({
+    label, rows: withGame.filter(x=> homeAwayFor(x.g, x.t.team, homeVenues)===label)
+  }));
+  const bySlot = TIMESLOT_ORDER.map(label=>({
+    label, rows: withGame.filter(x=> timeslotLabel(x.g)===label)
+  }));
+  const venueNames = [...new Set(withGame.map(x=>venueOf(x.g)).filter(Boolean))];
+  const byGround = venueNames
+    .map(v=>({ label:v, rows: withGame.filter(x=>venueOf(x.g)===v) }))
+    .sort((a,b)=> b.rows.length - a.rows.length);
+
+  document.getElementById('playerSplitsWrap').innerHTML =
+    playerSplitTable('Home / away', 'Worked out from the ground itself, not from who is listed first — so a final at a third club\'s ground counts as neutral rather than a home game', byHomeAway) +
+    playerSplitTable('By timeslot', 'Start time of the games this player has actually played — reflects their own fixture history, not a general early-vs-late effect', bySlot) +
+    playerSplitTable('By ground', 'Every ground this player has played at', byGround);
+  document.getElementById('playerLeagueContextWrap').innerHTML = playerLeagueContextHtml(p, playerList);
   const timeline = [...p.timeline].sort((a,b)=>b.date-a.date);
   const visibleTimeline = playerGameLogExpanded ? timeline : timeline.slice(0,3);
   const logWrap = document.getElementById('playerGameLogWrap');
@@ -5249,6 +5376,56 @@ function renderPlayerDetail(key){
     return;
   }
   const chrono = [...p.timeline].sort((a,b)=>a.date-b.date);
+
+  // A dashed vertical line (and year label) wherever the season rolls over — the date-only x-axis
+  // labels repeat every year with nothing to tell one year's games from the next's, which is what
+  // made the chart read as one endless loop rather than a multi-year history.
+  const yearBoundaryPlugin = (()=>{
+    const boundaries = [];
+    for(let i=1;i<chrono.length;i++){
+      const y0 = chrono[i-1].date ? new Date(chrono[i-1].date).getFullYear() : null;
+      const y1 = chrono[i].date ? new Date(chrono[i].date).getFullYear() : null;
+      if(y0!=null && y1!=null && y1!==y0) boundaries.push({ index:i, year:y1 });
+    }
+    return {
+      id:'yearBoundaries',
+      afterDraw(chart){
+        if(!boundaries.length) return;
+        const { ctx, chartArea, scales:{ x } } = chart;
+        ctx.save();
+        boundaries.forEach(b=>{
+          const xPos = (x.getPixelForValue(b.index-1) + x.getPixelForValue(b.index)) / 2;
+          ctx.beginPath();
+          ctx.setLineDash([4,4]);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(143,160,163,0.55)';
+          ctx.moveTo(xPos, chartArea.top);
+          ctx.lineTo(xPos, chartArea.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#8FA0A3';
+          ctx.font = '11px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText(String(b.year), xPos+4, chartArea.top+12);
+        });
+        ctx.restore();
+      }
+    };
+  })();
+
+  // One line under any tooltip on either chart: who it was against and how it went, pulling the
+  // actual margin from the game record (via gameId) rather than just win/loss/draw when it's there.
+  const tooltipFooterFor = items => {
+    if(!items.length) return '';
+    const t = chrono[items[0].dataIndex];
+    if(!t) return '';
+    const g = t.gameId ? games.find(gm=>gm.id===t.gameId) : null;
+    let resultText;
+    if(t.result === 'D') resultText = 'Draw';
+    else if(g && typeof g.margin === 'number') resultText = `${t.result==='W'?'Won':'Lost'} by ${g.margin}`;
+    else resultText = t.result==='W' ? 'Won' : (t.result==='L' ? 'Lost' : '—');
+    return `vs ${t.opponent} — ${resultText}`;
+  };
   const labels = chrono.map(t=> t.dateTime ? new Date(t.date).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '?');
   const goalsData = chrono.map(t=>t.goals);
   const roll3 = chrono.map((_,idx)=>{
@@ -5269,10 +5446,15 @@ function renderPlayerDetail(key){
         { type:'line', label:'5-game avg', data:roll5, borderColor:'#C9A227', backgroundColor:'transparent', tension:0.25 }
       ]
     },
+    plugins:[yearBoundaryPlugin],
     options:{
       responsive:true, maintainAspectRatio:false,
       scales:{ x:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } }, y:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } } },
-      plugins:{ legend:{ labels:{ color:'#EDF1F0' } }, title:{ display:true, text:'Goals per game with rolling form', color:'#EDF1F0' } }
+      plugins:{
+        legend:{ labels:{ color:'#EDF1F0' } },
+        title:{ display:true, text:'Goals per game with rolling form', color:'#EDF1F0' },
+        tooltip:{ callbacks:{ footer: tooltipFooterFor } }
+      }
     }
   });
 
@@ -5286,6 +5468,7 @@ function renderPlayerDetail(key){
       labels,
       datasets:[{ label:'Best player ranking', data:bestData, borderColor:'#C9A227', backgroundColor:'rgba(201,162,39,0.15)', fill:true, stepped:false, tension:0, pointRadius:4, pointBackgroundColor:'#C9A227' }]
     },
+    plugins:[yearBoundaryPlugin],
     options:{
       responsive:true, maintainAspectRatio:false,
       scales:{
@@ -5295,7 +5478,7 @@ function renderPlayerDetail(key){
       plugins:{
         legend:{ display:false },
         title:{ display:true, text:'Best player ranking per game', color:'#EDF1F0' },
-        tooltip:{ callbacks:{ label: ctx => rankLabel(ctx.parsed.y) } }
+        tooltip:{ callbacks:{ label: ctx => rankLabel(ctx.parsed.y), footer: tooltipFooterFor } }
       }
     }
   });
@@ -5341,7 +5524,7 @@ function renderFixturesList(){
     return a !== 'Other' ? a : b;
   };
 
-  const ageGroups = [...new Set(fixtures.map(fixtureAgeGroup))].sort();
+  const ageGroups = [...new Set(fixtures.map(fixtureAgeGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const divisions = [...new Set(fixtures.map(getDivision))].sort();
   if(!ageGroups.includes(fixturesAgeGroupFilter)) fixturesAgeGroupFilter = 'ALL';
   if(!divisions.includes(fixturesDivisionFilter)) fixturesDivisionFilter = 'ALL';
@@ -5431,7 +5614,7 @@ function renderFixturesList(){
       const ageGroupsInYear = grouped[year];
       const yearKey = 'fyear::'+year;
       const yearTotal = Object.values(ageGroupsInYear).reduce((s,divs)=>s+Object.values(divs).reduce((s2,rounds)=>s2+countIn(rounds),0),0);
-      const ageKeys = Object.keys(ageGroupsInYear).sort();
+      const ageKeys = Object.keys(ageGroupsInYear).sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
       return `
       <details class="group-details" data-group-key="${yearKey}" ${openFixtureGroups.has(yearKey)?'open':''}>
         <summary class="group-summary">${year} <span class="hint" style="margin:0;">(${yearTotal} fixture${yearTotal!==1?'s':''})</span></summary>
@@ -5550,38 +5733,85 @@ function renderFixturePreview(fixtureId){
   const winProbB = 100 - winProbA;
 
   const h2hPlayerList = computeAggregates().playerList;
-  const h2h = (teamAHist && teamBHist)
-    ? getCohortHeadToHead(
-        getTeamCohort(h2hPlayerList, teamAHist),
-        getTeamCohort(h2hPlayerList, teamBHist))
-    : getClubHeadToHead(clubA, clubB);
-  const trendA = teamAHist ? getCohortProgression(getTeamCohort(h2hPlayerList, teamAHist)) : getClubSeasonTrend(clubA);
-  const trendB = teamBHist ? getCohortProgression(getTeamCohort(h2hPlayerList, teamBHist)) : getClubSeasonTrend(clubB);
+  // Cohorts computed once, reused for head-to-head, squad history AND the cross-grade check below
+  // — a club fielding several age groups means the two clubs' most-recent clash of ANY kind can
+  // easily be a different grade's game, which is a real (if narrow) case: rosters can genuinely
+  // overlap across grades at the U18/Reserves boundary, where a talented junior sometimes turns
+  // out for the open-age side in the same season. So this isn't excluded outright — it's judged on
+  // its own overlap, same as any other cohort link, rather than assumed correct just for being the
+  // most recent game between the two clubs (which is what caused a Seniors fixture to compare
+  // against an unrelated U16 game purely because that happened to be more recent).
+  const cohortA = teamAHist ? getTeamCohort(h2hPlayerList, teamAHist) : null;
+  const cohortB = teamBHist ? getTeamCohort(h2hPlayerList, teamBHist) : null;
+  const h2h = (cohortA && cohortB) ? getCohortHeadToHead(cohortA, cohortB) : getClubHeadToHead(clubA, clubB);
+  const trendA = cohortA ? getCohortProgression(cohortA) : getClubSeasonTrend(clubA);
+  const trendB = cohortB ? getCohortProgression(cohortB) : getClubSeasonTrend(clubB);
 
-  const lastMeeting = games
-    .filter(g=>{
-      const cA=getClub(g.teamA.name), cB=getClub(g.teamB.name);
-      return (cA===clubA && cB===clubB) || (cA===clubB && cB===clubA);
-    })
-    .sort((a,b)=>extractGameDate(b)-extractGameDate(a))[0];
-
-  let rosterContinuityHtml = '<div class="empty">No previous meeting on record to compare rosters against.</div>';
-  if(lastMeeting && teamAHist && teamBHist){
-    const lastSideA = getClub(lastMeeting.teamA.name)===clubA ? lastMeeting.teamA.players : lastMeeting.teamB.players;
-    const lastSideB = getClub(lastMeeting.teamA.name)===clubB ? lastMeeting.teamA.players : lastMeeting.teamB.players;
+  const fixtureGrade = getAgeGroupLabel(f.teamA) !== 'Other' ? getAgeGroupLabel(f.teamA) : getAgeGroupLabel(f.teamB);
+  const gameGrade = g => getAgeGroupLabel(g.teamA.name) !== 'Other' ? getAgeGroupLabel(g.teamA.name) : getAgeGroupLabel(g.teamB.name);
+  const clubsMatch = g => {
+    const cA=getClub(g.teamA.name), cB=getClub(g.teamB.name);
+    return (cA===clubA && cB===clubB) || (cA===clubB && cB===clubA);
+  };
+  // Roster overlap between the CURRENT squads and whichever meeting is being checked — same
+  // calculation whether the candidate is same-grade or cross-grade, so the two are judged alike.
+  const continuityFor = meeting => {
+    if(!meeting || !teamAHist || !teamBHist) return { pctA:null, pctB:null };
+    const lastSideA = getClub(meeting.teamA.name)===clubA ? meeting.teamA.players : meeting.teamB.players;
+    const lastSideB = getClub(meeting.teamA.name)===clubB ? meeting.teamA.players : meeting.teamB.players;
     const lastRosterA = lastSideA.map(r=>r.name.toLowerCase().trim());
     const lastRosterB = lastSideB.map(r=>r.name.toLowerCase().trim());
     const currentRosterA = getTeamScopedRoster(playerList, teamAHist).map(p=>p.name.toLowerCase().trim());
     const currentRosterB = getTeamScopedRoster(playerList, teamBHist).map(p=>p.name.toLowerCase().trim());
     const overlapPct = (current, last) => last.length===0 ? null : Math.round((current.filter(n=>last.includes(n)).length/last.length)*100);
-    const pctA = overlapPct(currentRosterA, lastRosterA);
-    const pctB = overlapPct(currentRosterB, lastRosterB);
+    return { pctA: overlapPct(currentRosterA, lastRosterA), pctB: overlapPct(currentRosterB, lastRosterB) };
+  };
+
+  // Primary: the most recent meeting at the SAME age group as this fixture — always shown,
+  // whatever its own overlap turns out to be, so continuity is never hidden just because turnover
+  // happens to be high.
+  const sameGradeMeeting = games.filter(g=> clubsMatch(g) && gameGrade(g)===fixtureGrade)
+    .sort((a,b)=>extractGameDate(b)-extractGameDate(a))[0];
+  const sameGradeContinuity = continuityFor(sameGradeMeeting);
+
+  // Secondary: a MORE RECENT cross-grade meeting, shown alongside (never instead of) the primary
+  // one, and only when its own roster overlap clears the same 35% bar used to link cohorts in the
+  // first place — a coincidental shared surname wouldn't clear that bar, but a genuine dual-grade
+  // player showing up on both rosters would.
+  const SQUAD_OVERLAP_THRESHOLD = 35;
+  const inCohort = (teamName, year, cohort) => !!cohort && cohort.has(teamName + '__' + (year || 'Unknown'));
+  let crossGradeMeeting = null, crossGradeContinuity = { pctA:null, pctB:null };
+  if(cohortA && cohortB){
+    const candidate = games.filter(g=>{
+      const yr = getGameYear(g);
+      const straight = inCohort(g.teamA.name, yr, cohortA) && inCohort(g.teamB.name, yr, cohortB);
+      const swapped  = inCohort(g.teamA.name, yr, cohortB) && inCohort(g.teamB.name, yr, cohortA);
+      return (straight || swapped) && gameGrade(g) !== fixtureGrade;
+    }).sort((a,b)=>extractGameDate(b)-extractGameDate(a))[0];
+    if(candidate && (!sameGradeMeeting || extractGameDate(candidate) > extractGameDate(sameGradeMeeting))){
+      const c = continuityFor(candidate);
+      if((c.pctA!=null && c.pctA>=SQUAD_OVERLAP_THRESHOLD) || (c.pctB!=null && c.pctB>=SQUAD_OVERLAP_THRESHOLD)){
+        crossGradeMeeting = candidate; crossGradeContinuity = c;
+      }
+    }
+  }
+
+  let rosterContinuityHtml;
+  if(!sameGradeMeeting){
+    rosterContinuityHtml = '<div class="empty">No previous same-grade meeting on record to compare rosters against.</div>';
+  } else {
+    const { pctA, pctB } = sameGradeContinuity;
     rosterContinuityHtml = `
       <div class="card-grid">
         <div class="stat-card" title="How many of last meeting's players are still showing up for this team recently"><div class="label">${f.teamA} continuity</div><div class="value">${pctA!=null?pctA+'%':'—'}</div></div>
         <div class="stat-card" title="How many of last meeting's players are still showing up for this team recently"><div class="label">${f.teamB} continuity</div><div class="value">${pctB!=null?pctB+'%':'—'}</div></div>
       </div>
-      <div class="hint" style="margin-bottom:16px;">Compared against ${lastMeeting.dateTime} (${lastMeeting.teamA.name} vs ${lastMeeting.teamB.name}).</div>`;
+      <div class="hint" style="margin-bottom:${crossGradeMeeting?'6':'16'}px;">Compared against ${sameGradeMeeting.dateTime} (${sameGradeMeeting.teamA.name} vs ${sameGradeMeeting.teamB.name}).</div>`;
+    if(crossGradeMeeting){
+      const bestPct = Math.max(crossGradeContinuity.pctA ?? 0, crossGradeContinuity.pctB ?? 0);
+      rosterContinuityHtml += `
+      <div class="hint" style="margin-bottom:16px;" title="A more recent game exists between these clubs at a different age group, and enough of the current squads also appear on its rosters (${bestPct}%) that it's worth knowing about — common at the U18/Reserves boundary, where a junior sometimes plays up to the open-age side.">Also played more recently, with a shared squad: ${crossGradeMeeting.dateTime} (${crossGradeMeeting.teamA.name} vs ${crossGradeMeeting.teamB.name}) — ${bestPct}% overlap.</div>`;
+    }
   }
 
   const trendTable = (club, trend) => trend.length===0 ? '<div class="empty">No prior-season data.</div>' : `
@@ -6476,7 +6706,7 @@ function renderTopPlayers(){
     if(exclude!=='div' && curDiv!=='ALL' && !p.divisions.includes(curDiv)) return false;
     return true;
   };
-  const ageGroups = [...new Set(playerList.filter(p=>matches(p,'age')).map(p=>p.ageGroup))].sort();
+  const ageGroups = [...new Set(playerList.filter(p=>matches(p,'age')).map(p=>p.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const divisions = [...new Set(playerList.filter(p=>matches(p,'div')).flatMap(p=>p.divisions))].sort();
 
   wrap.innerHTML = `
@@ -6695,27 +6925,10 @@ function renderPlayerComparisonResult(playerList){
     return rec;
   }, { wins:0, losses:0, draws:0 });
 
-  // Comparison pool: players in the same age group, qualified by games played — the threshold
-  // adapts to how far the season has progressed instead of a flat "3+" that would leave an
-  // empty pool in the season's first couple of rounds. It's whatever the most games anyone in
-  // the age group has played is, capped at 3 once the season's far enough along.
-  const ageGroupPlayers = playerList.filter(p=> p.ageGroup===pA.ageGroup || p.ageGroup===pB.ageGroup);
-  const maxGamesInAgeGroup = ageGroupPlayers.reduce((m,p)=> Math.max(m, p.gamesPlayed||0), 0);
-  const minGamesThreshold = Math.min(3, maxGamesInAgeGroup) || 1;
-  const pool = ageGroupPlayers.filter(p=> p.gamesPlayed >= minGamesThreshold);
-  const percentileOf = (player, key) => {
-    const vals = pool.map(p=>p[key]||0);
-    if(!vals.length) return 0;
-    const below = vals.filter(v=> v < (player[key]||0)).length;
-    return Math.round((below / vals.length) * 100);
-  };
-  // Where the player's actual value sits between 0 and the league leader — unlike percentile
-  // (rank among players), this reflects real distance: two players tied near the top but far
-  // above a long tail of low scorers still show close together, not spread across the bar.
-  const valuePositionOf = (player, key, poolMax) => {
-    if(!poolMax) return 0;
-    return Math.max(0, Math.min(100, ((player[key]||0) / poolMax) * 100));
-  };
+  // Comparison pool: players in the same age group(s), qualified by games played. Shared with
+  // the single-player page's own League Context via buildLeagueContextPool, so the two stay
+  // consistent rather than drifting apart as separate copies of the same logic.
+  const { pool, minGamesThreshold, percentileOf, valuePositionOf } = buildLeagueContextPool(playerList, [pA.ageGroup, pB.ageGroup]);
 
   const STAT_GROUPS = [
     ['Scoring', [
@@ -6749,10 +6962,7 @@ function renderPlayerComparisonResult(playerList){
       </div>`;
   };
 
-  const CONTEXT_STATS = [
-    ['Total goals','totalGoals'], ['Goals per game','avgGoals'],
-    ['Best points','weightedBest'], ['Form score','formScore'], ['MVP points','mvpScore']
-  ];
+  const CONTEXT_STATS = LEAGUE_CONTEXT_STATS; // shared with the single-player page's own version
 
   el.innerHTML = `
     <div class="cmp-tape">
@@ -6845,15 +7055,38 @@ function renderPlayerComparisonResult(playerList){
 
     <h3 style="font-size:14px;margin-top:26px;">League context</h3>
     <p class="hint">Where each sits against every player in ${pA.ageGroup===pB.ageGroup ? pA.ageGroup : 'these age groups'} with at least ${minGamesThreshold} game${minGamesThreshold!==1?'s':''} played — comparing two players tells you who's ahead, not whether either is strong overall.</p>
+    ${(()=>{
+      // A one-line take before the detail: who leads on more of these tracked stats. Ties (equal
+      // value, or equal percentile when the raw values differ but land in the same rank) count
+      // toward neither side, so this can't imply a lead that isn't really there.
+      let aAhead = 0, bAhead = 0;
+      CONTEXT_STATS.forEach(([,key])=>{
+        const av = pA[key]||0, bv = pB[key]||0;
+        if(av > bv) aAhead++; else if(bv > av) bAhead++;
+      });
+      if(aAhead===bAhead) return `<p class="hint" style="color:var(--muted);">Even across these ${CONTEXT_STATS.length} tracked stats — ${aAhead} apiece${CONTEXT_STATS.length-aAhead-bAhead>0 ? `, ${CONTEXT_STATS.length-aAhead-bAhead} tied`:''}.</p>`;
+      const leader = aAhead > bAhead ? pA : pB, leadCount = Math.max(aAhead,bAhead), leadColor = aAhead>bAhead?'var(--green)':'var(--blue)';
+      return `<p class="hint"><strong style="color:${leadColor};">${leader.name}</strong> ahead in ${leadCount} of ${CONTEXT_STATS.length} tracked stats.</p>`;
+    })()}
     ${CONTEXT_STATS.map(([label,key])=>{
       const poolMax = pool.reduce((m,p)=> Math.max(m, p[key]||0), 0);
       const pa = valuePositionOf(pA,key,poolMax), pb = valuePositionOf(pB,key,poolMax);
       const paPct = percentileOf(pA,key), pbPct = percentileOf(pB,key);
       return `<div class="ctx-row">
         <div class="ctx-label">${label}</div>
+        <div class="ctx-readout">
+          <span style="color:var(--green);">${pA.name}: ${pA[key]} <span class="ctx-pct">(${paPct}th pct.)</span></span>
+          <span style="color:var(--blue);">${pB.name}: ${pB[key]} <span class="ctx-pct">(${pbPct}th pct.)</span></span>
+        </div>
         <div class="ctx-track">
-          <div class="ctx-marker" style="left:${pa}%;background:var(--green);" title="${pA.name}: ${pA[key]} — ahead of ${paPct}% of players"></div>
-          <div class="ctx-marker" style="left:${pb}%;background:var(--blue);" title="${pB.name}: ${pB[key]} — ahead of ${pbPct}% of players"></div>
+          <div class="ctx-marker-wrap a" style="left:${pa}%;">
+            <div class="ctx-marker-tag" style="color:var(--green);">${pA.name}</div>
+            <div class="ctx-marker" style="background:var(--green);"></div>
+          </div>
+          <div class="ctx-marker-wrap b" style="left:${pb}%;">
+            <div class="ctx-marker" style="background:var(--blue);"></div>
+            <div class="ctx-marker-tag" style="color:var(--blue);">${pB.name}</div>
+          </div>
         </div>
         <div class="ctx-scale"><span>0</span><span>League leader: ${poolMax}</span></div>
       </div>`;
