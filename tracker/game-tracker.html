@@ -656,6 +656,21 @@ let clubNicknames = {
   "geelong west wilkie": "Geelong West Giants"
 }; // nickname word(s) -> canonical club, for names that share no real words (e.g. "Ammos" = "Amateur")
 let currentPlayerDetailKey = null;
+// Set right before opening a player's profile from somewhere other than the plain Players list —
+// Lapsed Players, Check player links, or another player's own Player Links section — so "Back"
+// returns to that exact view (filters and all) instead of always landing on the generic list.
+// Cleared the moment it's used, so a later plain visit to Players doesn't get redirected somewhere
+// stale.
+let playerDetailReturnTo = null;
+function goBackFromPlayerDetail(){
+  if(playerDetailReturnTo){
+    const fn = playerDetailReturnTo;
+    playerDetailReturnTo = null;
+    fn();
+  } else {
+    backToPlayers();
+  }
+}
 let currentGameDetailId = null;
 let currentTeamDetailKey = null;
 // 'season' = just this team-season; 'squad' = this group of players wherever they've appeared.
@@ -834,18 +849,18 @@ async function loadGames(){
         parts.forEach(part=>{
           try{ const arr = JSON.parse(part); if(Array.isArray(arr)) merged.push(...arr); }catch(e){}
         });
-        games = merged;
+        games = stripJunkFixtures(merged);
         return;
       }
       let payload = parts.join('');
       if(info.encoding === 'gzip-b64') payload = await base64ToUngzip(payload);
-      games = payload ? JSON.parse(payload) : [];
+      games = stripJunkFixtures(payload ? JSON.parse(payload) : []);
       return;
     }
   }catch(e){ /* fall through to the legacy layout */ }
   try{
     const res = await window.storage.get(STORAGE_KEY, false);
-    games = res ? JSON.parse(res.value) : [];
+    games = stripJunkFixtures(res ? JSON.parse(res.value) : []);
   }catch(e){
     games = [];
   }
@@ -855,6 +870,19 @@ async function loadGames(){
 // against duplicate or missing ids — a restore from an older export, or two games merged from
 // different sources, could otherwise collide. Returns whether anything changed, since every call
 // site uses that to decide whether a save is needed.
+// PlayHQ itself seeds a dummy test fixture into at least one grading round ("AFL BARWON TEST 1"
+// vs "AFL BARWON TEST 2" — 0-0, no venue, no players). It isn't a real club, so there's nothing
+// to fix in Manage Clubs; it just needs to never be treated as a game. Applied wherever games
+// enter the app (load, restore, merge) so a future re-scrape can't quietly bring it back.
+function isJunkTestFixture(g){
+  const re = /^AFL\s+BARWON\s+TEST\b/i;
+  return !!(g && g.teamA && g.teamB && (re.test(g.teamA.name||'') || re.test(g.teamB.name||'')));
+}
+function stripJunkFixtures(list){
+  if(!Array.isArray(list)) return list;
+  return list.filter(g=> !isJunkTestFixture(g));
+}
+
 function ensureUniqueGameIds(){
   const seen = new Set();
   let changed = false;
@@ -1095,7 +1123,7 @@ function buildPendingRestore(payload, sourceLabel){
     label: `Restore ${gameCount} game${gameCount!==1?'s':''} from this ${sourceLabel}?`,
     detail: `This ${sourceLabel} has ${gameCount} game(s) and ${extraCount} extra item(s) (fixtures, byes, aliases, club settings).`,
     apply: async ()=>{
-      games = Array.isArray(payload.games) ? payload.games : [];
+      games = stripJunkFixtures(Array.isArray(payload.games) ? payload.games : []);
       ensureUniqueGameIds();
       fixtures = payloadFixtures;
       byes = payloadByes;
@@ -1171,7 +1199,9 @@ function buildPendingRestore(payload, sourceLabel){
         return merged;
       };
 
-      games = [...keptExisting, ...payloadGamesList.map(withCarriedOverFields)];
+      const mergedGames = [...keptExisting, ...payloadGamesList.map(withCarriedOverFields)];
+      games = stripJunkFixtures(mergedGames);
+      const junkRemoved = mergedGames.length - games.length;
       ensureUniqueGameIds();
       const addedCount = payloadGamesList.length - replacedCount;
 
@@ -1200,7 +1230,7 @@ function buildPendingRestore(payload, sourceLabel){
       }catch(e){
         showToast('Merged in memory, but saving to storage failed — reload with care');
       }
-      showToast(`Merged: ${replacedCount} game(s) updated, ${addedCount} new game(s) added, ${extraCount} extra item(s) merged${preservedCount ? ` — kept existing detail (quarter scores/pastes/predictions) on ${preservedCount} game(s)` : ''}`);
+      showToast(`Merged: ${replacedCount} game(s) updated, ${addedCount} new game(s) added, ${extraCount} extra item(s) merged${preservedCount ? ` — kept existing detail (quarter scores/pastes/predictions) on ${preservedCount} game(s)` : ''}${junkRemoved ? ` — ${junkRemoved} junk test fixture(s) filtered out` : ''}`);
       renderAll();
     }
   };
@@ -2657,8 +2687,12 @@ function renderRetroPredictionCheck(){
 //
 // Three things this deliberately guards against, each of which produced wrong answers when tested
 // against the real data:
-//  1. Shared names. "jack kelly" appears at six clubs and is obviously several different boys, so
-//     any name seen at more than two clubs is dropped rather than read as a serial mover.
+//  1. Shared names. "jack kelly" appears at six clubs and is obviously several different boys.
+//     Rather than capping how many clubs a name can ever touch (which also silently threw out a
+//     real player's entire history the moment they moved twice), each individual hop is checked
+//     on its own: the club must actually differ, and the grade jump between those two seasons has
+//     to be one a single body could physically make (see the age-progression check below) — a
+//     coincidental shared name is what fails that check, not a genuine multi-club career.
 //  2. Merged teams. Only ~0.5% of players in a combined side (e.g. "Newcomb / Belmont Power
 //     Lions") carry the 'sp' tag that says which half they belong to; everyone else defaults to
 //     the first-named club, which silently counted every Belmont boy as a Newcomb player. A
@@ -2668,90 +2702,106 @@ function renderRetroPredictionCheck(){
 //     relative level (0 = top division of that grade-season, 1 = bottom) instead.
 const AGE_GROUP_ORDER = { 'U8':0,'U10':1,'U12':2,'U14':3,'U16':4,'U18':5,'Reserves':6,'Seniors':6 };
 
+// Shared groundwork for anything that needs "what did every player do, season by season" —
+// currently Player Movement and the Lapsed Players lookup below. Kept as one function so the
+// two features can't quietly drift into different definitions of a player's trail or division.
+function buildMovementContext(gamesList){
+  // How many divisions each grade-season actually runs, so a division can be expressed as a
+  // relative level rather than a bare number.
+  const maxDiv = {};
+  gamesList.forEach(g=>{
+    const yr = getGameYear(g); if(!yr) return;
+    const rank = divisionRank(getDivision(g)); if(rank==null) return;
+    const grade = getAgeGroupLabel(g.teamA.name) !== 'Other' ? getAgeGroupLabel(g.teamA.name) : getAgeGroupLabel(g.teamB.name);
+    const k = grade + '||' + yr;
+    if(maxDiv[k]==null || rank > maxDiv[k]) maxDiv[k] = rank;
+  });
+  // Some grades simply aren't graded into divisions — U12 and below are unstreamed, and senior
+  // and reserves football runs as a single tier. A move into or out of one of those has no
+  // higher-or-lower to report, which is different from a division existing but being unknown.
+  const gradeHasDivisions = (grade, yr) => maxDiv[grade + '||' + yr] != null;
+
+  // Which divisions each club fields in each grade and season. This is the yardstick a move is
+  // judged against: the question worth answering isn't "was their old division a bigger number"
+  // but "are they now playing higher than they would be had they stayed?" — so the comparison is
+  // against the old club's side in the SAME grade and the SAME season they've moved into. Both
+  // sides then sit in one competition, which makes the raw division numbers directly comparable
+  // and sidesteps the fact that grades run different numbers of divisions. Merged teams are
+  // skipped, since their club can't be pinned down.
+  const clubGradeDivisions = {};
+  gamesList.forEach(g=>{
+    const yr = getGameYear(g); if(!yr) return;
+    const rank = divisionRank(getDivision(g)); if(rank==null) return;
+    ['teamA','teamB'].forEach(side=>{
+      const t = g[side];
+      if(isMergedTeam(t.name)) return;
+      const k = getClub(t.name) + '||' + getAgeGroupLabel(t.name) + '||' + yr;
+      (clubGradeDivisions[k] = clubGradeDivisions[k] || new Set()).add(rank);
+    });
+  });
+
+  // name -> year -> what we know about that player's season
+  const trail = {};
+  gamesList.forEach(g=>{
+    const yr = getGameYear(g); if(!yr) return;
+    const rank = divisionRank(getDivision(g));
+    ['teamA','teamB'].forEach(side=>{
+      const t = g[side];
+      const merged = isMergedTeam(t.name);
+      const grade = getAgeGroupLabel(t.name);
+      (t.players||[]).forEach(row=>{
+        const raw = (row.name||'').trim();
+        if(isPlaceholderPlayerName(raw)) return;
+        const nm = raw.toLowerCase();
+        const byYear = (trail[nm] = trail[nm] || {});
+        const e = (byYear[yr] = byYear[yr] || { clubs:new Set(), teams:new Set(), grades:new Set(), divGames:{}, goals:0, bestCount:0, display:raw, ambiguous:false });
+        e.teams.add(t.name); e.grades.add(grade);
+        e.goals += Number(row.goals)||0;
+        if(row.isBest) e.bestCount++;
+        // Count games per division rather than just noting which ones were played: a player who
+        // swaps between a club's sides mid-season has a division they MOSTLY play in, and that's
+        // the one worth reporting.
+        if(rank != null) e.divGames[rank] = (e.divGames[rank] || 0) + 1;
+        if(merged && !(row.tag||'').toLowerCase().includes('sp')){
+          e.ambiguous = true;      // can't tell which half of the merge this player belongs to
+        } else {
+          e.clubs.add(playerClubForTeam(t.name, row.tag));
+        }
+      });
+    });
+  });
+
+  const gradeIdx = e => {
+    const list = [...e.grades].map(a=>AGE_GROUP_ORDER[a]).filter(v=>v!=null);
+    return list.length ? Math.min(...list) : null;
+  };
+  // Divisions this player turned out in that season, most-played first. Ties go to the stronger
+  // (lower-numbered) division. The first entry is treated as "the division they play in".
+  const divisionsOf = e => Object.keys(e.divGames)
+    .map(r=>({ rank:Number(r), games:e.divGames[r] }))
+    .sort((a,b)=> b.games - a.games || a.rank - b.rank);
+
+  return { trail, gradeIdx, divisionsOf, gradeHasDivisions, clubGradeDivisions };
+}
+
 function computePlayerMovement(){
   return withAllDataFilters(()=>{
     const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
-
-    // How many divisions each grade-season actually runs, so a division can be expressed as a
-    // relative level rather than a bare number.
-    const maxDiv = {};
-    gamesList.forEach(g=>{
-      const yr = getGameYear(g); if(!yr) return;
-      const rank = divisionRank(getDivision(g)); if(rank==null) return;
-      const grade = getAgeGroupLabel(g.teamA.name) !== 'Other' ? getAgeGroupLabel(g.teamA.name) : getAgeGroupLabel(g.teamB.name);
-      const k = grade + '||' + yr;
-      if(maxDiv[k]==null || rank > maxDiv[k]) maxDiv[k] = rank;
-    });
-    // Some grades simply aren't graded into divisions — U12 and below are unstreamed, and senior
-    // and reserves football runs as a single tier. A move into or out of one of those has no
-    // higher-or-lower to report, which is different from a division existing but being unknown.
-    const gradeHasDivisions = (grade, yr) => maxDiv[grade + '||' + yr] != null;
-
-    // Which divisions each club fields in each grade and season. This is the yardstick a move is
-    // judged against: the question worth answering isn't "was their old division a bigger number"
-    // but "are they now playing higher than they would be had they stayed?" — so the comparison is
-    // against the old club's side in the SAME grade and the SAME season they've moved into. Both
-    // sides then sit in one competition, which makes the raw division numbers directly comparable
-    // and sidesteps the fact that grades run different numbers of divisions. Merged teams are
-    // skipped, since their club can't be pinned down.
-    const clubGradeDivisions = {};
-    gamesList.forEach(g=>{
-      const yr = getGameYear(g); if(!yr) return;
-      const rank = divisionRank(getDivision(g)); if(rank==null) return;
-      ['teamA','teamB'].forEach(side=>{
-        const t = g[side];
-        if(isMergedTeam(t.name)) return;
-        const k = getClub(t.name) + '||' + getAgeGroupLabel(t.name) + '||' + yr;
-        (clubGradeDivisions[k] = clubGradeDivisions[k] || new Set()).add(rank);
-      });
-    });
-
-    // name -> year -> what we know about that player's season
-    const trail = {};
-    gamesList.forEach(g=>{
-      const yr = getGameYear(g); if(!yr) return;
-      const rank = divisionRank(getDivision(g));
-      ['teamA','teamB'].forEach(side=>{
-        const t = g[side];
-        const merged = isMergedTeam(t.name);
-        const grade = getAgeGroupLabel(t.name);
-        (t.players||[]).forEach(row=>{
-          const raw = (row.name||'').trim();
-          if(isPlaceholderPlayerName(raw)) return;
-          const nm = raw.toLowerCase();
-          const byYear = (trail[nm] = trail[nm] || {});
-          const e = (byYear[yr] = byYear[yr] || { clubs:new Set(), teams:new Set(), grades:new Set(), divGames:{}, display:raw, ambiguous:false });
-          e.teams.add(t.name); e.grades.add(grade);
-          // Count games per division rather than just noting which ones were played: a player who
-          // swaps between a club's sides mid-season has a division they MOSTLY play in, and that's
-          // the one worth reporting.
-          if(rank != null) e.divGames[rank] = (e.divGames[rank] || 0) + 1;
-          if(merged && !(row.tag||'').toLowerCase().includes('sp')){
-            e.ambiguous = true;      // can't tell which half of the merge this player belongs to
-          } else {
-            e.clubs.add(playerClubForTeam(t.name, row.tag));
-          }
-        });
-      });
-    });
-
-    const gradeIdx = e => {
-      const list = [...e.grades].map(a=>AGE_GROUP_ORDER[a]).filter(v=>v!=null);
-      return list.length ? Math.min(...list) : null;
-    };
-    // Divisions this player turned out in that season, most-played first. Ties go to the stronger
-    // (lower-numbered) division. The first entry is treated as "the division they play in".
-    const divisionsOf = e => Object.keys(e.divGames)
-      .map(r=>({ rank:Number(r), games:e.divGames[r] }))
-      .sort((a,b)=> b.games - a.games || a.rank - b.rank);
+    const { trail, gradeIdx, divisionsOf, gradeHasDivisions, clubGradeDivisions } = buildMovementContext(gamesList);
     const moves = [];
     Object.keys(trail).forEach(nm=>{
       const byYear = trail[nm];
       const years = Object.keys(byYear).map(Number).sort((a,b)=>a-b);
       // Seasons where we can actually name the club with confidence.
       const solid = years.filter(y=> !byYear[y].ambiguous && byYear[y].clubs.size === 1);
-      const clubsSeen = new Set(solid.map(y=>[...byYear[y].clubs][0]));
-      if(clubsSeen.size !== 2) return;   // 0-1 = never moved; 3+ = almost certainly a shared name
+      // Walk the chronological chain and emit a move at every point the club changes. This used
+      // to require the whole career to touch EXACTLY two clubs, on the theory that 3+ meant a
+      // shared name rather than one real person — but a genuine player can move more than once,
+      // and that cap silently dropped their entire history, every hop, rather than just the
+      // implausible one. The per-hop checks just below (club must actually differ, and the grade
+      // jump has to be one a single body could physically make between those two seasons) are
+      // the real guard against a coincidental shared name — they reject an individual bad link
+      // without throwing out a real multi-club career along with it.
       for(let i=0;i<solid.length-1;i++){
         const y1 = solid[i], y2 = solid[i+1];
         const e1 = byYear[y1], e2 = byYear[y2];
@@ -2808,6 +2858,133 @@ function computePlayerMovement(){
       });
     };
     return { moves, trailFor };
+  });
+}
+
+// Players who turned out in a given age group / season / division, but haven't appeared ANYWHERE
+// on record since — not scoped to their old club, deliberately: the point isn't "did they leave
+// this club" (Player Movement already answers that), it's "have they stopped playing at all,
+// anywhere in the competition" — a genuine recruiting lead, not just a departure.
+//
+// "Still playing" is checked by bare name only, ignoring club, on purpose: the question here is
+// just existence, not identity precision. If a same-named person elsewhere in the competition
+// causes a false "still playing" read, the failure is a lapsed player quietly left off the list —
+// safe by construction, unlike Player Movement's move-detection where a bad match would actively
+// mislabel someone. Erring toward under-counting suits a recruiting list; erring toward over-
+// counting would mean chasing people who never actually stopped.
+function computeLapsedPlayers({ ageGroups, year, divisionRank: wantRank }){
+  return withAllDataFilters(()=>{
+    const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    const { trail, divisionsOf } = buildMovementContext(gamesList);
+
+    const latestYear = gamesList.reduce((m,g)=>{ const y = getGameYear(g); return y && y > m ? y : m; }, 0);
+    const stillPlaying = new Set();
+    if(latestYear){
+      gamesList.forEach(g=>{
+        if(getGameYear(g) !== latestYear) return;
+        ['teamA','teamB'].forEach(side=>{
+          (g[side].players||[]).forEach(row=>{
+            const raw = (row.name||'').trim();
+            if(!isPlaceholderPlayerName(raw)) stillPlaying.add(raw.toLowerCase());
+          });
+        });
+      });
+    }
+
+    const results = [];
+    Object.keys(trail).forEach(nm=>{
+      const e = trail[nm] && trail[nm][year];
+      if(!e || e.ambiguous || e.clubs.size !== 1) return;   // need a confident club for that season
+      const matchedGrades = [...e.grades].filter(g=> ageGroups.includes(g));
+      if(!matchedGrades.length) return;
+      const divs = divisionsOf(e);
+      if(!divs.length) return;                                // no graded division this season at all
+      if(wantRank != null && divs[0].rank !== wantRank) return;
+      if(year === latestYear) return;                        // "lapsed" only makes sense looking back
+      if(stillPlaying.has(nm)) return;                        // showed up somewhere this latest year
+      results.push({
+        name: e.display, club: [...e.clubs][0], teams: [...e.teams],
+        playerKey: resolvePlayerKey([...e.clubs][0] + '||' + nm),
+        grade: matchedGrades.sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b)).join('/'),
+        divisionRank: divs[0].rank, divisionLabel: movementDivisionLabel(divs, false),
+        games: divs.reduce((s,d)=>s+d.games,0), goals: e.goals, bestCount: e.bestCount,
+        latestYear
+      });
+    });
+    results.sort((a,b)=> b.games - a.games || b.goals - a.goals);
+    return { results, latestYear };
+  });
+}
+
+// "Check player links" — for two clubs, finds every player who has genuinely shared a roster with
+// both via a MERGED team (e.g. "Newcomb / Belmont Power Lions"). That's the only mechanism in this
+// data where two different clubs' players end up on the literal same team: normal fixtures never
+// overlap clubs, so an external connection only ever exists through a season where the two
+// combined. Everyone found here has real personal history with people your club currently has (or
+// once had) — a natural opening for a recruiting conversation, not a guess at who might know whom.
+//
+// Deliberately does NOT try to find any wider "friend of a friend" network beyond that — a merged
+// roster is the only link in the data that's actually verifiable; anything looser would be a guess
+// dressed up as a finding.
+function computePlayerLinks({ clubA, clubB }){
+  return withAllDataFilters(()=>{
+    const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    const wanted = [clubA, clubB].slice().sort().join('||');
+
+    // Every merged team-season combining exactly these two clubs, and who played on it.
+    const linkedSeasons = {};
+    gamesList.forEach(g=>{
+      const yr = getGameYear(g); if(!yr) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side];
+        if(!isMergedTeam(t.name)) return;
+        const clubs = getAllClubsForTeam(t.name);
+        if(clubs.length !== 2 || clubs.slice().sort().join('||') !== wanted) return;
+        const key = t.name + '__' + yr;
+        const entry = (linkedSeasons[key] = linkedSeasons[key] || { year:yr, ageGroup:getAgeGroupLabel(t.name), team:t.name, players:new Map() });
+        (t.players||[]).forEach(row=>{
+          const raw = (row.name||'').trim();
+          if(isPlaceholderPlayerName(raw)) return;
+          const nm = raw.toLowerCase();
+          const p = entry.players.get(nm) || { display:raw, games:0, goals:0, best:0 };
+          p.games++; p.goals += Number(row.goals)||0; if(row.isBest) p.best++;
+          entry.players.set(nm, p);
+        });
+      });
+    });
+    const seasons = Object.values(linkedSeasons).sort((a,b)=> b.year - a.year);
+
+    // Where each linked player is these days — their FULL history across every club and game on
+    // file, not just their time on the shared roster, using the same trail everything else uses.
+    const { trail } = buildMovementContext(gamesList);
+    const latestYear = gamesList.reduce((m,g)=>{ const y=getGameYear(g); return y && y>m ? y : m; }, 0);
+
+    const byPlayer = new Map();
+    seasons.forEach(s=>{
+      s.players.forEach((p, nm)=>{
+        const existing = byPlayer.get(nm) || { display:p.display, linkedVia:[], games:0, goals:0, best:0 };
+        existing.linkedVia.push({ year:s.year, ageGroup:s.ageGroup, team:s.team });
+        existing.games += p.games; existing.goals += p.goals; existing.best += p.best;
+        byPlayer.set(nm, existing);
+      });
+    });
+
+    const results = [...byPlayer.entries()].map(([nm, info])=>{
+      const byYear = trail[nm] || {};
+      const years = Object.keys(byYear).map(Number).sort((a,b)=>b-a);
+      const latest = years.length ? byYear[years[0]] : null;
+      const confidentClub = latest && !latest.ambiguous && latest.clubs.size===1 ? [...latest.clubs][0] : null;
+      return {
+        name: info.display, games: info.games, goals: info.goals, best: info.best,
+        linkedVia: info.linkedVia.sort((a,b)=>b.year-a.year),
+        mostRecentYear: years[0] || null,
+        currentClub: confidentClub, currentTeams: latest ? [...latest.teams] : [],
+        playerKey: confidentClub ? resolvePlayerKey(confidentClub + '||' + nm) : null,
+        status: !years.length ? 'unknown' : (years[0] === latestYear ? 'active' : 'lapsed')
+      };
+    });
+    results.sort((a,b)=> (b.mostRecentYear||0) - (a.mostRecentYear||0) || b.games - a.games);
+    return { results, seasons, latestYear };
   });
 }
 
@@ -2906,7 +3083,7 @@ async function renderStorageCheck(){
 }
 
 // ---------- Player movement panel ----------
-let movementFilters = { mode:'league', club:'ALL', transition:'ALL', grade:'ALL', direction:'ALL', includeGaps:false, sort:'grade', chart:'agegroup' };
+let movementFilters = { mode:'league', club:'ALL', transition:'ALL', grade:'ALL', direction:'ALL', includeGaps:false, sort:'grade', chart:'agegroup', showAllClubs:false, lapsedAgeGroup:null, lapsedYear:null, lapsedDivision:null, lapsedSortKey:'games', lapsedSortDir:'desc', linksClubA:null, linksClubB:null };
 // Junior football is graded U12 up to U18; Reserves and Seniors are the open-age tiers. Used by
 // the "All junior ages" filter, which is just every age group minus those two.
 function isJuniorGrade(g){ return /^U\d{1,2}$/.test(g || ''); }
@@ -2936,8 +3113,199 @@ function backToPlayersFromMovement(){
   document.getElementById('panel-players').classList.add('active');
 }
 
+function getLapsedPlayerFilterOptions(){
+  return withAllDataFilters(()=>{
+    const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    const years = [...new Set(gamesList.map(getGameYear).filter(Boolean))].sort((a,b)=>b-a);
+    const latestYear = years[0] || null;
+    const ageGroups = [...new Set(gamesList.flatMap(g=>[getAgeGroupLabel(g.teamA.name), getAgeGroupLabel(g.teamB.name)]).filter(a=>a!=='Other'))]
+      .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+    const divsByKey = {};
+    gamesList.forEach(g=>{
+      const yr = getGameYear(g); if(!yr) return;
+      const rank = divisionRank(getDivision(g)); if(rank==null) return;
+      const grade = getAgeGroupLabel(g.teamA.name)!=='Other' ? getAgeGroupLabel(g.teamA.name) : getAgeGroupLabel(g.teamB.name);
+      const k = grade+'||'+yr;
+      (divsByKey[k] = divsByKey[k] || new Set()).add(rank);
+    });
+    return { years, latestYear, ageGroups, divsByKey };
+  });
+}
+
+function renderLapsedPlayers(wrap){
+  const f = movementFilters;
+  const { years, latestYear, ageGroups, divsByKey } = getLapsedPlayerFilterOptions();
+
+  if(f.lapsedAgeGroup == null || !(ageGroups.includes(f.lapsedAgeGroup) || ['ALL','JUNIORS','ADULT'].includes(f.lapsedAgeGroup))){
+    f.lapsedAgeGroup = ageGroups[0] || null;
+  }
+  const pastYears = years.filter(y=>y!==latestYear);
+  if(f.lapsedYear == null || !pastYears.includes(f.lapsedYear)) f.lapsedYear = pastYears[0] || null;
+
+  // Which actual grades are in scope for this selection — a preset expands to every grade it
+  // covers, so results and division options are the union across all of them, not just one.
+  const scopeGrades =
+    f.lapsedAgeGroup === 'ALL' ? ageGroups :
+    f.lapsedAgeGroup === 'JUNIORS' ? ageGroups.filter(isJuniorGrade) :
+    f.lapsedAgeGroup === 'ADULT' ? ageGroups.filter(g=>!isJuniorGrade(g)) :
+    [f.lapsedAgeGroup];
+
+  const divisions = [...new Set(scopeGrades.flatMap(g=>[...(divsByKey[g+'||'+f.lapsedYear] || [])]))].sort((a,b)=>a-b);
+  if(f.lapsedDivision == null || (f.lapsedDivision !== 'ALL' && !divisions.includes(f.lapsedDivision))){
+    f.lapsedDivision = divisions.length ? divisions[0] : null;
+  }
+
+  const canRun = scopeGrades.length && f.lapsedYear && f.lapsedDivision != null;
+  const wantRank = f.lapsedDivision === 'ALL' ? null : f.lapsedDivision;
+  const { results } = canRun ? computeLapsedPlayers({ ageGroups:scopeGrades, year:f.lapsedYear, divisionRank:wantRank }) : { results: [] };
+  const spansMultipleGrades = scopeGrades.length > 1;
+
+  // Columns a header click can sort by, with a sensible default direction the first time each is
+  // clicked — division ascending (Div 1 first), everything else numeric descending (most first),
+  // names/clubs ascending (A first).
+  const COLUMNS = [
+    { key:'name', label:'Player', numeric:false, defaultDir:'asc' },
+    ...(spansMultipleGrades ? [{ key:'grade', label:'Grade', numeric:false, defaultDir:'asc' }] : []),
+    { key:'club', label:'Last club', numeric:false, defaultDir:'asc' },
+    { key:'teamsLabel', label:'Team(s)', numeric:false, defaultDir:'asc' },
+    { key:'divisionRank', label:'Division', numeric:false, defaultDir:'asc' },
+    { key:'games', label:'Games that season', numeric:true, defaultDir:'desc' },
+    { key:'goals', label:'Goals', numeric:true, defaultDir:'desc' },
+    { key:'bestCount', label:'Bests', numeric:true, defaultDir:'desc' }
+  ];
+  const sortable = results.map(r=>({ ...r, teamsLabel: r.teams.join(', ') }));
+  const { lapsedSortKey, lapsedSortDir } = f;
+  const dirMul = lapsedSortDir === 'asc' ? 1 : -1;
+  sortable.sort((a,b)=>{
+    const av = a[lapsedSortKey], bv = b[lapsedSortKey];
+    if(typeof av === 'string') return av.localeCompare(bv) * dirMul;
+    return ((av ?? 0) - (bv ?? 0)) * dirMul;
+  });
+  const thHtml = COLUMNS.map(c=>{
+    const active = lapsedSortKey === c.key;
+    const arrow = active ? (lapsedSortDir==='asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToPlayersFromMovement">&larr; Back to players</span>
+    <h2 style="font-size:20px;">Lapsed players</h2>
+    <div class="controls-row" style="margin-bottom:12px;">
+      <select id="mvMode">
+        <option value="league" ${f.mode==='league'?'selected':''}>All movement</option>
+        <option value="club" ${f.mode==='club'?'selected':''}>By club</option>
+        <option value="lapsed" ${f.mode==='lapsed'?'selected':''}>Lapsed players</option>
+        <option value="links" ${f.mode==='links'?'selected':''}>Check player links</option>
+      </select>
+    </div>
+    <div class="warn-box" style="margin:0 0 14px;">Checked by name only, ignoring club — the question here is just "are they playing anywhere at all", not which club they're at. A same-named person elsewhere in the competition could cause a genuine lapsed player to be missed, but can't cause a false one to appear — safe for a recruiting list, since the only failure direction is under-counting, never a false lead.</div>
+    <p class="hint" style="margin:0 0 12px;">Played in the division below during that season, but hasn't shown up in a single game since${latestYear?` — checked against ${latestYear}, the most recent season on file`:''}.${spansMultipleGrades?' Spanning several age groups: a division number means the top division of WHICHEVER grade that player was in, not necessarily the same competition — the Grade column shows which.':''}</p>
+    <div class="controls-row" style="margin-bottom:14px;">
+      <select id="lapsedAgeGroup">
+        <option value="ALL" ${f.lapsedAgeGroup==='ALL'?'selected':''}>All age groups</option>
+        <option value="JUNIORS" ${f.lapsedAgeGroup==='JUNIORS'?'selected':''}>All junior ages (no seniors/reserves)</option>
+        <option value="ADULT" ${f.lapsedAgeGroup==='ADULT'?'selected':''}>Seniors/Reserves only</option>
+        ${ageGroups.map(g=>`<option value="${g}" ${f.lapsedAgeGroup===g?'selected':''}>${g}</option>`).join('')}
+      </select>
+      <select id="lapsedYear">${pastYears.map(y=>`<option value="${y}" ${f.lapsedYear===y?'selected':''}>${y}</option>`).join('')}</select>
+      <select id="lapsedDivision" ${!divisions.length?'disabled':''}>
+        ${divisions.length ? `<option value="ALL" ${f.lapsedDivision==='ALL'?'selected':''}>All divisions</option>` : ''}
+        ${divisions.length ? divisions.map(d=>`<option value="${d}" ${f.lapsedDivision===d?'selected':''}>Division ${d}</option>`).join('') : '<option>No divisions that season</option>'}
+      </select>
+    </div>
+    ${!canRun ? '<div class="empty">No age group in this selection has numbered divisions in that season — U12 and Seniors/Reserves aren\'t graded, so there\'s nothing to pick here. Try a different year or age group.</div>' : (
+      results.length===0 ? '<div class="empty">Everyone who played that division that season is still showing up somewhere this year.</div>' : `
+      <p class="hint" style="margin:0 0 10px;">${results.length} player${results.length===1?'':'s'} found.</p>
+      <table><thead><tr>${thHtml}</tr></thead>
+      <tbody>${sortable.map(r=>`<tr><td><span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span></td>${spansMultipleGrades?`<td>${r.grade}</td>`:''}<td>${r.club}</td><td>${r.teamsLabel}</td><td>${r.divisionLabel}</td><td class="num">${r.games}</td><td class="num">${r.goals}</td><td class="num">${r.bestCount}</td></tr>`).join('')}</tbody></table>`
+    )}
+  `;
+  document.getElementById('backToPlayersFromMovement').onclick = backToPlayersFromMovement;
+  wrap.querySelectorAll('.player-link').forEach(el=>{
+    el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, openPlayerMovement);
+  });
+  wrap.querySelectorAll('.sortable-th').forEach(th=>{
+    th.onclick = ()=>{
+      const key = th.dataset.sortKey;
+      if(movementFilters.lapsedSortKey === key){
+        movementFilters.lapsedSortDir = movementFilters.lapsedSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        movementFilters.lapsedSortKey = key;
+        movementFilters.lapsedSortDir = th.dataset.defaultDir;
+      }
+      renderPlayerMovement();
+    };
+  });
+  const bind = (id,key,cast) => {
+    const el = document.getElementById(id);
+    if(el) el.onchange = e=>{ movementFilters[key] = cast ? cast(e.target.value) : e.target.value; renderPlayerMovement(); };
+  };
+  bind('mvMode','mode');
+  bind('lapsedAgeGroup','lapsedAgeGroup');
+  bind('lapsedYear','lapsedYear', v=>parseInt(v,10));
+  bind('lapsedDivision','lapsedDivision', v=> v==='ALL' ? 'ALL' : parseInt(v,10));
+}
+
+function renderPlayerLinks(wrap){
+  const f = movementFilters;
+  const clubOptions = knownClubs.slice().sort();
+  if(f.linksClubA == null) f.linksClubA = clubOptions[0] || null;
+  if(f.linksClubB == null) f.linksClubB = clubOptions.find(c=>c!==f.linksClubA) || null;
+
+  const canRun = f.linksClubA && f.linksClubB && f.linksClubA !== f.linksClubB;
+  const { results, seasons, latestYear } = canRun
+    ? computePlayerLinks({ clubA:f.linksClubA, clubB:f.linksClubB })
+    : { results:[], seasons:[], latestYear:null };
+
+  const statusCell = r => {
+    if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    if(r.status==='lapsed') return `<span style="color:var(--gold);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    return '<span style="color:var(--muted);">Unknown</span>';
+  };
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToPlayersFromMovement">&larr; Back to players</span>
+    <h2 style="font-size:20px;">Check player links</h2>
+    <div class="controls-row" style="margin-bottom:12px;">
+      <select id="mvMode">
+        <option value="league" ${f.mode==='league'?'selected':''}>All movement</option>
+        <option value="club" ${f.mode==='club'?'selected':''}>By club</option>
+        <option value="lapsed" ${f.mode==='lapsed'?'selected':''}>Lapsed players</option>
+        <option value="links" ${f.mode==='links'?'selected':''}>Check player links</option>
+      </select>
+    </div>
+    <div class="warn-box" style="margin:0 0 14px;">Only finds a connection where these two clubs actually fielded a COMBINED team at some point — that's the one place in this data two different clubs' players genuinely share a roster. It can't find friendships or acquaintances beyond that; no combined season between two clubs means no result, not necessarily no connection in real life.</div>
+    <p class="hint" style="margin:0 0 12px;">Pick your club and a club to check — shows every player who's shared a roster with ${f.linksClubA||'your club'} via a season the two combined, and where that player is now.</p>
+    <div class="controls-row" style="margin-bottom:14px;">
+      <select id="linksClubA">${clubOptions.map(c=>`<option value="${c}" ${f.linksClubA===c?'selected':''}>${c}</option>`).join('')}</select>
+      <span class="hint" style="margin:0;">↔</span>
+      <select id="linksClubB">${clubOptions.map(c=>`<option value="${c}" ${f.linksClubB===c?'selected':''}>${c}</option>`).join('')}</select>
+    </div>
+    ${!canRun ? '<div class="empty">Pick two different clubs.</div>' : (
+      seasons.length===0 ? `<div class="empty">${f.linksClubA} and ${f.linksClubB} have never fielded a combined team, so there's no shared-roster link to show.</div>` : `
+      <p class="hint" style="margin:0 0 10px;">Combined into one team ${seasons.length} time${seasons.length===1?'':'s'}: ${seasons.map(s=>`${s.team} (${s.year})`).join(', ')}.</p>
+      <p class="hint" style="margin:0 0 10px;">${results.length} player${results.length===1?'':'s'} shared that roster.</p>
+      <table><thead><tr><th>Player</th><th>Status</th><th>Connected via</th><th class="num">Games</th><th class="num">Goals</th><th class="num">Bests</th></tr></thead>
+      <tbody>${results.map(r=>`<tr><td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td><td>${statusCell(r)}</td><td>${r.linkedVia.map(v=>`${v.team} (${v.year})`).join(', ')}</td><td class="num">${r.games}</td><td class="num">${r.goals}</td><td class="num">${r.best}</td></tr>`).join('')}</tbody></table>`
+    )}
+  `;
+  document.getElementById('backToPlayersFromMovement').onclick = backToPlayersFromMovement;
+  wrap.querySelectorAll('.player-link').forEach(el=>{
+    el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, openPlayerMovement);
+  });
+  const bind = (id,key,cast) => {
+    const el = document.getElementById(id);
+    if(el) el.onchange = e=>{ movementFilters[key] = cast ? cast(e.target.value) : e.target.value; renderPlayerMovement(); };
+  };
+  bind('mvMode','mode');
+  bind('linksClubA','linksClubA');
+  bind('linksClubB','linksClubB');
+}
+
 function renderPlayerMovement(){
   const wrap = document.getElementById('playerMovementWrap');
+  if(movementFilters.mode === 'lapsed'){ renderLapsedPlayers(wrap); return; }
+  if(movementFilters.mode === 'links'){ renderPlayerLinks(wrap); return; }
   const { moves, trailFor } = computePlayerMovement();
   const live = moves.filter(m=> !dismissedMatchGroups.has(m.signature));
 
@@ -2955,6 +3323,7 @@ function renderPlayerMovement(){
     (f.direction==='ALL' || m.direction===f.direction);
   const inClubScope = m => !(f.mode==='club' && f.club!=='ALL') || m.fromClub===f.club || m.toClub===f.club;
   const scoped = live.filter(m=> (f.includeGaps || m.gap === 1) && matchesExceptGap(m) && inClubScope(m));
+  const scopedClubCount = new Set(scoped.flatMap(m=>[m.fromClub, m.toClub])).size;
   const gradeRank = gradeDisplayRank;
   const DIRECTION_RANK = { up:0, same:1, down:2, unknown:3, na:4 };
   const sorters = {
@@ -3036,13 +3405,15 @@ function renderPlayerMovement(){
   wrap.innerHTML = `
     <span class="back-link" id="backToPlayersFromMovement">&larr; Back to players</span>
     <h2 style="font-size:20px;">Player movement</h2>
-    <div class="warn-box" style="margin:0 0 14px;">Inferred by matching player names across clubs, so treat it as a lead rather than a record — the app keys players per club, so a genuine move and two boys sharing a name look alike. Names seen at more than two clubs are excluded, and seasons in a combined team are treated as club-unknown (only about 0.5% of combined-team players are tagged to their own club, so the rest can't be told apart). Use ✕ to hide a pair that isn't the same player.</div>
+    <div class="warn-box" style="margin:0 0 14px;">Inferred by matching player names across clubs, so treat it as a lead rather than a record — the app keys players per club, so a genuine move and two boys sharing a name look alike. Each move is checked on its own (the grade jump has to be one a real career could make), rather than capping how many clubs a name can touch — a coincidental shared name is what fails that check, not a real multi-club career. Seasons in a combined team are treated as club-unknown (only about 0.5% of combined-team players are tagged to their own club, so the rest can't be told apart). Use ✕ to hide a pair that isn't the same player.</div>
     <p class="hint" style="margin:0 0 12px;">Higher/lower compares the division a player turns out in now against the side their old club fields in the <em>same</em> age group that season — i.e. would they be playing at a higher level than if they'd stayed. Both sit in one competition, so the division numbers are directly comparable.</p>
     <p class="hint" style="margin:0 0 12px;">The season and phase filters at the top of the page don't apply here — spotting a move needs both seasons visible at once, so this panel always reads every season on file. Use the season dropdown below to narrow it instead.</p>
     <div class="controls-row" style="margin-bottom:12px;">
       <select id="mvMode">
         <option value="league" ${f.mode==='league'?'selected':''}>All movement</option>
         <option value="club" ${f.mode==='club'?'selected':''}>By club</option>
+        <option value="lapsed" ${f.mode==='lapsed'?'selected':''}>Lapsed players</option>
+        <option value="links" ${f.mode==='links'?'selected':''}>Check player links</option>
       </select>
       <select id="mvClub" ${f.mode!=='club'?'disabled':''}>
         <option value="ALL">Pick a club…</option>
@@ -3080,6 +3451,10 @@ function renderPlayerMovement(){
       <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px;" title="A move with a missing season in between — more likely to be a name clash or a year out, so it's off by default">
         <input type="checkbox" id="mvGaps" ${f.includeGaps?'checked':''}> include gap years
       </label>
+      ${(f.chart==='clubs'||f.chart==='net') ? `
+      <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px;" title="Off shows only the busiest clubs, so the chart stays readable at a glance. On shows every club with any movement — the chart grows to fit, so it can get long.">
+        <input type="checkbox" id="mvAllClubs" ${f.showAllClubs?'checked':''}> show all clubs
+      </label>` : ''}
     </div>
     ${(()=>{
       const unresolved = withAllDataFilters(()=>unresolvedTeamClubs());
@@ -3093,7 +3468,11 @@ function renderPlayerMovement(){
       <div class="stat-card" title="Playing within the range of divisions their old club fields in that age group"><div class="label">Same</div><div class="value">${pctOf('same')}</div></div>
       <div class="stat-card" title="Now playing lower than any side their old club fields in that age group"><div class="label">Lower than old club</div><div class="value">${pctOf('down')}</div></div>
     </div>
-    <div id="movementChartWrap" style="height:${f.chart==='clubs'||f.chart==='net'?'420':'300'}px;margin:18px 0 6px;${scoped.length?'':'display:none;'}">
+    <div id="movementChartWrap" style="height:${
+      (f.chart==='clubs'||f.chart==='net')
+        ? (f.showAllClubs ? Math.max(420, scopedClubCount*24 + 60) : 420)
+        : 300
+    }px;margin:18px 0 6px;${scoped.length?'':'display:none;'}">
       <canvas id="movementChart"></canvas>
     </div>
     ${scoped.length?`<p class="hint" style="margin:0 0 16px;">${
@@ -3114,6 +3493,7 @@ function renderPlayerMovement(){
   bind('mvMode','mode'); bind('mvClub','club'); bind('mvTransition','transition');
   bind('mvGrade','grade'); bind('mvDirection','direction'); bind('mvSort','sort'); bind('mvChart','chart');
   bind('mvGaps','includeGaps', el=>el.checked);
+  bind('mvAllClubs','showAllClubs', el=>el.checked);
 
   wrap.querySelectorAll('[data-trail]').forEach(row=>{
     row.style.cursor = 'pointer';
@@ -3172,9 +3552,9 @@ function renderPlayerMovement(){
       scoped.forEach(m=>{ out[m.fromClub]=(out[m.fromClub]||0)+1; inn[m.toClub]=(inn[m.toClub]||0)+1; });
       const names = [...new Set([...Object.keys(out), ...Object.keys(inn)])];
       const net = c => (inn[c]||0) - (out[c]||0);
-      const top = f.chart==='net'
-        ? names.sort((a,b)=> net(b)-net(a)).slice(0, 16)
-        : names.sort((a,b)=> ((out[b]||0)+(inn[b]||0)) - ((out[a]||0)+(inn[a]||0))).slice(0, 12);
+      const top = f.showAllClubs
+        ? (f.chart==='net' ? names.slice().sort((a,b)=> net(b)-net(a)) : names.slice().sort((a,b)=> ((out[b]||0)+(inn[b]||0)) - ((out[a]||0)+(inn[a]||0))))
+        : (f.chart==='net' ? names.sort((a,b)=> net(b)-net(a)).slice(0, 16) : names.sort((a,b)=> ((out[b]||0)+(inn[b]||0)) - ((out[a]||0)+(inn[a]||0))).slice(0, 12));
       cfg = f.chart==='net'
         ? { type:'bar',
             data:{ labels:top, datasets:[{ label:'Net players gained (+) or lost (−)',
@@ -3182,7 +3562,7 @@ function renderPlayerMovement(){
             options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
               scales:{ x:{ ...AXIS, grid:{ color:'#2E3A3E' } }, y:AXIS },
               plugins:{ legend:{ display:false },
-                title:{ display:true, text:'Net club gain/loss from player movement', color:'#EDF1F0' } } } }
+                title:{ display:true, text:`Net club gain/loss from player movement${f.showAllClubs?' — every club':''}`, color:'#EDF1F0' } } } }
         : { type:'bar',
             data:{ labels:top, datasets:[
               { label:'Left the club', backgroundColor:'#C0473F', data:top.map(c=>out[c]||0) },
@@ -3190,7 +3570,7 @@ function renderPlayerMovement(){
             options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
               scales:{ x:AXIS_N, y:AXIS },
               plugins:{ legend:{ labels:{ color:'#EDF1F0' } },
-                title:{ display:true, text:'Players in vs out, busiest clubs', color:'#EDF1F0' } } } };
+                title:{ display:true, text:f.showAllClubs?'Players in vs out, every club':'Players in vs out, busiest clubs', color:'#EDF1F0' } } } };
 
     } else if(f.chart === 'trend'){
       cfg = { type:'line',
@@ -4426,16 +4806,33 @@ function getPlayerSeasonHistory(p){
   const byYear = {};
   p.timeline.forEach(t=>{
     const year = t.date ? new Date(t.date).getFullYear() : 'Unknown';
-    byYear[year] = byYear[year] || { teams:new Set(), divisions:new Set(), games:0, goals:0 };
-    byYear[year].teams.add(t.team);
-    if(t.division) byYear[year].divisions.add(t.division);
-    byYear[year].games++;
-    byYear[year].goals += t.goals;
+    const y = (byYear[year] = byYear[year] || { teams:new Set(), divisions:new Set(), games:0, goals:0, byTeam:{} });
+    y.teams.add(t.team);
+    if(t.division) y.divisions.add(t.division);
+    y.games++;
+    y.goals += t.goals;
+    // Per-team (and per-division within that team, in the rare case a side gets regraded
+    // mid-season) game/goal counts — a season with more than one team is otherwise just two flat
+    // lists with no way to tell which division goes with which side, or how much time was spent
+    // in each.
+    const te = (y.byTeam[t.team] = y.byTeam[t.team] || { team:t.team, games:0, goals:0, divisions:{} });
+    te.games++; te.goals += t.goals;
+    const divLabel = t.division || 'Unknown';
+    te.divisions[divLabel] = (te.divisions[divLabel] || 0) + 1;
   });
-  return Object.keys(byYear).sort((a,b)=>b-a).map(year=>({
-    year, teams:[...byYear[year].teams], divisions:[...byYear[year].divisions],
-    games:byYear[year].games, goals:byYear[year].goals
-  }));
+  return Object.keys(byYear).sort((a,b)=>b-a).map(year=>{
+    const y = byYear[year];
+    const teamBreakdown = Object.values(y.byTeam)
+      .map(te=>({
+        team: te.team, games: te.games, goals: te.goals,
+        divisions: Object.entries(te.divisions).map(([label,games])=>({label,games})).sort((a,b)=> b.games-a.games)
+      }))
+      .sort((a,b)=> b.games - a.games);
+    return {
+      year, teams:[...y.teams], divisions:[...y.divisions],
+      games: y.games, goals: y.goals, teamBreakdown
+    };
+  });
 }
 
 function gameRowHtml(g){
@@ -5151,14 +5548,23 @@ let playerGameLogExpanded = false;
 let teamGameLogExpanded = false;
 let playerH2HExpanded = false;
 let teammateOverlapExpanded = false;
+let playerTeammateLinksFilter = 'ALL';
 
 function openPlayerDetail(key){
   currentPlayerDetailKey = key;
   playerGameLogExpanded = false;
+  playerDetailReturnTo = null;   // default: a plain open has nowhere special to return to
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-player-detail').classList.add('active');
   renderPlayerDetail(key);
+}
+// Used by the handful of places (Lapsed Players, Check player links, another player's own
+// Player Links section) where "Back" should return somewhere more specific than the plain
+// Players list — set AFTER opening, since openPlayerDetail() itself resets it to null.
+function openPlayerDetailWithReturn(key, returnFn){
+  openPlayerDetail(key);
+  playerDetailReturnTo = returnFn;
 }
 
 // Shared pool math for "how does this player sit against their peers" — used by the two-player
@@ -5224,13 +5630,197 @@ function playerLeagueContextHtml(p, playerList){
   `;
 }
 
+// Every teammate this player has EVER shared a team-season with, across their whole recorded
+// career under this identity — the same general mechanism getSquadTeammateOverlap already uses to
+// compare two squads (any shared team-season counts, not just an explicit club merger), just
+// applied to one person instead of two rosters. A merged team-season is one way two people end up
+// sharing a roster, but it's not the only one — most teammate history is just two kids on the same
+// side, no merge involved — so this deliberately isn't limited to the merge-only mechanism "Check
+// player links" uses for comparing two whole clubs.
+function computePlayerTeammates(playerObj){
+  return withAllDataFilters(()=>{
+    const { playerList } = computeAggregates();
+    const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    const { trail } = buildMovementContext(gamesList);
+    const latestYear = gamesList.reduce((m,g)=>{ const y=getGameYear(g); return y && y>m ? y : m; }, 0);
+
+    const seasonsOf = pl => new Set(pl.timeline.filter(t=>t.date).map(t=> t.team+'__'+new Date(t.date).getFullYear()));
+    const mySeasons = seasonsOf(playerObj);
+
+    const teammates = [];
+    playerList.forEach(pl=>{
+      if(pl.key === playerObj.key) return;
+      const shared = [...seasonsOf(pl)].filter(s=>mySeasons.has(s)).map(s=>{
+        const idx = s.lastIndexOf('__');
+        return { team: s.slice(0,idx), year: s.slice(idx+2) };
+      }).sort((a,b)=> b.year - a.year);
+      if(!shared.length) return;
+
+      // Where they are NOW — their full history under this name, any club, not just the club
+      // this particular playerList entry happens to represent (which may itself be years old).
+      const nm = pl.name.toLowerCase();
+      const byYear = trail[nm] || {};
+      const years = Object.keys(byYear).map(Number).sort((a,b)=>b-a);
+      const latest = years.length ? byYear[years[0]] : null;
+      const confidentClub = latest && !latest.ambiguous && latest.clubs.size===1 ? [...latest.clubs][0] : null;
+
+      teammates.push({
+        name: pl.name, playerKey: confidentClub ? resolvePlayerKey(confidentClub + '||' + nm) : null,
+        sharedSeasons: shared,
+        mostRecentYear: years[0] || null,
+        currentClub: confidentClub, currentTeams: latest ? [...latest.teams] : [],
+        status: !years.length ? 'unknown' : (years[0] === latestYear ? 'active' : 'lapsed')
+      });
+    });
+    teammates.sort((a,b)=> b.sharedSeasons[0].year - a.sharedSeasons[0].year);
+    return { teammates, latestYear };
+  });
+}
+
+function renderPlayerTeammateLinks(p){
+  const wrap = document.getElementById('playerTeammateLinksWrap');
+  if(!wrap) return;
+  const { teammates, latestYear } = computePlayerTeammates(p);
+  if(!teammates.length){ wrap.innerHTML = ''; return; }
+
+  const clubOptions = [...new Set(teammates.map(t=>t.currentClub).filter(Boolean))].sort();
+  if(!['ALL', ...clubOptions].includes(playerTeammateLinksFilter)) playerTeammateLinksFilter = 'ALL';
+  const filtered = playerTeammateLinksFilter==='ALL' ? teammates : teammates.filter(t=>t.currentClub===playerTeammateLinksFilter);
+
+  const statusCell = r => {
+    if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    if(r.status==='lapsed') return `<span style="color:var(--gold);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    return '<span style="color:var(--muted);">Unknown</span>';
+  };
+
+  wrap.innerHTML = `
+    <h3 style="font-size:14px;margin-top:24px;">Player links</h3>
+    <p class="hint">Every player ${p.name} has shared a team-season with, across everything logged under this profile — teammates, not opponents. ${teammates.length} found${latestYear?`; status checked against ${latestYear}, the most recent season on file`:''}.</p>
+    <div class="controls-row" style="margin-bottom:12px;">
+      <select id="playerTeammateClubFilter">
+        <option value="ALL" ${playerTeammateLinksFilter==='ALL'?'selected':''}>Any club — show everyone</option>
+        ${clubOptions.map(c=>`<option value="${c}" ${playerTeammateLinksFilter===c?'selected':''}>Last played at ${c}</option>`).join('')}
+      </select>
+    </div>
+    ${filtered.length===0 ? '<div class="empty">Nobody matches that filter.</div>' : `
+    <table><thead><tr><th>Teammate</th><th>Shared season(s)</th><th>Status</th></tr></thead>
+    <tbody>${filtered.map(r=>`<tr>
+      <td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td>
+      <td>${r.sharedSeasons.map(s=>`${s.team} (${s.year})`).join(', ')}</td>
+      <td>${statusCell(r)}</td>
+    </tr>`).join('')}</tbody></table>`}
+  `;
+  wrap.querySelectorAll('.player-link').forEach(el=>{
+    el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, ()=> openPlayerDetail(p.key));
+  });
+  const sel = document.getElementById('playerTeammateClubFilter');
+  if(sel) sel.onchange = e=>{ playerTeammateLinksFilter = e.target.value; renderPlayerTeammateLinks(p); };
+}
+
+// The team-wide version of Player Links: instead of one person's teammates, the union of every
+// CURRENT squad member's teammates — then narrowed to whoever ISN'T already at this club, since
+// someone already here isn't a "possible link", they're just a teammate. Same underlying
+// mechanism as computePlayerTeammates (any shared team-season, ever), applied across a whole
+// roster and de-duplicated by name so one real person found via two different old teams doesn't
+// show up as two separate rows.
+let teamPossibleLinksFilter = 'ALL';
+function computeTeamPossibleLinks(teamObj, playerList){
+  return withAllDataFilters(()=>{
+    const gamesList = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    const { trail } = buildMovementContext(gamesList);
+    const latestYear = gamesList.reduce((m,g)=>{ const y=getGameYear(g); return y && y>m ? y : m; }, 0);
+
+    const rosterKeys = new Set(getTeamScopedRoster(playerList, teamObj).map(r=>r.key));
+    const roster = playerList.filter(pl=> rosterKeys.has(pl.key));
+    const myClub = getClub(teamObj.name);
+    const seasonsOf = pl => new Set(pl.timeline.filter(t=>t.date).map(t=> t.team+'__'+new Date(t.date).getFullYear()));
+    const rosterSeasons = roster.map(rp=> ({ name: rp.name, seasons: seasonsOf(rp) }));
+
+    const byName = new Map(); // lowercase name -> aggregated result
+    playerList.forEach(pl=>{
+      if(rosterKeys.has(pl.key)) return; // already on this team — not a "possible link"
+      const plSeasons = seasonsOf(pl);
+      const connections = [];
+      rosterSeasons.forEach(rp=>{
+        [...plSeasons].filter(s=>rp.seasons.has(s)).forEach(s=>{
+          const idx = s.lastIndexOf('__');
+          connections.push({ teammate: rp.name, team: s.slice(0,idx), year: s.slice(idx+2) });
+        });
+      });
+      if(!connections.length) return;
+
+      const nm = pl.name.toLowerCase();
+      const existing = byName.get(nm) || { name: pl.name, connections: [] };
+      existing.connections.push(...connections);
+      byName.set(nm, existing);
+    });
+
+    const results = [...byName.entries()].map(([nm, info])=>{
+      const byYear = trail[nm] || {};
+      const years = Object.keys(byYear).map(Number).sort((a,b)=>b-a);
+      const latest = years.length ? byYear[years[0]] : null;
+      const confidentClub = latest && !latest.ambiguous && latest.clubs.size===1 ? [...latest.clubs][0] : null;
+      return {
+        name: info.name,
+        connections: [...new Map(info.connections.map(c=>[c.teammate+'|'+c.team+'|'+c.year, c])).values()].sort((a,b)=> b.year-a.year),
+        mostRecentYear: years[0] || null,
+        currentClub: confidentClub, currentTeams: latest ? [...latest.teams] : [],
+        playerKey: confidentClub ? resolvePlayerKey(confidentClub + '||' + nm) : null,
+        status: !years.length ? 'unknown' : (years[0] === latestYear ? 'active' : 'lapsed')
+      };
+    }).filter(r=> r.currentClub !== myClub); // still filter out anyone whose current club IS this one
+    results.sort((a,b)=> (b.mostRecentYear||0) - (a.mostRecentYear||0) || b.connections.length - a.connections.length);
+    return { results, latestYear };
+  });
+}
+
+function renderTeamPossibleLinks(teamObj, playerList){
+  const wrap = document.getElementById('teamPossibleLinksWrap');
+  if(!wrap) return;
+  const { results, latestYear } = computeTeamPossibleLinks(teamObj, playerList);
+  if(!results.length){ wrap.innerHTML = ''; return; }
+
+  const clubOptions = [...new Set(results.map(r=>r.currentClub).filter(Boolean))].sort();
+  if(!['ALL', ...clubOptions].includes(teamPossibleLinksFilter)) teamPossibleLinksFilter = 'ALL';
+  const filtered = teamPossibleLinksFilter==='ALL' ? results : results.filter(r=>r.currentClub===teamPossibleLinksFilter);
+
+  const statusCell = r => {
+    if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    if(r.status==='lapsed') return `<span style="color:var(--gold);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    return '<span style="color:var(--muted);">Unknown</span>';
+  };
+
+  wrap.innerHTML = `
+    <h3 style="font-size:14px;margin-top:24px;">Possible player links</h3>
+    <div class="warn-box" style="margin:0 0 12px;">Every player who's shared a team-season with someone currently on this team, and isn't already here themselves — teammates, not opponents, so this is a lead list, not a scouting report. ${results.length} found${latestYear?`; status checked against ${latestYear}, the most recent season on file`:''}.</div>
+    <div class="controls-row" style="margin-bottom:12px;">
+      <select id="teamPossibleLinksFilter">
+        <option value="ALL" ${teamPossibleLinksFilter==='ALL'?'selected':''}>Any club — show everyone</option>
+        ${clubOptions.map(c=>`<option value="${c}" ${teamPossibleLinksFilter===c?'selected':''}>Last played at ${c}</option>`).join('')}
+      </select>
+    </div>
+    ${filtered.length===0 ? '<div class="empty">Nobody matches that filter.</div>' : `
+    <table><thead><tr><th>Player</th><th>Status</th><th>Connected via</th></tr></thead>
+    <tbody>${filtered.map(r=>`<tr>
+      <td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td>
+      <td>${statusCell(r)}</td>
+      <td>${r.connections.map(c=>`${c.teammate} — ${c.team} (${c.year})`).join('<br>')}</td>
+    </tr>`).join('')}</tbody></table>`}
+  `;
+  wrap.querySelectorAll('.player-link').forEach(el=>{
+    el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, ()=> openTeamDetail(teamObj.key));
+  });
+  const sel = document.getElementById('teamPossibleLinksFilter');
+  if(sel) sel.onchange = e=>{ teamPossibleLinksFilter = e.target.value; renderTeamPossibleLinks(teamObj, playerList); };
+}
+
 function renderPlayerDetail(key){
   const { playerList } = computeAggregates();
   const p = playerList.find(pl => pl.key === key);
   const wrap = document.getElementById('playerDetailWrap');
   if(!p){
     wrap.innerHTML = `<span class="back-link" id="backToPlayers">&larr; Back to players</span><div class="empty">Player not found.</div>`;
-    document.getElementById('backToPlayers').onclick = backToPlayers;
+    document.getElementById('backToPlayers').onclick = goBackFromPlayerDetail;
     return;
   }
 
@@ -5277,15 +5867,16 @@ function renderPlayerDetail(key){
     <div id="playerSeasonHistoryWrap"></div>
     <div id="playerSplitsWrap"></div>
     <div id="playerLeagueContextWrap"></div>
+    <div id="playerTeammateLinksWrap"></div>
     <h3 style="font-size:14px;margin-top:24px;">Game log</h3>
     <div id="playerGameLogWrap"></div>
   `;
-  document.getElementById('backToPlayers').onclick = backToPlayers;
+  document.getElementById('backToPlayers').onclick = goBackFromPlayerDetail;
   document.getElementById('compareThisPlayerBtn').onclick = ()=> openComparePlayers(p.key);
 
   const seasonHistory = getPlayerSeasonHistory(p);
   document.getElementById('playerSeasonHistoryWrap').innerHTML = seasonHistory.length===0 ? '' : `
-    <table style="max-width:600px;">
+    <table style="max-width:640px;">
       <thead><tr><th>Year</th><th>Team(s)</th><th>Division(s)</th><th class="num">Games</th><th class="num">Goals</th></tr></thead>
       <tbody>
         ${seasonHistory.map(s=>`
@@ -5296,6 +5887,15 @@ function renderPlayerDetail(key){
             <td class="num">${s.games}</td>
             <td class="num">${s.goals}</td>
           </tr>
+          ${s.teamBreakdown.length > 1 ? `
+          <tr><td></td><td colspan="4" style="padding-top:0;">
+            <div style="font-size:11.5px;color:var(--muted);line-height:1.6;">
+              ${s.teamBreakdown.map(te=>{
+                const divText = te.divisions.map(d=> d.label==='Unknown' ? '' : `${d.label} (${d.games})`).filter(Boolean).join(', ');
+                return `${te.team}: ${te.games} game${te.games!==1?'s':''}${divText?` — ${divText}`:''}, ${te.goals} goal${te.goals!==1?'s':''}`;
+              }).join('<br>')}
+            </div>
+          </td></tr>` : ''}
         `).join('')}
       </tbody>
     </table>`;
@@ -5345,6 +5945,7 @@ function renderPlayerDetail(key){
     playerSplitTable('By timeslot', 'Start time of the games this player has actually played — reflects their own fixture history, not a general early-vs-late effect', bySlot) +
     playerSplitTable('By ground', 'Every ground this player has played at', byGround);
   document.getElementById('playerLeagueContextWrap').innerHTML = playerLeagueContextHtml(p, playerList);
+  renderPlayerTeammateLinks(p);
   const timeline = [...p.timeline].sort((a,b)=>b.date-a.date);
   const visibleTimeline = playerGameLogExpanded ? timeline : timeline.slice(0,3);
   const logWrap = document.getElementById('playerGameLogWrap');
@@ -6095,6 +6696,7 @@ function renderTeamDetail(teamKey){
            + splitTable('By timeslot', 'Start time of the game. Compare within this team only — across grades, timeslot mostly reflects which grade plays when', bySlot)
            + splitTable('By ground', 'Every ground this team has played at. Grounds and opponents usually go together via home grounds, so read this alongside the opponent record rather than instead of it', byGround);
     })()}
+    <div id="teamPossibleLinksWrap"></div>
     <h3 style="font-size:14px;margin-top:8px;">Leaderboards</h3>
     <div class="card-grid">
       ${leaderboardBox('Top goal kickers', 'Most total goals this season', topGoals, p=>p.totalGoals+' gls')}
@@ -6130,6 +6732,7 @@ function renderTeamDetail(teamKey){
 
   const squadTrend = getCohortProgression(getTeamCohort(playerList, t));
   const trendClass = tr => tr==='Improved' ? 'win-tag' : (tr==='Dropped back' ? 'loss-tag' : '');
+  renderTeamPossibleLinks(t, playerList);
   document.getElementById('clubHistoryWrap').innerHTML = squadTrend.length===0 ? '<div class="empty">No prior-season data yet for this squad.</div>' : `
     <table style="max-width:650px;margin-bottom:20px;">
       <thead><tr><th>Year</th><th>Team(s)</th><th>Division(s)</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th>Trend</th></tr></thead>
