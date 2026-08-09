@@ -54,6 +54,43 @@
   nav.tabs button.active{ color:var(--text); border-bottom-color:var(--green); }
   nav.tabs button:hover{ color:var(--text); }
 
+  /* Breadcrumb trail — shows the drill-down path within the current tab (e.g.
+     Teams / Newcomb Power U16 / Jordan Smith) so a multi-level detour can jump back
+     more than one step at once, not just to the immediate parent. */
+  #breadcrumbBar{ padding:9px 28px; border-bottom:1px solid var(--line); background:var(--bg);
+    font-size:12.5px; display:none; }
+  #breadcrumbBar .crumb{ color:var(--muted); cursor:pointer; }
+  #breadcrumbBar .crumb:hover{ color:var(--text); text-decoration:underline; }
+  #breadcrumbBar .crumb-sep{ color:var(--line); margin:0 6px; }
+  #breadcrumbBar .crumb.current{ color:var(--text); }
+
+  /* Header search — finds a player, team or club from anywhere in the app. */
+  .header-search{ position:relative; min-width:200px; flex:1; max-width:280px; }
+  .header-search input{ width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--text);
+    border-radius:6px; padding:9px 12px; font-size:13.5px; font-family:'Inter',sans-serif; }
+  .header-search input:focus{ outline:none; border-color:var(--blue); }
+  .header-search .search-dropdown{ position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:40; }
+
+  nav.tabs button[data-tab="tools"].active{ border-bottom-color:var(--gold); }
+
+  /* Tool tile grid — used on the Tools tab and the Home page's "Jump to a tool" row.
+     Deliberately reuses .home-card's shape so tool tiles read as the same kind of thing
+     as the Players/Teams/Games cards, just one level down. */
+  .tools-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin:0 0 8px; }
+  .tool-tile{ background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:16px 18px;
+    cursor:pointer; transition:border-color .15s, transform .15s; }
+  .tool-tile:hover{ border-color:var(--gold); transform:translateY(-2px); }
+  .tool-tile-title{ font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:15px; letter-spacing:0.03em;
+    color:var(--gold); margin-bottom:6px; }
+  .tool-tile-desc{ font-size:12.5px; color:var(--muted); line-height:1.45; }
+  .tool-tile.tool-tile-blue .tool-tile-title{ color:var(--blue); }
+  .tool-tile.tool-tile-blue:hover{ border-color:var(--blue); }
+  .tool-tile.tool-tile-green .tool-tile-title{ color:#8fd7a3; }
+  .tool-tile.tool-tile-green:hover{ border-color:var(--green); }
+  .tools-section-label{ font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);
+    margin:22px 0 10px; }
+  .tools-section-label:first-child{ margin-top:0; }
+
   main{ padding:24px 28px 60px; max-width:1100px; margin:0 auto; }
   .panel{ display:none; }
   .panel.active{ display:block; }
@@ -255,6 +292,8 @@
   .search-dropdown .picker-result:last-child{ border-bottom:none; }
   .search-dropdown .picker-result:hover{ background:var(--surface-2); }
   .search-dropdown .empty{ padding:12px 14px; margin:0; }
+  .search-dropdown .search-group-label{ padding:7px 14px 3px; font-size:10.5px; text-transform:uppercase;
+    letter-spacing:0.06em; color:var(--muted); }
   .filter-strip{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; background:var(--bg);
                   border:1px solid var(--line); border-radius:6px; padding:9px 10px; margin-bottom:12px; }
   .toolbar-actions{ display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; width:100%; }
@@ -268,6 +307,9 @@
   button.green-btn{ background:none; border:1px solid var(--green); color:#8fd7a3; padding:9px 16px;
                      border-radius:5px; cursor:pointer; font-size:13px; font-family:'Inter',sans-serif; }
   button.green-btn:hover{ background:var(--green-soft); }
+  button.blue-btn{ background:none; border:1px solid var(--blue); color:#9dc0e0; padding:9px 16px;
+                    border-radius:5px; cursor:pointer; font-size:13px; font-family:'Inter',sans-serif; }
+  button.blue-btn:hover{ background:rgba(75,123,168,0.15); }
   .home-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; max-width:900px; margin:0 auto; }
   .home-snapshot{ display:flex; flex-wrap:wrap; gap:14px; max-width:900px; margin:0 auto; }
   .home-snapshot-item{ background:var(--surface); border:1px solid var(--line); border-radius:8px;
@@ -330,7 +372,11 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 2026-08-04</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 09082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <div class="header-search">
+    <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
+    <div id="headerSearchResults" class="search-dropdown"></div>
+  </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;">
     <button class="ghost" id="backupBtn" title="Downloads a JSON file with every game, fixture, alias and club setting — use this to move all your data into a new copy of this app" style="margin-top:0;">Backup all data</button>
     <button class="ghost" id="restoreBtn" title="Restore all data from a JSON backup, or rebuild games from an exported .xlsx spreadsheet. This replaces everything currently saved here." style="margin-top:0;">Restore from backup</button>
@@ -345,7 +391,10 @@
   <button data-tab="players">Players</button>
   <button data-tab="teams">Teams</button>
   <button data-tab="games">Games</button>
+  <button data-tab="tools">Tools</button>
 </nav>
+
+<div id="breadcrumbBar"></div>
 
 <div class="filters-bar" id="filtersBar">
   <div class="filters-bar-inner">
@@ -385,10 +434,18 @@
         <div class="home-card-desc">Every game logged, grouped by year, age group and division. Add a new result by pasting it straight in, and keep everything backed up from here too.</div>
       </div>
     </div>
+    <p class="hint" style="margin:26px 0 14px;">Or jump straight to a tool:</p>
+    <div class="tools-grid" style="max-width:900px;">
+      <div class="tool-tile" id="homeToolPowerRankings"><div class="tool-tile-title">Power rankings</div><div class="tool-tile-desc">Every team ranked, any division.</div></div>
+      <div class="tool-tile" id="homeToolComparePlayers"><div class="tool-tile-title">Compare players</div><div class="tool-tile-desc">Two players, head-to-head.</div></div>
+      <div class="tool-tile" id="homeToolCompareTeams"><div class="tool-tile-title">Compare teams</div><div class="tool-tile-desc">Two teams, head-to-head.</div></div>
+      <div class="tool-tile" id="homeToolPlayerMovement"><div class="tool-tile-title">Player movement</div><div class="tool-tile-desc">Who's moved, and who's lapsed.</div></div>
+    </div>
   </section>
 
   <!-- ADD GAME -->
   <section class="panel" id="panel-add">
+    <span class="back-link" id="backFromAddGame">&larr; Back</span>
     <p class="hint">Open either a completed match page, or a Fixture round page (listing all games for that round) on PlayHQ, select all the page content and paste it below — the parser works out which one it is automatically.</p>
     <textarea id="pasteBox" placeholder="Paste the full match or fixture round page text here..."></textarea>
     <div>
@@ -403,7 +460,7 @@
     <p class="hint" style="text-align:center;margin:0 0 16px;">Every player's stats in one place — jump to the top performers, browse everyone, search for someone specific, or compare two head-to-head.</p>
     <div class="players-quick-actions">
       <button class="gold-btn" id="topPlayersBtn" style="margin-top:0;">Top players</button>
-      <button class="green-btn" id="showAllPlayersBtn" style="margin-top:0;">Show everyone</button>
+      <button class="green-btn" id="showAllPlayersBtn" style="margin-top:0;">Show Everyone</button>
     </div>
     <div class="players-toolbar">
       <p class="hint" style="margin:0 0 6px;">Search for a specific player</p>
@@ -417,6 +474,7 @@
         <select id="divisionFilter"><option value="ALL">All divisions</option></select>
         <select id="teamFilter"></select>
       </div>
+      <div class="tools-section-label" style="margin:14px 0 8px;">More tools <span style="text-transform:none;letter-spacing:0;color:var(--line);">— also on the Tools tab</span></div>
       <div class="toolbar-actions">
         <button class="text-link-btn" id="mergePlayersBtn" title="Merge duplicate player records — for typos or a player who switched clubs mid-season">Merge players</button>
         <button class="compare-btn" id="comparePlayersBtn">Compare players</button>
@@ -453,7 +511,7 @@
   <section class="panel" id="panel-teams">
     <p class="hint" style="text-align:center;margin:0 0 16px;">Every team's record in one place — browse everyone, pick a specific team, jump to the power rankings, compare two head-to-head, or see how squads have progressed.</p>
     <div class="players-quick-actions">
-      <button class="green-btn" id="showAllTeamsBtn" style="margin-top:0;">Show everyone</button>
+      <button class="green-btn" id="showAllTeamsBtn" style="margin-top:0;">Show Everyone</button>
     </div>
     <div class="players-toolbar">
       <p class="hint" style="margin:0 0 6px;">Jump to a specific team</p>
@@ -465,10 +523,14 @@
         <select id="teamNameFilter"><option value="ALL">Select a team...</option></select>
       </div>
     </div>
-    <div class="players-quick-actions">
-      <button class="gold-btn" id="powerRankingsBtn" style="margin-top:0;">Power rankings</button>
-      <button class="compare-btn" id="compareTeamsBtn">Compare teams</button>
-      <button class="gold-btn" id="squadProgressionsPageBtn" style="margin-top:0;">Squad progressions</button>
+    <div class="toolbar-actions" style="margin-bottom:10px;">
+      <button class="compare-btn" id="compareTeamsBtn">Compare Teams</button>
+    </div>
+    <div class="tools-section-label" style="margin:14px 0 8px;">More tools <span style="text-transform:none;letter-spacing:0;color:var(--line);">— also on the Tools tab</span></div>
+    <div class="players-quick-actions" style="flex-wrap:wrap;">
+      <button class="gold-btn" id="powerRankingsBtn" style="margin-top:0;">Power Rankings</button>
+      <button class="green-btn" id="squadProgressionsPageBtn" style="margin-top:0;">Squad Progressions</button>
+      <button class="blue-btn" id="homeGrownPageBtn" style="margin-top:0;">Home Grown</button>
     </div>
     <div class="toolbar-actions" style="margin-bottom:14px;">
       <button class="text-link-btn" id="suggestDivisionsBtn">Suggest divisions</button>
@@ -476,6 +538,34 @@
     </div>
     <p class="hint" id="teamsSortHint" style="margin:0 0 14px;">Click a column header to sort — click again to reverse. Click <strong>#</strong> to go back to ladder order.</p>
     <div id="teamsTableWrap"></div>
+  </section>
+
+  <!-- TOOLS -->
+  <section class="panel" id="panel-tools">
+    <p class="hint" style="text-align:center;margin:0 0 18px;">Every deeper analysis tool in one place — the same tools also live as shortcuts on the Players and Teams pages, so use whichever is quicker for you.</p>
+    <div class="tools-section-label">Players</div>
+    <div class="tools-grid">
+      <div class="tool-tile" id="toolTileTopPlayers"><div class="tool-tile-title">Top players</div><div class="tool-tile-desc">This season's leaders across goals, bests and form.</div></div>
+      <div class="tool-tile" id="toolTileComparePlayers"><div class="tool-tile-title">Compare players</div><div class="tool-tile-desc">Head-to-head stats, teammate history and league context for two players.</div></div>
+      <div class="tool-tile" id="toolTilePlayerMovement"><div class="tool-tile-title">Player movement</div><div class="tool-tile-desc">Who's changed clubs, lapsed entirely, or shares a roster history — recruiting leads.</div></div>
+      <div class="tool-tile" id="toolTileMergePlayers"><div class="tool-tile-title">Merge players</div><div class="tool-tile-desc">Fix duplicate player records — typos, or a player who switched clubs mid-season.</div></div>
+    </div>
+    <div class="tools-section-label">Teams</div>
+    <div class="tools-grid">
+      <div class="tool-tile tool-tile-blue" id="toolTilePowerRankings"><div class="tool-tile-title">Power rankings</div><div class="tool-tile-desc">Every team ranked regardless of division, age group or year.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileCompareTeams"><div class="tool-tile-title">Compare teams</div><div class="tool-tile-desc">Head-to-head record and squad overlap for two teams.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Which squads have improved the most, season on season.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
+    </div>
+    <div class="tools-section-label">Games &amp; fixtures</div>
+    <div class="tools-grid">
+      <div class="tool-tile tool-tile-green" id="toolTilePredictionAccuracy"><div class="tool-tile-title">Prediction accuracy</div><div class="tool-tile-desc">How well the forecast model has called results so far.</div></div>
+    </div>
+    <div class="tools-section-label">Data &amp; admin</div>
+    <div class="tools-grid">
+      <div class="tool-tile tool-tile-green" id="toolTileSuggestDivisions"><div class="tool-tile-title">Suggest divisions</div><div class="tool-tile-desc">Flags teams that may be sitting in the wrong division.</div></div>
+      <div class="tool-tile tool-tile-green" id="toolTileManageClubs"><div class="tool-tile-title">Manage clubs</div><div class="tool-tile-desc">Resolve unrecognised team names to a real club, and set nicknames.</div></div>
+    </div>
   </section>
 
   <!-- COMPARE PLAYERS -->
@@ -496,6 +586,11 @@
   <!-- SQUAD PROGRESSIONS -->
   <section class="panel" id="panel-squad-progressions">
     <div id="squadProgressionsWrap"></div>
+  </section>
+
+  <!-- HOME GROWN -->
+  <section class="panel" id="panel-home-grown">
+    <div id="homeGrownWrap"></div>
   </section>
 
   <!-- MERGE PLAYERS -->
@@ -685,9 +780,10 @@ function goBackFromPlayerDetail(){
   if(playerDetailReturnTo){
     const fn = playerDetailReturnTo;
     playerDetailReturnTo = null;
+    if(navStack.length > 1) navStack.pop(); // this player view is being replaced, not stacked on top of
     fn();
   } else {
-    backToPlayers();
+    navBack();
   }
 }
 let currentGameDetailId = null;
@@ -1186,7 +1282,27 @@ function buildPendingRestore(payload, sourceLabel){
       const isMissing = v => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
       const GAME_FIELDS = ['quarterScores','rawText','predictionCheck','phase','venue','resultRaw',
                            'roundLabel','competitionRaw','year','margin','winner','draw'];
-      const SIDE_FIELDS = ['players','best','ratio'];
+      const SIDE_FIELDS = ['best','ratio'];
+      // Per-PLAYER fields that can legitimately be missing on one source and present on another
+      // for the exact same row — e.g. a JSON backup never carries playhqId at all (only the xlsx
+      // export path does), so restoring a JSON after an xlsx must not blank out ids you already
+      // had. Matched by name+number, which is effectively unique within one game's roster.
+      const PLAYER_ROW_FIELDS = ['playhqId'];
+      const mergePlayerRows = (incomingRows, prevRows) => {
+        if(!Array.isArray(incomingRows) || incomingRows.length === 0) return incomingRows;
+        if(!Array.isArray(prevRows) || prevRows.length === 0) return incomingRows;
+        const prevByRowKey = new Map(prevRows.map(r=> [`${r.number}||${(r.name||'').toLowerCase()}`, r]));
+        return incomingRows.map(row=>{
+          const prevRow = prevByRowKey.get(`${row.number}||${(row.name||'').toLowerCase()}`);
+          if(!prevRow) return row;
+          let rowCarried = false;
+          const mergedRow = { ...row };
+          PLAYER_ROW_FIELDS.forEach(f=>{
+            if(isMissing(mergedRow[f]) && !isMissing(prevRow[f])){ mergedRow[f] = prevRow[f]; rowCarried = true; }
+          });
+          return rowCarried ? mergedRow : row;
+        });
+      };
       // On a duplicate signature, keep whichever existing copy carries the most of the
       // app-only fields, since that's the one with something worth rescuing.
       const richness = g => (g.quarterScores?1:0) + (g.rawText?1:0) + (g.predictionCheck?1:0);
@@ -1212,6 +1328,16 @@ function buildPendingRestore(payload, sourceLabel){
           SIDE_FIELDS.forEach(f=>{
             if(isMissing(side2[f]) && !isMissing(prev[side][f])){ side2[f] = prev[side][f]; carried = true; }
           });
+          // players gets row-by-row merging (see mergePlayerRows above) rather than the
+          // all-or-nothing check above — a non-empty incoming array can still be missing a
+          // per-row field like playhqId that the previous copy had.
+          if(isMissing(side2.players) && !isMissing(prev[side].players)){
+            side2.players = prev[side].players;
+            carried = true;
+          } else {
+            const mergedPlayers = mergePlayerRows(side2.players, prev[side].players);
+            if(mergedPlayers !== side2.players){ side2.players = mergedPlayers; carried = true; }
+          }
           merged[side] = side2;
         });
         if(carried) preservedCount++;
@@ -2018,21 +2144,17 @@ function applyHeadToHeadOrdering(rows){
 // around and overrides the person's own filter changes afterwards.
 let pendingRankPreset = null;
 
-function openPowerRankings(preset){
+function doOpenPowerRankings(preset){
   rankSort = { key: 'rank', dir: 'asc' };
   pendingRankPreset = preset || null;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-power-rankings').classList.add('active');
+  showPanel('power-rankings');
   renderPowerRankings();
 }
-function backToTeamsFromRankings(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="teams"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-teams').classList.add('active');
-  renderTeams();
+function openPowerRankings(preset){
+  doOpenPowerRankings(preset);
+  navPush('power-rankings', 'Power Rankings', 'tools/power-rankings', ()=>doOpenPowerRankings(preset));
 }
+function backToTeamsFromRankings(){ navBack(); }
 
 function renderPowerRankings(){
   const wrap = document.getElementById('powerRankingsWrap');
@@ -2189,19 +2311,15 @@ function renderPowerRankings(){
   });
 }
 
-function openSuggestDivisions(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-suggest-divisions').classList.add('active');
+function doOpenSuggestDivisions(){
+  showPanel('suggest-divisions');
   renderSuggestDivisions();
 }
-function backToTeamsFromDivisions(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="teams"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-teams').classList.add('active');
-  renderTeams();
+function openSuggestDivisions(){
+  doOpenSuggestDivisions();
+  navPush('suggest-divisions', 'Suggest Divisions', 'tools/suggest-divisions', doOpenSuggestDivisions);
 }
+function backToTeamsFromDivisions(){ navBack(); }
 
 function renderSuggestDivisions(){
   const wrap = document.getElementById('suggestDivisionsWrap');
@@ -2758,7 +2876,7 @@ function buildMovementContext(gamesList){
     const rank = divisionRank(getDivision(g)); if(rank==null) return;
     ['teamA','teamB'].forEach(side=>{
       const t = g[side];
-      if(isMergedTeam(t.name)) return;
+      if(isMergedTeam(t.name, yr)) return;
       const k = getClub(t.name) + '||' + getAgeGroupLabel(t.name) + '||' + yr;
       (clubGradeDivisions[k] = clubGradeDivisions[k] || new Set()).add(rank);
     });
@@ -2771,7 +2889,7 @@ function buildMovementContext(gamesList){
     const rank = divisionRank(getDivision(g));
     ['teamA','teamB'].forEach(side=>{
       const t = g[side];
-      const merged = isMergedTeam(t.name);
+      const merged = isMergedTeam(t.name, yr);
       const grade = getAgeGroupLabel(t.name);
       (t.players||[]).forEach(row=>{
         const raw = (row.name||'').trim();
@@ -3155,7 +3273,7 @@ async function renderStorageCheck(){
 }
 
 // ---------- Player movement panel ----------
-let movementFilters = { mode:'league', club:'ALL', transition:'ALL', grade:'ALL', direction:'ALL', includeGaps:false, sort:'grade', chart:'agegroup', showAllClubs:false, lapsedAgeGroup:null, lapsedYear:null, lapsedDivision:null, lapsedSortKey:'games', lapsedSortDir:'desc', linksClubA:null, linksClubB:null };
+let movementFilters = { mode:'league', club:'ALL', transition:'ALL', grade:'ALL', direction:'ALL', includeGaps:false, sort:'grade', chart:'agegroup', showAllClubs:false, lapsedAgeGroup:null, lapsedYear:null, lapsedDivision:null, lapsedSortKey:'games', lapsedSortDir:'desc', linksClubA:null, linksClubB:null, linksExpanded:false };
 // Junior football is graded U12 up to U18; Reserves and Seniors are the open-age tiers. Used by
 // the "All junior ages" filter, which is just every age group minus those two.
 function isJuniorGrade(g){ return /^U\d{1,2}$/.test(g || ''); }
@@ -3171,19 +3289,15 @@ function isJuniorGrade(g){ return /^U\d{1,2}$/.test(g || ''); }
 const GRADE_DISPLAY_ORDER = { 'Seniors':0,'Reserves':1,'U18':2,'U16':3,'U14':4,'U12':5,'U10':6,'U8':7 };
 function gradeDisplayRank(g){ return GRADE_DISPLAY_ORDER[g] ?? 99; }
 
-function openPlayerMovement(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-player-movement').classList.add('active');
+function doOpenPlayerMovement(){
+  showPanel('player-movement');
   renderPlayerMovement();
 }
-function backToPlayersFromMovement(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  const tab = document.querySelector('nav.tabs button[data-tab="players"]');
-  if(tab) tab.classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-players').classList.add('active');
+function openPlayerMovement(){
+  doOpenPlayerMovement();
+  navPush('player-movement', 'Player Movement', 'tools/player-movement', doOpenPlayerMovement);
 }
+function backToPlayersFromMovement(){ navBack(); }
 
 function getLapsedPlayerFilterOptions(){
   return withAllDataFilters(()=>{
@@ -3338,6 +3452,7 @@ function renderPlayerLinks(wrap){
   const { results, seasons, latestYear } = canRun
     ? computePlayerLinks({ clubA:f.linksClubA, clubB:f.linksClubB })
     : { results:[], seasons:[], latestYear:null };
+  const visible = f.linksExpanded ? results : results.slice(0, 3);
 
   const statusCell = r => {
     if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
@@ -3368,7 +3483,8 @@ function renderPlayerLinks(wrap){
       <p class="hint" style="margin:0 0 10px;">Combined into one team ${seasons.length} time${seasons.length===1?'':'s'}: ${seasons.map(s=>`${s.team} (${s.year})`).join(', ')}.</p>
       <p class="hint" style="margin:0 0 10px;">${results.length} player${results.length===1?'':'s'} shared that roster.</p>
       <table><thead><tr><th>Player</th><th>Status</th><th>Team / Division</th><th>Connected via</th><th class="num">Games</th><th class="num">Goals</th><th class="num">Bests</th></tr></thead>
-      <tbody>${results.map(r=>`<tr><td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td><td>${statusCell(r)}</td><td>${r.currentTeamLabel||'<span style="color:var(--muted);">—</span>'}${r.currentDivisionLabel?`<div style="font-size:11.5px;color:var(--muted);">${r.currentDivisionLabel}</div>`:''}</td><td>${r.linkedVia.map(v=>`${v.team} (${v.year})`).join(', ')}</td><td class="num">${r.games}</td><td class="num">${r.goals}</td><td class="num">${r.best}</td></tr>`).join('')}</tbody></table>`
+      <tbody>${visible.map(r=>`<tr><td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td><td>${statusCell(r)}</td><td>${r.currentTeamLabel||'<span style="color:var(--muted);">—</span>'}${r.currentDivisionLabel?`<div style="font-size:11.5px;color:var(--muted);">${r.currentDivisionLabel}</div>`:''}</td><td>${r.linkedVia.map(v=>`${v.team} (${v.year})`).join(', ')}</td><td class="num">${r.games}</td><td class="num">${r.goals}</td><td class="num">${r.best}</td></tr>`).join('')}</tbody></table>
+      ${results.length > 3 ? `<button class="ghost" id="toggleLinksBtn" style="margin-top:12px;">${f.linksExpanded ? 'Show less' : `Show more (${results.length - 3} more)`}</button>` : ''}`
     )}
   `;
   document.getElementById('backToPlayersFromMovement').onclick = backToPlayersFromMovement;
@@ -3380,8 +3496,12 @@ function renderPlayerLinks(wrap){
     if(el) el.onchange = e=>{ movementFilters[key] = cast ? cast(e.target.value) : e.target.value; renderPlayerMovement(); };
   };
   bind('mvMode','mode');
-  bind('linksClubA','linksClubA');
-  bind('linksClubB','linksClubB');
+  const clubASel = document.getElementById('linksClubA');
+  if(clubASel) clubASel.onchange = e=>{ f.linksClubA = e.target.value; f.linksExpanded = false; renderPlayerMovement(); };
+  const clubBSel = document.getElementById('linksClubB');
+  if(clubBSel) clubBSel.onchange = e=>{ f.linksClubB = e.target.value; f.linksExpanded = false; renderPlayerMovement(); };
+  const toggleBtn = document.getElementById('toggleLinksBtn');
+  if(toggleBtn) toggleBtn.onclick = ()=>{ f.linksExpanded = !f.linksExpanded; renderPlayerMovement(); };
 }
 
 function renderPlayerMovement(){
@@ -3732,16 +3852,16 @@ function isPlaceholderPlayerName(name){
 // Every time two players lined up on opposite sides of a game, that's one "encounter".
 // Returns pairs sorted by how often they've faced each other, most first.
 function computeHeadToHeadPairs(){
-  const { playerList } = computeAggregates();
+  const { playerList, idToKey } = computeAggregates();
   const nameByKey = {};
   playerList.forEach(p=>{ nameByKey[p.key] = p; });
 
   const pairData = {};
   getVisibleGames().forEach(g=>{
     const rowsA = g.teamA.players.filter(r=>!isPlaceholderPlayerName(r.name))
-      .map(r=>resolvePlayerIdentityKey(g.teamA.name, r.name, r.tag));
+      .map(r=>resolvePlayerIdentityKeyWithId(g.teamA.name, r.name, r.tag, r.playhqId, idToKey));
     const rowsB = g.teamB.players.filter(r=>!isPlaceholderPlayerName(r.name))
-      .map(r=>resolvePlayerIdentityKey(g.teamB.name, r.name, r.tag));
+      .map(r=>resolvePlayerIdentityKeyWithId(g.teamB.name, r.name, r.tag, r.playhqId, idToKey));
     rowsA.forEach(keyA=>{
       rowsB.forEach(keyB=>{
         const [k1,k2] = [keyA,keyB].sort();
@@ -3812,7 +3932,23 @@ function matchClubPlain(text){
   return { matched:false, club: stripped };
 }
 
-function isMergedTeam(teamName){
+// Team-seasons that are functionally joint/shared squads but weren't NAMED with the usual
+// "Club A / Club B" merge pattern, so the automatic detection below can't catch them — confirmed
+// case-by-case from roster evidence, not guessed from the name. "Portarlington Blue U16" in 2025
+// drew a chunk of its roster straight off Newcomb Power U16 with no other Portarlington history,
+// while the SAME team name in 2024 was a clean single-club side (zero cross-club players) — so
+// this is scoped to the exact season, not the team name in general. Treating it as a merge makes
+// those players' club "ambiguous" for that season (same treatment a real "/" merge gets when no
+// SP tag says which side a player belongs to), rather than wrongly crediting them to Portarlington
+// — which is what was throwing off home-grown status and club history for the Newcomb kids caught
+// up in it. Add more "Team Name|Year" entries here as they're confirmed.
+const MANUAL_MERGED_TEAM_SEASONS = new Set([
+  'Portarlington Blue U16|2025',
+  'Newcomb South Barwon U16|2023'
+]);
+
+function isMergedTeam(teamName, year){
+  if(year!=null && MANUAL_MERGED_TEAM_SEASONS.has(teamName+'|'+year)) return true;
   const stripped = stripAgeToken(teamName||'');
   if(!hasMergeSeparator(stripped)) return false;
   const parts = splitMergeSeparator(stripped).map(s=>s.trim()).filter(Boolean);
@@ -3828,6 +3964,19 @@ function getAllClubsForTeam(teamName){
   const stripped = stripAgeToken(teamName||'');
   if(isMergedTeam(teamName)){
     return splitMergeSeparator(stripped).map(s=>s.trim()).filter(Boolean).map(part=>matchClubPlain(part).club);
+  }
+  // A whole (non-merged) team name that still carries a club prefix in front of the Newcomb
+  // Power/Belmont Lions joint program's own name — e.g. "Belmont Power Lions Pope U14" — would
+  // otherwise match the real, SEPARATE "Belmont Lions" club via matchClubPlain's normal known-club
+  // scan (it shares the words "Belmont" + "Lions"). The words "power" + "lions" together are the
+  // joint-program signal (same rule as the bare "power lions" nickname, "Power" named first =
+  // Newcomb), so that's checked first and wins here. Scoped to this non-merged branch only — a
+  // genuine "/" merge like "Newcomb / Belmont Power Lions U14" is split into its two parts BEFORE
+  // reaching this function, so its "Belmont Power Lions U14" half still resolves the normal way
+  // (to Belmont Lions, correctly keeping the merge as Newcomb + Belmont Lions).
+  const words = normalizeWords(stripped);
+  if(clubNicknames['power lions'] && words.includes('power') && words.includes('lions')){
+    return [clubNicknames['power lions']];
   }
   return [matchClubPlain(stripped).club];
 }
@@ -3999,7 +4148,7 @@ function resolvePlayerKey(rawKey){
   return key;
 }
 
-function resolvePlayerIdentityKey(team, name, tag){
+function rawPlayerIdentityKey(team, name, tag){
   const merged = resolveMergedClubs(team);
   let club;
   if(merged){
@@ -4008,8 +4157,24 @@ function resolvePlayerIdentityKey(team, name, tag){
   } else {
     club = getClub(team);
   }
-  const rawKey = club + '||' + name.toLowerCase();
-  return resolvePlayerKey(rawKey);
+  return club + '||' + name.toLowerCase();
+}
+
+// Kept for the few call sites that only have (team, name, tag) and no game row to read a
+// playhqId from — pure name/club matching, same as before. Prefer resolvePlayerIdentityKey
+// below wherever a playhqId is available, since that's what actually disambiguates people.
+function resolvePlayerIdentityKey(team, name, tag){
+  return resolvePlayerKey(rawPlayerIdentityKey(team, name, tag));
+}
+
+// For code OUTSIDE computeAggregates that needs to land on the exact same canonical key
+// computeAggregates itself would use for this row — e.g. matching a game row up against
+// playerList. Mirrors ensurePlayer's id-first-then-name logic exactly, using the idToKey map
+// computeAggregates returns, so a mover/renamed player (linked via playhqId) resolves to the
+// same key here as everywhere else instead of silently falling through a name-only mismatch.
+function resolvePlayerIdentityKeyWithId(team, name, tag, playhqId, idToKey){
+  const rawKey = resolvePlayerIdentityKey(team, name, tag);
+  return (playhqId && idToKey && idToKey[playhqId]) ? idToKey[playhqId] : rawKey;
 }
 
 function computeAggregates(gamesOverride){
@@ -4017,18 +4182,34 @@ function computeAggregates(gamesOverride){
   if(_sig && _aggCache.has(_sig)) return _aggCache.get(_sig);
   const players = {}; // key -> stats
   const teams = {};   // name -> stats
+  // profile ID -> the canonical key this person was FIRST seen under. A PlayHQ profile id is a
+  // stable per-person identity — once we've linked an id to a key, every later game for that
+  // same id (even under a different club or a differently-spelled name) resolves to the SAME
+  // player record instead of creating a second one or needing a manual alias. First-seen wins:
+  // whichever club/name the person's earliest game in this dataset used becomes their canonical
+  // key, exactly like it already would with no id at all — this only ADDS cross-key linking on
+  // top, it never changes what a name-only lookup would have produced for the first sighting.
+  const idToKey = {};
 
-  function ensurePlayer(team, name, tag){
-    const key = resolvePlayerIdentityKey(team, name, tag);
+  function ensurePlayer(team, name, tag, playhqId){
+    const rawKey = resolvePlayerKey(rawPlayerIdentityKey(team, name, tag));
+    // If this exact person (by PlayHQ id) already has a canonical key from an earlier game in
+    // this pass, use THAT key even though this game's club/name would normally point elsewhere —
+    // this is what lets a real club move or a name-spelling change still land on one player
+    // record without a manual alias. A blank/missing id (fill-ins, private profiles, older
+    // seasons scraped before this was captured) just falls back to the name/club key as before.
+    const key = (playhqId && idToKey[playhqId]) ? idToKey[playhqId] : rawKey;
     if(!players[key]){
       players[key] = {
-        key, name, club: getClub(team), team, teams:new Set(), gamesPlayed:0, totalGoals:0, goalsInWins:0, goalsInLosses:0,
+        key, name, club: getClub(team), team, teams:new Set(), gamesPlayed:0, totalGoals:0, weightedGoals:0, goalsInWins:0, goalsInLosses:0,
         bestCount:0, weightedBest:0, multiGoal2:0, multiGoal3:0, multiGoal5:0,
         shareSum:0, shareGames:0, timeline:[], _bestRun:0, bestStreak:0, playhqId:''
       };
     }
+    if(playhqId && !idToKey[playhqId]) idToKey[playhqId] = key;
     players[key].teams.add(team);
-    players[key].team = team; // games are processed chronologically, so this ends up as their most recent team
+    players[key].team = team;   // games are processed chronologically, so these end up as their
+    players[key].club = getClub(team); // most recent team AND club — a merged mover shows where they are now, not where they started
     return players[key];
   }
   function ensureTeam(name, year){
@@ -4058,6 +4239,18 @@ function computeAggregates(gamesOverride){
   }
 
   const sortedGames = [...(gamesOverride || getVisibleGames())].sort((a,b)=> extractGameDate(a) - extractGameDate(b));
+
+  // Context weight for a player's goals in one game, for the MVP score: rewards goals that MATTER.
+  // Close games count more than blowouts (a goal when it's up for grabs beats the 6th in a romp);
+  // wins get a small premium and losses a small discount (but not zero — 4 in a beaten side still
+  // counts); and a big bag in one game gets gentle diminishing returns so it can't dominate.
+  const contextGoalWeight = (goals, margin, res) => {
+    if(!goals) return 0;
+    const eff = goals <= 1 ? goals : Math.pow(goals, 0.85);          // diminishing returns on a bag
+    const leverage = Math.max(0.6, Math.min(1.5, 1.5 - (margin||0)/100)); // close=1.5 → blowout=0.6
+    const tilt = res === 'W' ? 1.1 : (res === 'L' ? 0.9 : 1.0);       // win premium / loss discount
+    return eff * leverage * tilt;
+  };
 
   sortedGames.forEach(g=>{
     const aRes = g.draw ? 'D' : (g.winner === g.teamA.name ? 'W' : 'L');
@@ -4101,9 +4294,10 @@ function computeAggregates(gamesOverride){
 
     g.teamA.players.forEach(row=>{
       if(isPlaceholderName(row.name)) return;
-      const p = ensurePlayer(g.teamA.name, row.name, row.tag);
+      const p = ensurePlayer(g.teamA.name, row.name, row.tag, row.playhqId);
       if(row.playhqId && !p.playhqId) p.playhqId = row.playhqId;
       p.gamesPlayed++; p.totalGoals += row.goals;
+      p.weightedGoals += contextGoalWeight(row.goals, g.margin, aRes);
       if(aRes==='W') p.goalsInWins += row.goals; else if(aRes==='L') p.goalsInLosses += row.goals;
       if(row.goals>=2) p.multiGoal2++;
       if(row.goals>=3) p.multiGoal3++;
@@ -4117,9 +4311,10 @@ function computeAggregates(gamesOverride){
     });
     g.teamB.players.forEach(row=>{
       if(isPlaceholderName(row.name)) return;
-      const p = ensurePlayer(g.teamB.name, row.name, row.tag);
+      const p = ensurePlayer(g.teamB.name, row.name, row.tag, row.playhqId);
       if(row.playhqId && !p.playhqId) p.playhqId = row.playhqId;
       p.gamesPlayed++; p.totalGoals += row.goals;
+      p.weightedGoals += contextGoalWeight(row.goals, g.margin, bRes);
       if(bRes==='W') p.goalsInWins += row.goals; else if(bRes==='L') p.goalsInLosses += row.goals;
       if(row.goals>=2) p.multiGoal2++;
       if(row.goals>=3) p.multiGoal3++;
@@ -4135,13 +4330,13 @@ function computeAggregates(gamesOverride){
     g.teamA.best.forEach((name,idx)=>{
       if(isPlaceholderName(name)) return;
       const matchRow = g.teamA.players.find(r=>r.name.toLowerCase()===name.toLowerCase());
-      const p = ensurePlayer(g.teamA.name, name, matchRow ? matchRow.tag : null);
+      const p = ensurePlayer(g.teamA.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null);
       p.bestCount++; p.weightedBest += Math.max(6-idx, 1);
     });
     g.teamB.best.forEach((name,idx)=>{
       if(isPlaceholderName(name)) return;
       const matchRow = g.teamB.players.find(r=>r.name.toLowerCase()===name.toLowerCase());
-      const p = ensurePlayer(g.teamB.name, name, matchRow ? matchRow.tag : null);
+      const p = ensurePlayer(g.teamB.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null);
       p.bestCount++; p.weightedBest += Math.max(6-idx, 1);
     });
   });
@@ -4162,8 +4357,10 @@ function computeAggregates(gamesOverride){
     const rb3 = rollingBestStat(p.timeline, 3);
     const rb5 = rollingBestStat(p.timeline, 5);
     const rollingGoals3 = rollingAvg(p.timeline, 3);
-    // MVP score: goals(3pts) + best-player rank points (1-6pts/game, already weighted) + games played(1pt, durability) + goals in wins(+1 bonus, rewards impact in winning games)
-    const mvpScore = (p.totalGoals*3) + p.weightedBest + p.gamesPlayed + p.goalsInWins;
+    // MVP score: context-weighted goals (x2 — close games worth more than blowouts, wins over
+    // losses, gentle diminishing on big bags) + best-player rank points (1-6/game) + games played
+    // (durability). The win/loss context now lives inside weightedGoals, so no separate win bonus.
+    const mvpScore = (p.weightedGoals*2) + p.weightedBest + p.gamesPlayed;
     // Form score: recent scoring rate(3pts/goal) + recent best-player recognition(2pts per appearance in last 3 games)
     const formScore = +((rollingGoals3*3) + (rb3.count*2)).toFixed(1);
     const ageGroup = getAgeGroupLabel(p.team);
@@ -4197,7 +4394,7 @@ function computeAggregates(gamesOverride){
     };
   });
 
-  const _result = { playerList, teamList };
+  const _result = { playerList, teamList, idToKey };
   if(_sig) _aggCache.set(_sig, _result);
   return _result;
 }
@@ -4461,7 +4658,7 @@ function renderPlayers(){
       ['bestStreak','Best streak','num','Longest run of consecutive games named in the Best Players list'],
       ['rolling3Best','L3 bests','num','How many of their last 3 games they were named best player in'],
       ['rolling5Best','L5 bests','num','How many of their last 5 games they were named best player in'],
-      ['mvpScore','MVP pts','num','Season MVP score: (goals × 3) + best-player rank points + games played + (goals in wins as a bonus). A custom weighting, not an official stat — sortable across All teams for a cross-team ranking.'],
+      ['mvpScore','MVP pts','num','Season MVP score: context-weighted goals (×2 — goals in close games count more than blowouts, wins more than losses, with gentle diminishing returns on a big bag) + best-player rank points + games played. A custom weighting, not an official stat — sortable across All teams for a cross-team ranking.'],
       ['formScore','Form score','num','Recent form score: (avg goals last 3 games × 3) + (best-player appearances in last 3 games × 2). Higher = hotter right now.']
     ];
     wrap.innerHTML = `
@@ -5168,11 +5365,16 @@ function renderYearFilterBar(){
   if(yearFilter === null) yearFilter = getDefaultYearSet(years);
   const el = document.getElementById('yearFilterPicker');
   if(years.length===0){ el.innerHTML = `<span class="hint" style="margin:0;">No dated games yet</span>`; return; }
-  el.innerHTML = years.map(y=>`<span class="chip ${yearFilter.has(y)?'active':''}" data-year="${y}">${y}</span>`).join('');
+  el.innerHTML = `<span class="chip ${years.every(y=>yearFilter.has(y))?'active':''}" data-all="1" style="font-weight:600;" title="Select every year; click again to go back to the current-year default">All years</span>`
+    + years.map(y=>`<span class="chip ${yearFilter.has(y)?'active':''}" data-year="${y}">${y}</span>`).join('');
   el.querySelectorAll('.chip').forEach(chip=>{
     chip.onclick = ()=>{
-      const y = parseInt(chip.dataset.year,10);
-      if(yearFilter.has(y)) yearFilter.delete(y); else yearFilter.add(y);
+      if(chip.dataset.all){
+        yearFilter = years.every(y=>yearFilter.has(y)) ? getDefaultYearSet(years) : new Set(years);
+      } else {
+        const y = parseInt(chip.dataset.year,10);
+        if(yearFilter.has(y)) yearFilter.delete(y); else yearFilter.add(y);
+      }
       goalsChartSelected = null; cumulativeChartSelected = null; lastTeamFilterForCharts = null;
       renderAll();
     };
@@ -5460,6 +5662,9 @@ function refreshCurrentDetailView(){
   if(document.getElementById('panel-squad-progressions').classList.contains('active')){
     renderSquadProgressions();
   }
+  if(document.getElementById('panel-home-grown').classList.contains('active')){
+    renderHomeGrown();
+  }
   if(document.getElementById('panel-games').classList.contains('active') && gamesSubView){
     renderGamesSubView();
   }
@@ -5665,15 +5870,26 @@ let teamGameLogExpanded = false;
 let playerH2HExpanded = false;
 let teammateOverlapExpanded = false;
 let playerTeammateLinksFilter = 'ALL';
+let playerTeammateLinksExpanded = false;
 
-function openPlayerDetail(key){
+function doOpenPlayerDetail(key){
   currentPlayerDetailKey = key;
   playerGameLogExpanded = false;
+  playerTeammateLinksExpanded = false;
   playerDetailReturnTo = null;   // default: a plain open has nowhere special to return to
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-player-detail').classList.add('active');
+  showPanel('player-detail');
   renderPlayerDetail(key);
+}
+function playerLabelFor(key){
+  try{
+    const { playerList } = computeAggregates();
+    const p = playerList.find(pl => pl.key === key);
+    return p ? p.name : 'Player';
+  }catch(e){ return 'Player'; }
+}
+function openPlayerDetail(key){
+  doOpenPlayerDetail(key);
+  navPush('player-detail', playerLabelFor(key), 'player/'+encodeURIComponent(key), ()=>doOpenPlayerDetail(key));
 }
 // Used by the handful of places (Lapsed Players, Check player links, another player's own
 // Player Links section) where "Back" should return somewhere more specific than the plain
@@ -5869,7 +6085,12 @@ function computePlayerTeammates(playerObj){
     const latestYear = gamesList.reduce((m,g)=>{ const y=getGameYear(g); return y && y>m ? y : m; }, 0);
 
     const seasonsOf = pl => new Set(pl.timeline.filter(t=>t.date).map(t=> t.team+'__'+new Date(t.date).getFullYear()));
-    const mySeasons = seasonsOf(playerObj);
+    // Measure the subject's seasons from the FULL all-years list we just built here — NOT from the
+    // passed-in playerObj, which reflects whatever year filter was active when the profile opened.
+    // This section is "everything logged under this profile", so it must not shrink under a year
+    // filter (that's what made former-club teammates vanish when viewing under a narrow filter).
+    const selfAllYears = playerList.find(pl=> pl.key === playerObj.key) || playerObj;
+    const mySeasons = seasonsOf(selfAllYears);
 
     const teammates = [];
     playerList.forEach(pl=>{
@@ -5890,7 +6111,10 @@ function computePlayerTeammates(playerObj){
       const { team: currentTeamLabel, divisionLabel: currentDivisionLabel } = currentSeasonTeamDivision(latest, years[0], divisionsOf, gradeHasDivisions);
 
       teammates.push({
-        name: pl.name, playerKey: confidentClub ? resolvePlayerKey(confidentClub + '||' + nm) : null,
+        // Link to their CURRENT identity when we can confidently resolve one club; otherwise fall
+        // back to pl.key — the club-scoped identity that actually shared the season here (still a
+        // real profile) — so a player whose latest season is a joint/two-club side stays clickable.
+        name: pl.name, playerKey: confidentClub ? resolvePlayerKey(confidentClub + '||' + nm) : pl.key,
         sharedSeasons: shared,
         mostRecentYear: years[0] || null,
         currentClub: confidentClub, currentTeams: latest ? [...latest.teams] : [],
@@ -5910,8 +6134,12 @@ function renderPlayerTeammateLinks(p){
   if(!teammates.length){ wrap.innerHTML = ''; return; }
 
   const clubOptions = [...new Set(teammates.map(t=>t.currentClub).filter(Boolean))].sort();
-  if(!['ALL', ...clubOptions].includes(playerTeammateLinksFilter)) playerTeammateLinksFilter = 'ALL';
-  const filtered = playerTeammateLinksFilter==='ALL' ? teammates : teammates.filter(t=>t.currentClub===playerTeammateLinksFilter);
+  const hasLapsed = teammates.some(t=>t.status==='lapsed');
+  if(!['ALL', 'LAPSED', ...clubOptions].includes(playerTeammateLinksFilter)) playerTeammateLinksFilter = 'ALL';
+  const filtered = playerTeammateLinksFilter==='ALL' ? teammates
+    : playerTeammateLinksFilter==='LAPSED' ? teammates.filter(t=>t.status==='lapsed')
+    : teammates.filter(t=>t.currentClub===playerTeammateLinksFilter);
+  const visible = playerTeammateLinksExpanded ? filtered : filtered.slice(0, 3);
 
   const statusCell = r => {
     if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
@@ -5925,23 +6153,27 @@ function renderPlayerTeammateLinks(p){
     <div class="controls-row" style="margin-bottom:12px;">
       <select id="playerTeammateClubFilter">
         <option value="ALL" ${playerTeammateLinksFilter==='ALL'?'selected':''}>Any club — show everyone</option>
+        ${hasLapsed ? `<option value="LAPSED" ${playerTeammateLinksFilter==='LAPSED'?'selected':''}>Not currently playing</option>` : ''}
         ${clubOptions.map(c=>`<option value="${c}" ${playerTeammateLinksFilter===c?'selected':''}>Last played at ${c}</option>`).join('')}
       </select>
     </div>
     ${filtered.length===0 ? '<div class="empty">Nobody matches that filter.</div>' : `
     <table><thead><tr><th>Teammate</th><th>Shared season(s)</th><th>Status</th><th>Team / Division</th></tr></thead>
-    <tbody>${filtered.map(r=>`<tr>
+    <tbody>${visible.map(r=>`<tr>
       <td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td>
       <td>${r.sharedSeasons.map(s=>`${s.team} (${s.year})`).join(', ')}</td>
       <td>${statusCell(r)}</td>
       <td>${r.currentTeamLabel||'<span style="color:var(--muted);">—</span>'}${r.currentDivisionLabel?`<div style="font-size:11.5px;color:var(--muted);">${r.currentDivisionLabel}</div>`:''}</td>
-    </tr>`).join('')}</tbody></table>`}
+    </tr>`).join('')}</tbody></table>
+    ${filtered.length > 3 ? `<button class="ghost" id="toggleTeammateLinksBtn" style="margin-top:12px;">${playerTeammateLinksExpanded ? 'Show less' : `Show more (${filtered.length - 3} more)`}</button>` : ''}`}
   `;
   wrap.querySelectorAll('.player-link').forEach(el=>{
     el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, ()=> openPlayerDetail(p.key));
   });
   const sel = document.getElementById('playerTeammateClubFilter');
-  if(sel) sel.onchange = e=>{ playerTeammateLinksFilter = e.target.value; renderPlayerTeammateLinks(p); };
+  if(sel) sel.onchange = e=>{ playerTeammateLinksFilter = e.target.value; playerTeammateLinksExpanded = false; renderPlayerTeammateLinks(p); };
+  const toggleBtn = document.getElementById('toggleTeammateLinksBtn');
+  if(toggleBtn) toggleBtn.onclick = ()=>{ playerTeammateLinksExpanded = !playerTeammateLinksExpanded; renderPlayerTeammateLinks(p); };
 }
 
 // The team-wide version of Player Links: instead of one person's teammates, the union of every
@@ -6004,6 +6236,55 @@ function computeTeamPossibleLinks(teamObj, playerList){
   });
 }
 
+// Lists this team-season's roster, each with an expandable club history (every club/season that
+// player has turned out for), so you can see at a glance who's home-grown vs recruited from elsewhere.
+function renderTeamSquadOrigins(t, roster){
+  const wrap = document.getElementById('teamSquadOriginsWrap');
+  if(!wrap) return;
+  const currentClub = getClub(t.name);
+  const { trail, nameClubs } = withAllDataFilters(()=>{
+    const gl = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    return { trail: buildMovementContext(gl).trail, nameClubs: computeNameClubs(gl) };
+  });
+  const players = [...roster].sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+  if(!players.length){ wrap.innerHTML = '<div class="empty">No roster on file for this team.</div>'; return; }
+  const visible = teamSquadOriginsExpanded ? players : players.slice(0, 3);
+  const playerBlock = p => {
+    const nm = (p.name||'').toLowerCase();
+    const byYear = trail[nm] || {};
+    const yrs = Object.keys(byYear).map(Number).sort((a,b)=> a-b);
+    const clubs = nameClubs[nm] || new Set();   // joint teams excluded, so they don't break home-grown
+    const otherClubs = [...clubs].filter(c=> c !== currentClub);
+    const homeGrown = clubs.size===1 && clubs.has(currentClub);
+    const badge = homeGrown
+      ? '<span class="win-tag" style="margin-left:6px;">Home grown</span>'
+      : (otherClubs.length ? `<span class="tag" style="margin-left:6px;color:var(--gold);">+${otherClubs.length} other club${otherClubs.length>1?'s':''}</span>` : '');
+    const seasonRows = yrs.map(y=>{
+      const e = byYear[y];
+      const eClubs = [...e.clubs].filter(Boolean);
+      const elsewhere = eClubs.some(c=> c !== currentClub);
+      return `<tr><td>${y}</td><td>${[...e.teams].join(', ')}</td><td>${elsewhere ? `<span style="color:var(--gold);">${eClubs.join(' / ')}</span>` : '<span style="color:var(--muted);">—</span>'}</td></tr>`;
+    }).join('');
+    return `<details class="group-details" style="margin-bottom:4px;">
+      <summary style="cursor:pointer;"><strong>${p.name}</strong>${badge}</summary>
+      <div style="padding:6px 0 10px 14px;">
+        ${homeGrown ? `<p class="hint" style="margin:0 0 6px;">Only ever at ${currentClub}.</p>`
+            : (otherClubs.length ? `<p class="hint" style="margin:0 0 6px;">Also played at: ${otherClubs.join(', ')}.</p>`
+            : `<p class="hint" style="margin:0 0 6px;color:var(--muted);">No cross-club history on file.</p>`)}
+          <table style="max-width:560px;"><thead><tr><th>Year</th><th>Team</th><th>Club (if different)</th></tr></thead><tbody>${seasonRows || '<tr><td colspan="3" class="empty">—</td></tr>'}</tbody></table>
+          <p style="margin:6px 0 0;"><span class="player-link" data-key="${p.key}" style="color:var(--gold);cursor:pointer;">View ${p.name}'s profile ↗</span></p>
+        </div>
+      </details>`;
+  };
+  wrap.innerHTML = `
+    <p class="hint" style="margin:0 0 8px;">Everyone who played for ${t.name}${t.year? ' in '+t.year : ''}. Open a name to see every club and season they've turned out for.</p>
+    ${visible.map(playerBlock).join('')}
+    ${players.length > 3 ? `<button class="ghost" id="toggleTeamSquadOriginsBtn" style="margin-top:8px;">${teamSquadOriginsExpanded ? 'Show less' : `Show more (${players.length - 3} more)`}</button>` : ''}`;
+  wrap.querySelectorAll('.player-link').forEach(el=> el.onclick = ()=> openPlayerDetail(el.dataset.key));
+  const toggleBtn = document.getElementById('toggleTeamSquadOriginsBtn');
+  if(toggleBtn) toggleBtn.onclick = ()=>{ teamSquadOriginsExpanded = !teamSquadOriginsExpanded; renderTeamSquadOrigins(t, roster); };
+}
+
 function renderTeamPossibleLinks(teamObj, playerList){
   const wrap = document.getElementById('teamPossibleLinksWrap');
   if(!wrap) return;
@@ -6052,6 +6333,7 @@ function renderTeamPossibleLinks(teamObj, playerList){
     if(typeof av === 'string') return av.localeCompare(bv) * dirMul;
     return ((av ?? 0) - (bv ?? 0)) * dirMul;
   });
+  const visible = teamPossibleLinksExpanded ? sorted : sorted.slice(0, 3);
   const thHtml = COLUMNS.map(c=>{
     const active = teamPossibleLinksSort.key === c.key;
     const arrow = active ? (teamPossibleLinksSort.dir==='asc' ? ' ▲' : ' ▼') : '';
@@ -6070,12 +6352,13 @@ function renderTeamPossibleLinks(teamObj, playerList){
     </div>
     ${filtered.length===0 ? '<div class="empty">Nobody matches that filter.</div>' : `
     <table><thead><tr>${thHtml}</tr></thead>
-    <tbody>${sorted.map(r=>`<tr style="vertical-align:top;">
+    <tbody>${visible.map(r=>`<tr style="vertical-align:top;">
       <td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td>
       <td>${statusCell(r)}</td>
       <td>${r.currentTeamLabel||'<span style="color:var(--muted);">—</span>'}${r.currentDivisionLabel?`<div style="font-size:11.5px;color:var(--muted);">${r.currentDivisionLabel}</div>`:''}</td>
       <td>${connectionsCell(r)}</td>
-    </tr>`).join('')}</tbody></table>`}
+    </tr>`).join('')}</tbody></table>
+    ${sorted.length > 3 ? `<button class="ghost" id="toggleTeamPossibleLinksBtn" style="margin-top:12px;">${teamPossibleLinksExpanded ? 'Show less' : `Show more (${sorted.length - 3} more)`}</button>` : ''}`}
   `;
   wrap.querySelectorAll('.player-link').forEach(el=>{
     el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, ()=> openTeamDetail(teamObj.key));
@@ -6092,7 +6375,9 @@ function renderTeamPossibleLinks(teamObj, playerList){
     };
   });
   const sel = document.getElementById('teamPossibleLinksFilter');
-  if(sel) sel.onchange = e=>{ teamPossibleLinksFilter = e.target.value; renderTeamPossibleLinks(teamObj, playerList); };
+  if(sel) sel.onchange = e=>{ teamPossibleLinksFilter = e.target.value; teamPossibleLinksExpanded = false; renderTeamPossibleLinks(teamObj, playerList); };
+  const toggleBtn = document.getElementById('toggleTeamPossibleLinksBtn');
+  if(toggleBtn) toggleBtn.onclick = ()=>{ teamPossibleLinksExpanded = !teamPossibleLinksExpanded; renderTeamPossibleLinks(teamObj, playerList); };
 }
 
 function renderPlayerDetail(key){
@@ -6331,6 +6616,11 @@ function renderPlayerDetail(key){
     return +(slice.reduce((s,t)=>s+t.goals,0)/slice.length).toFixed(2);
   });
   if(window._playerFormChartInstance) window._playerFormChartInstance.destroy();
+  // Goals are whole numbers, so the y-axis uses whole-goal gridlines (no 0.2-goal ticks), and gives
+  // low scorers headroom: top out at their best single-game tally + 2 rather than hugging their max.
+  const maxGoalsInGame = Math.max(...goalsData, 0);
+  const goalsAxisMax = maxGoalsInGame + 2;
+  const goalsAxisStep = Math.max(1, Math.ceil(goalsAxisMax / 8)); // keeps ticks whole and uncrowded
   window._playerFormChartInstance = new Chart(document.getElementById('playerFormChart').getContext('2d'), {
     data:{
       labels,
@@ -6343,7 +6633,7 @@ function renderPlayerDetail(key){
     plugins:[yearBoundaryPlugin],
     options:{
       responsive:true, maintainAspectRatio:false,
-      scales:{ x:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } }, y:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } } },
+      scales:{ x:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } }, y:{ min:0, max:goalsAxisMax, ticks:{ color:'#8FA0A3', stepSize:goalsAxisStep, precision:0 }, grid:{ color:'#2E3A3E' } } },
       plugins:{
         legend:{ labels:{ color:'#EDF1F0' } },
         title:{ display:true, text:'Goals per game with rolling form', color:'#EDF1F0' },
@@ -6386,21 +6676,23 @@ function backToPlayers(){
   renderPlayers();
 }
 
-function openGameDetail(id){
+function gameLabelFor(id){
+  const g = games.find(x=>x.id===id);
+  return g ? `${g.teamA.name} v ${g.teamB.name}` : 'Game';
+}
+function doOpenGameDetail(id){
   currentGameDetailId = id;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-game-detail').classList.add('active');
+  showPanel('game-detail');
   renderGameDetail(id, false);
+}
+function openGameDetail(id){
+  doOpenGameDetail(id);
+  navPush('game-detail', gameLabelFor(id), 'game/'+encodeURIComponent(id), ()=>doOpenGameDetail(id));
 }
 
 function backToGames(){
   currentGameDetailId = null;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="games"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-games').classList.add('active');
-  renderGamesLanding();
+  navBack();
 }
 
 function renderFixturesList(){
@@ -6578,20 +6870,22 @@ function renderFixturesList(){
   flushFixtureSnapshots();
 }
 
-function openFixturePreview(fixtureId){
+function fixtureLabelFor(fixtureId){
+  const f = fixtures.find(x=>x.id===fixtureId);
+  return f ? `${f.teamA} v ${f.teamB}` : 'Fixture';
+}
+function doOpenFixturePreview(fixtureId){
   currentFixturePreviewId = fixtureId;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-fixture-preview').classList.add('active');
+  showPanel('fixture-preview');
   renderFixturePreview(fixtureId);
 }
+function openFixturePreview(fixtureId){
+  doOpenFixturePreview(fixtureId);
+  navPush('fixture-preview', fixtureLabelFor(fixtureId), 'fixture/'+encodeURIComponent(fixtureId), ()=>doOpenFixturePreview(fixtureId));
+}
 function backToFixturesList(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="games"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-games').classList.add('active');
   gamesSubView = 'upcoming';
-  renderGamesLanding();
+  navBack();
 }
 
 function renderFixturePreview(fixtureId){
@@ -6730,19 +7024,17 @@ function renderFixturePreview(fixtureId){
   document.getElementById('backToFixturesList').onclick = backToFixturesList;
 }
 
-function openPredictionAccuracy(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-prediction-accuracy').classList.add('active');
+function doOpenPredictionAccuracy(){
+  showPanel('prediction-accuracy');
   renderPredictionAccuracy();
 }
+function openPredictionAccuracy(){
+  doOpenPredictionAccuracy();
+  navPush('prediction-accuracy', 'Prediction Accuracy', 'tools/prediction-accuracy', doOpenPredictionAccuracy);
+}
 function backToFixturesFromAccuracy(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="games"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-games').classList.add('active');
   gamesSubView = 'upcoming';
-  renderGamesLanding();
+  navBack();
 }
 
 function renderPredictionAccuracy(){
@@ -6782,24 +7074,33 @@ function renderPredictionAccuracy(){
 }
 
 let teamDetailSort = { key:'totalGoals', dir:'desc' };
+let teamRosterExpanded = false;
+let teamSquadOriginsExpanded = false;
+let teamPossibleLinksExpanded = false;
 
-function openTeamDetail(teamKey){
+function teamLabelFor(teamKey){
+  try{
+    const { teamList } = computeAggregates();
+    const t = teamList.find(x=>x.key===teamKey);
+    return t ? t.name : 'Team';
+  }catch(e){ return 'Team'; }
+}
+function doOpenTeamDetail(teamKey){
   currentTeamDetailKey = teamKey;
   teamDetailSort = { key:'totalGoals', dir:'desc' };
   teamGameLogExpanded = false;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-team-detail').classList.add('active');
+  teamRosterExpanded = false;
+  teamSquadOriginsExpanded = false;
+  teamPossibleLinksExpanded = false;
+  showPanel('team-detail');
   renderTeamDetail(teamKey);
 }
-
-function backToTeams(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="teams"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-teams').classList.add('active');
-  renderTeams();
+function openTeamDetail(teamKey){
+  doOpenTeamDetail(teamKey);
+  navPush('team-detail', teamLabelFor(teamKey), 'team/'+encodeURIComponent(teamKey), ()=>doOpenTeamDetail(teamKey));
 }
+
+function backToTeams(){ navBack(); }
 
 function leaderboardBox(title, tip, list, valueFn){
   return `
@@ -7015,6 +7316,8 @@ function renderTeamDetail(teamKey){
       : `<h3 style="font-size:14px;margin-top:24px;">Average points per quarter (for vs against)</h3><p class="hint" style="color:var(--muted);margin-top:-4px;">No quarter-by-quarter scores are on file for ${t.name}'s games, so there's nothing to chart here yet — this fills in once games with quarter breakdowns are recorded.</p>`}
     <h3 style="font-size:14px;margin-top:24px;">Roster</h3>
     <div id="teamDetailRosterWrap"></div>
+    <h3 style="font-size:14px;margin-top:24px;">Squad — where they've played</h3>
+    <div id="teamSquadOriginsWrap"></div>
     <h3 style="font-size:14px;margin-top:24px;">Recent games</h3>
     <div id="teamGameLogWrap"></div>
     <div id="teamPossibleLinksWrap"></div>
@@ -7036,6 +7339,7 @@ function renderTeamDetail(teamKey){
   const squadTrend = getCohortProgression(getTeamCohort(playerList, t));
   const trendClass = tr => tr==='Improved' ? 'win-tag' : (tr==='Dropped back' ? 'loss-tag' : '');
   renderTeamPossibleLinks(t, playerList);
+  renderTeamSquadOrigins(t, roster);
   document.getElementById('clubHistoryWrap').innerHTML = squadTrend.length===0 ? '<div class="empty">No prior-season data yet for this squad.</div>' : `
     <table style="max-width:650px;margin-bottom:20px;">
       <thead><tr><th>Year</th><th>Team(s)</th><th>Division(s)</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th>Trend</th></tr></thead>
@@ -7063,7 +7367,7 @@ function renderTeamDetail(teamKey){
   if(scopeSeasonBtn) scopeSeasonBtn.onclick = ()=>{ teamSplitScope = 'season'; renderTeamDetail(currentTeamDetailKey); };
   if(scopeSquadBtn) scopeSquadBtn.onclick = ()=>{ teamSplitScope = 'squad'; renderTeamDetail(currentTeamDetailKey); };
 
-  renderTeamRoster(teamName);
+  renderTeamRoster(t);
   renderTeamGameLog(teamName, teamGamesDesc, resultFor);
 
   if(typeof Chart !== 'undefined'){
@@ -7118,15 +7422,16 @@ function renderTeamDetail(teamKey){
   }
 }
 
-function renderTeamRoster(teamName){
+function renderTeamRoster(teamObj){
   const { playerList } = computeAggregates();
-  const roster = getTeamScopedRoster(playerList, teamName);
+  const roster = getTeamScopedRoster(playerList, teamObj);
   roster.sort((a,b)=>{
     const cmp = compareValues(a, b, teamDetailSort.key);
     return teamDetailSort.dir==='asc' ? cmp : -cmp;
   });
   const wrap = document.getElementById('teamDetailRosterWrap');
   if(roster.length===0){ wrap.innerHTML = `<div class="empty">No players recorded for this team yet.</div>`; return; }
+  const visible = teamRosterExpanded ? roster : roster.slice(0, 3);
   const cols = [
     ['name','Player','','Player name'],
     ['gamesPlayed','GP','num','Games played'],
@@ -7141,7 +7446,7 @@ function renderTeamRoster(teamName){
     <table>
       <thead><tr>${cols.map(([key,label,cls,tip])=>`<th class="${cls} sortable" data-key="${key}" title="${tip}">${label}${arrowFor(key, teamDetailSort)}</th>`).join('')}</tr></thead>
       <tbody>
-        ${roster.map(p=>`
+        ${visible.map(p=>`
           <tr>
             <td><span class="player-link" data-key="${p.key}">${p.name}</span></td>
             <td class="num">${p.gamesPlayed}</td>
@@ -7154,7 +7459,8 @@ function renderTeamRoster(teamName){
           </tr>
         `).join('')}
       </tbody>
-    </table>`;
+    </table>
+    ${roster.length > 3 ? `<button class="ghost" id="toggleTeamRosterBtn" style="margin-top:12px;">${teamRosterExpanded ? 'Show less' : `Show more (${roster.length - 3} more)`}</button>` : ''}`;
   wrap.querySelectorAll('.player-link').forEach(el=>{
     el.onclick = ()=> openPlayerDetail(el.dataset.key);
   });
@@ -7163,9 +7469,11 @@ function renderTeamRoster(teamName){
       const key = th.dataset.key;
       if(teamDetailSort.key===key){ teamDetailSort.dir = teamDetailSort.dir==='asc'?'desc':'asc'; }
       else { teamDetailSort = { key, dir: key==='name'?'asc':'desc' }; }
-      renderTeamRoster(teamName);
+      renderTeamRoster(teamObj);
     };
   });
+  const toggleBtn = document.getElementById('toggleTeamRosterBtn');
+  if(toggleBtn) toggleBtn.onclick = ()=>{ teamRosterExpanded = !teamRosterExpanded; renderTeamRoster(teamObj); };
 }
 
 function extractByeDate(b){
@@ -7232,22 +7540,18 @@ let mergePlayersChecked = new Set();
 let mergePlayersSearchText = '';
 let mergePlayersKeeper = null;
 
-function openMergePlayers(){
+function doOpenMergePlayers(){
   mergePlayersChecked = new Set();
   mergePlayersSearchText = '';
   mergePlayersKeeper = null;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-merge-players').classList.add('active');
+  showPanel('merge-players');
   renderMergePlayers();
 }
-function backToPlayersFromMerge(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="players"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-players').classList.add('active');
-  renderPlayers();
+function openMergePlayers(){
+  doOpenMergePlayers();
+  navPush('merge-players', 'Merge Players', 'tools/merge-players', doOpenMergePlayers);
 }
+function backToPlayersFromMerge(){ navBack(); }
 
 function renderMergePlayers(){
   const { playerList } = computeAggregates();
@@ -7426,19 +7730,15 @@ function renderSuggestedMatches(){
   });
 }
 
-function openManageClubs(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-manage-clubs').classList.add('active');
+function doOpenManageClubs(){
+  showPanel('manage-clubs');
   renderManageClubs();
 }
-function backToTeamsFromManageClubs(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="teams"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-teams').classList.add('active');
-  renderTeams();
+function openManageClubs(){
+  doOpenManageClubs();
+  navPush('manage-clubs', 'Manage Clubs', 'tools/manage-clubs', doOpenManageClubs);
 }
+function backToTeamsFromManageClubs(){ navBack(); }
 
 function renderManageClubs(){
   const wrap = document.getElementById('manageClubsWrap');
@@ -7584,19 +7884,15 @@ function renderManageClubs(){
   };
 }
 
-function openTopPlayers(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-top-players').classList.add('active');
+function doOpenTopPlayers(){
+  showPanel('top-players');
   renderTopPlayers();
 }
-function backToPlayersFromTop(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="players"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-players').classList.add('active');
-  renderPlayers();
+function openTopPlayers(){
+  doOpenTopPlayers();
+  navPush('top-players', 'Top Players', 'tools/top-players', doOpenTopPlayers);
 }
+function backToPlayersFromTop(){ navBack(); }
 
 function renderTopPlayers(){
   const { playerList } = computeAggregates();
@@ -7691,21 +7987,17 @@ function renderTopPlayers(){
   });
 }
 
-function openComparePlayers(presetKey){
+function doOpenComparePlayers(presetKey){
   comparePlayersSelected = [presetKey || null, null];
   comparePlayersSearch = ['', ''];
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-compare-players').classList.add('active');
+  showPanel('compare-players');
   renderComparePlayers();
 }
-function backToPlayersFromCompare(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="players"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-players').classList.add('active');
-  renderPlayers();
+function openComparePlayers(presetKey){
+  doOpenComparePlayers(presetKey);
+  navPush('compare-players', 'Compare Players', 'tools/compare-players', ()=>doOpenComparePlayers(presetKey));
 }
+function backToPlayersFromCompare(){ navBack(); }
 
 function statRow(label, tip, a, b, higherBetter=true){
   let aClass = '', bClass = '';
@@ -8022,23 +8314,19 @@ function renderPlayerComparisonResult(playerList){
   }
 }
 
-function openCompareTeams(presetKey){
+function doOpenCompareTeams(presetKey){
   compareTeamsSelected = [presetKey || null, null];
   compareTeamsSearch = ['', ''];
   playerH2HExpanded = false;
   teammateOverlapExpanded = false;
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-compare-teams').classList.add('active');
+  showPanel('compare-teams');
   renderCompareTeams();
 }
-function backToTeamsFromCompare(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('nav.tabs button[data-tab="teams"]').classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-teams').classList.add('active');
-  renderTeams();
+function openCompareTeams(presetKey){
+  doOpenCompareTeams(presetKey);
+  navPush('compare-teams', 'Compare Teams', 'tools/compare-teams', ()=>doOpenCompareTeams(presetKey));
 }
+function backToTeamsFromCompare(){ navBack(); }
 
 function renderCompareTeams(){
   const { teamList } = computeAggregates();
@@ -8490,17 +8778,288 @@ function computeSquadImprovement(){
   return out;
 }
 
-function openSquadProgressions(preset){
+function doOpenSquadProgressions(preset){
   if(preset){
     if(preset.year != null) squadProgFilters.year = String(preset.year);
     if(preset.ageGroup != null) squadProgFilters.ageGroup = preset.ageGroup==='Other' ? 'ALL' : preset.ageGroup;
     squadProgFilters.division = 'ALL';
     squadProgFilters.trend = 'ALL';
   }
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-squad-progressions').classList.add('active');
+  showPanel('squad-progressions');
   renderSquadProgressions();
+}
+function openSquadProgressions(preset){
+  doOpenSquadProgressions(preset);
+  navPush('squad-progressions', 'Squad Progressions', 'tools/squad-progressions', ()=>doOpenSquadProgressions(preset));
+}
+
+// ─── Home grown (one-club players) ─────────────────────────────────────────────────────────
+// "Home grown" = a player who has only ever appeared for the ONE club across every season on file.
+// Player history/clubs come from buildMovementContext's trail (name -> year -> resolved clubs), so
+// this respects all the club resolution (nicknames, merged-team handling) the rest of the app uses.
+let homeGrownFilters = { mode:'clubs', minPlayers:10, minRoster:10, search:'', year:'ALL', ageGroup:'ALL', division:'ALL', club:'ALL' };
+let homeGrownDetail = null; // {name, year} when drilled into a single team-season
+
+// Each player's set of clubs, counting NON-merged teams only. Joint/merged (e.g. "Newcomb / Belmont
+// Power Lions") sides don't count toward which club a player belongs to — so a home-club kid who
+// turns out for the joint side still reads as home-grown, and joint appearances never wrongly split
+// someone across two clubs. Players whose ONLY appearances are joint teams end up with no club and
+// are simply left out of the home-grown tallies (there's no single club to credit them to).
+function computeNameClubs(gamesList){
+  const nameClubs = {};
+  gamesList.forEach(g=>{
+    ['teamA','teamB'].forEach(side=>{
+      const t = g[side]; if(!t || isMergedTeam(t.name, getGameYear(g))) return;
+      const club = getClub(t.name); if(!club) return;
+      (t.players||[]).forEach(row=>{
+        const nm = (row.name||'').trim().toLowerCase();
+        if(!nm || isPlaceholderPlayerName(row.name)) return;
+        (nameClubs[nm] = nameClubs[nm] || new Set()).add(club);
+      });
+    });
+  });
+  return nameClubs;
+}
+
+function computeHomeGrown(){
+  const f = homeGrownFilters;
+  return withAllDataFilters(()=>{
+    const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    // Home-grown STATUS is always career-wide — a player counts as one-club based on their whole
+    // history, never just the filtered slice. The filters below only scope WHICH clubs/teams get
+    // ranked, so narrowing to (say) U16 2026 asks "of the players in those teams, how many are
+    // one-club players", not "did they only play one club within U16 2026".
+    const nameClubs = computeNameClubs(allGames);
+
+    const sideMatches = (g, t) => {
+      if(f.year !== 'ALL' && String(getGameYear(g)) !== String(f.year)) return false;
+      if(f.ageGroup !== 'ALL' && getAgeGroupLabel(t.name) !== f.ageGroup) return false;
+      if(f.division !== 'ALL' && getDivision(g) !== f.division) return false;
+      if(f.club !== 'ALL' && getClub(t.name) !== f.club) return false;
+      return true;
+    };
+
+    // Which (club -> players) and (team-season -> roster) fall inside the current scope.
+    const clubPlayers = {}, teamRosters = {};
+    allGames.forEach(g=>{
+      const yr = getGameYear(g);
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t || !sideMatches(g,t)) return;
+        const names = (t.players||[]).map(r=>(r.name||'').trim().toLowerCase())
+          .filter((nm,i)=> nm && !isPlaceholderPlayerName((t.players||[])[i].name));
+        if(!isMergedTeam(t.name, yr)){
+          const club = getClub(t.name);
+          if(club){
+            const cp = clubPlayers[club] = clubPlayers[club] || new Set();
+            names.forEach(nm=> cp.add(nm));
+          }
+        }
+        if(yr){
+          const key = t.name + '__' + yr;
+          const r = teamRosters[key] = teamRosters[key] || { name:t.name, year:yr, players:new Set() };
+          names.forEach(nm=> r.players.add(nm));
+        }
+      });
+    });
+
+    const clubs = Object.entries(clubPlayers).map(([club,set])=>{
+      let players=0, home=0;
+      set.forEach(nm=>{ const c = nameClubs[nm]; if(!c) return; players++; if(c.size===1) home++; });
+      return { club, players, home, pct: players ? home/players : 0 };
+    }).filter(c=> c.players > 0);
+
+    const teams = Object.values(teamRosters).map(r=>{
+      let roster=0, home=0;
+      r.players.forEach(nm=>{ const c = nameClubs[nm]; if(!c) return; roster++; if(c.size===1) home++; });
+      return { name:r.name, year:r.year, roster, home, pct: roster ? home/roster : 0 };
+    }).filter(t=> t.roster > 0);
+
+    // League-wide rate quoted in the blurb reflects the CURRENT scope (everyone in the ranked pool).
+    const scopedNames = new Set();
+    Object.values(clubPlayers).forEach(s=> s.forEach(nm=> scopedNames.add(nm)));
+    Object.values(teamRosters).forEach(r=> r.players.forEach(nm=> scopedNames.add(nm)));
+    let totalPlayers=0, totalHome=0;
+    scopedNames.forEach(nm=>{ const c = nameClubs[nm]; if(!c) return; totalPlayers++; if(c.size===1) totalHome++; });
+
+    // Dropdown option lists, derived from everything on file (not the current scope, so you can
+    // always switch back out of a narrow filter).
+    const years = [...new Set(allGames.map(g=>getGameYear(g)).filter(Boolean))].sort((a,b)=>b-a);
+    const ageGroups = [...new Set(allGames.flatMap(g=>[g.teamA,g.teamB].map(t=>getAgeGroupLabel(t.name))))]
+      .filter(Boolean).sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+    const divisions = [...new Set(allGames.map(g=>getDivision(g)).filter(Boolean))].sort();
+    const clubList = [...new Set(allGames.flatMap(g=>[g.teamA,g.teamB]
+      .filter(t=>t && !isMergedTeam(t.name)).map(t=>getClub(t.name))))].filter(Boolean).sort();
+
+    return { clubs, teams, totalPlayers, totalHome, years, ageGroups, divisions, clubList };
+  });
+}
+
+function doOpenHomeGrown(){
+  showPanel('home-grown');
+  renderHomeGrown();
+}
+function openHomeGrown(){
+  doOpenHomeGrown();
+  navPush('home-grown', 'Home Grown', 'tools/home-grown', doOpenHomeGrown);
+}
+
+// Roster breakdown for one team-season: who's home grown, who came from elsewhere, and where from.
+function computeHomeGrownTeamDetail(teamName, year){
+  return withAllDataFilters(()=>{
+    const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
+    const nameClubs = computeNameClubs(allGames);
+    const { trail } = buildMovementContext(allGames);
+    const thisClub = getClub(teamName);
+
+    // Roster = everyone who appeared for this exact team in this season.
+    const roster = new Map(); // lowercase name -> display name
+    allGames.forEach(g=>{
+      if(String(getGameYear(g)) !== String(year)) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t || t.name !== teamName) return;
+        (t.players||[]).forEach(row=>{
+          const nm = (row.name||'').trim();
+          if(nm && !isPlaceholderPlayerName(nm)) roster.set(nm.toLowerCase(), nm);
+        });
+      });
+    });
+
+    const homeGrown = [], recruited = [], unknown = [];
+    roster.forEach((display, nm)=>{
+      const clubs = nameClubs[nm];
+      const byYear = trail[nm] || {};
+      const seasons = Object.keys(byYear).map(Number).sort((a,b)=>a-b).map(y=>({
+        year: y,
+        teams: [...byYear[y].teams],
+        clubs: [...byYear[y].clubs].filter(Boolean),
+        games: byYear[y].games || 0
+      }));
+      const entry = { name:display, key:nm, clubs: clubs ? [...clubs] : [], seasons };
+      if(!clubs || !clubs.size) unknown.push(entry);
+      else if(clubs.size === 1 && clubs.has(thisClub)) homeGrown.push(entry);
+      else recruited.push(entry);
+    });
+    const byName = (a,b)=> a.name.localeCompare(b.name);
+    return { thisClub, homeGrown: homeGrown.sort(byName), recruited: recruited.sort(byName), unknown: unknown.sort(byName), total: roster.size };
+  });
+}
+
+function renderHomeGrownDetail(){
+  const wrap = document.getElementById('homeGrownWrap');
+  const { name, year } = homeGrownDetail;
+  const { thisClub, homeGrown, recruited, unknown, total } = computeHomeGrownTeamDetail(name, year);
+  const counted = homeGrown.length + recruited.length;
+  const pct = counted ? Math.round(100*homeGrown.length/counted) : 0;
+
+  const playerBlock = (p, isHome) => {
+    const others = p.clubs.filter(c=> c !== thisClub);
+    const rows = p.seasons.map(s=>{
+      const elsewhere = s.clubs.some(c=> c !== thisClub);
+      return `<tr><td>${s.year}</td><td>${s.teams.join(', ')}</td><td>${elsewhere?`<span style="color:var(--gold);">${s.clubs.join(' / ')}</span>`:'<span style="color:var(--muted);">—</span>'}</td><td class="num">${s.games||''}</td></tr>`;
+    }).join('');
+    return `<details class="group-details" style="margin-bottom:4px;">
+      <summary style="cursor:pointer;"><strong>${p.name}</strong>${isHome
+        ? '<span class="win-tag" style="margin-left:6px;">Home grown</span>'
+        : `<span class="tag" style="margin-left:6px;color:var(--gold);">${others.length? 'Also: '+others.join(', ') : 'Other club'}</span>`}</summary>
+      <div style="padding:6px 0 10px 14px;">
+        <table style="max-width:620px;"><thead><tr><th>Year</th><th>Team</th><th>Club (if different)</th><th class="num">Games</th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">—</td></tr>'}</tbody></table>
+      </div>
+    </details>`;
+  };
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToHGList">&larr; Back to home grown</span>
+    <h2 style="font-size:20px;">${name} <span style="color:var(--muted);font-weight:400;">${year}</span></h2>
+    <p class="hint" style="max-width:640px;"><strong style="color:var(--gold);">${pct}%</strong> home grown — ${homeGrown.length} of ${counted} players in this squad have only ever played for ${thisClub||'this club'}. ${recruited.length} came from (or also played at) another club.${unknown.length?` ${unknown.length} couldn't be attributed to a club.`:''}</p>
+    <h3 style="font-size:14px;margin-top:20px;">Home grown (${homeGrown.length})</h3>
+    ${homeGrown.length ? homeGrown.map(p=>playerBlock(p,true)).join('') : '<div class="empty">None.</div>'}
+    <h3 style="font-size:14px;margin-top:20px;">Played at another club (${recruited.length})</h3>
+    ${recruited.length ? recruited.map(p=>playerBlock(p,false)).join('') : '<div class="empty">None — every player is a one-club player.</div>'}
+    ${unknown.length ? `<h3 style="font-size:14px;margin-top:20px;">Club unclear (${unknown.length})</h3>
+      <p class="hint" style="margin-top:-4px;">Only ever recorded in joint/merged teams, so there's no single club to attribute them to.</p>
+      ${unknown.map(p=>playerBlock(p,false)).join('')}` : ''}
+    <p class="hint" style="margin-top:14px;color:var(--muted);">Based on name-matched history across every season on file — an older player's "home grown" tag reflects what's tracked, not necessarily their full career; an early move before data coverage began wouldn't show here.</p>`;
+
+  document.getElementById('backToHGList').onclick = ()=>{ homeGrownDetail = null; renderHomeGrown(); };
+}
+
+function renderHomeGrown(){
+  if(homeGrownDetail) return renderHomeGrownDetail();
+  const wrap = document.getElementById('homeGrownWrap');
+  const f = homeGrownFilters;
+  const { clubs, teams, totalPlayers, totalHome, years, ageGroups, divisions, clubList } = computeHomeGrown();
+  const pctStr = v => (v*100).toFixed(0)+'%';
+  const leaguePct = totalPlayers ? totalHome/totalPlayers : 0;
+  const search = (f.search||'').trim().toLowerCase();
+  const opt = (val, label, cur) => `<option value="${String(val).replace(/"/g,'&quot;')}" ${String(cur)===String(val)?'selected':''}>${label}</option>`;
+
+  // Same shape as the Players tab: a row of plain dropdowns inside the filter strip.
+  const filterStrip = `
+    <select id="hgMode">${opt('clubs','View: Clubs',f.mode)}${opt('teams','View: Teams',f.mode)}</select>
+    <select id="hgClub">${opt('ALL','All clubs',f.club)}${clubList.map(c=>opt(c,c,f.club)).join('')}</select>
+    <select id="hgAge">${opt('ALL','All age groups',f.ageGroup)}${ageGroups.map(a=>opt(a,a,f.ageGroup)).join('')}</select>
+    <select id="hgDivision">${opt('ALL','All divisions',f.division)}${divisions.map(d=>opt(d,d,f.division)).join('')}</select>
+    <select id="hgYear">${opt('ALL','All years',f.year)}${years.map(y=>opt(y,y,f.year)).join('')}</select>
+    ${f.mode==='clubs'
+      ? `<select id="hgMinPlayers">${[1,5,10,20,30,50].map(n=>opt(n,'Min '+n+' players',f.minPlayers)).join('')}</select>`
+      : `<select id="hgMinRoster">${[1,5,8,10,15,20].map(n=>opt(n,'Min '+n+' roster',f.minRoster)).join('')}</select>`}`;
+
+  let body, subtitle, searchPlaceholder;
+  if(f.mode === 'clubs'){
+    let rows = clubs.filter(c=> c.players >= f.minPlayers);
+    if(search) rows = rows.filter(c=> c.club.toLowerCase().includes(search));
+    rows.sort((a,b)=> b.pct-a.pct || b.players-a.players);
+    searchPlaceholder = 'Search club name...';
+    subtitle = 'Clubs ranked by the share of their players who are one-club loyalists.';
+    body = `<table><thead><tr><th>#</th><th>Club</th><th class="num">Players</th><th class="num">One-club</th><th class="num">Home-grown %</th></tr></thead><tbody>
+      ${rows.length ? rows.map((c,i)=>`<tr class="hg-club-row" data-club="${c.club.replace(/"/g,'&quot;')}" style="cursor:pointer;"><td>${i+1}</td><td style="color:var(--gold);text-decoration:underline;">${c.club}</td><td class="num">${c.players}</td><td class="num">${c.home}</td><td class="num" style="color:var(--gold);font-weight:600;">${pctStr(c.pct)}</td></tr>`).join('') : `<tr><td colspan="5" class="empty">${search?'No clubs match that search.':'No clubs match these filters.'}</td></tr>`}
+      </tbody></table>`;
+  } else {
+    let rows = teams.filter(t=> t.roster >= f.minRoster);
+    if(search) rows = rows.filter(t=> t.name.toLowerCase().includes(search));
+    rows.sort((a,b)=> b.pct-a.pct || b.roster-a.roster);
+    searchPlaceholder = 'Search team name...';
+    subtitle = "Teams ranked by the share of a season's roster who are one-club players.";
+    body = `<table><thead><tr><th>#</th><th>Team</th><th class="num">Year</th><th class="num">Roster</th><th class="num">One-club</th><th class="num">Home-grown %</th></tr></thead><tbody>
+      ${rows.length ? rows.map((t,i)=>`<tr class="hg-team-row" data-name="${t.name.replace(/"/g,'&quot;')}" data-year="${t.year}" style="cursor:pointer;"><td>${i+1}</td><td style="color:var(--gold);text-decoration:underline;">${t.name}</td><td class="num">${t.year}</td><td class="num">${t.roster}</td><td class="num">${t.home}</td><td class="num" style="color:var(--gold);font-weight:600;">${pctStr(t.pct)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">${search?'No teams match that search.':'No teams match these filters.'}</td></tr>`}
+      </tbody></table>`;
+  }
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToTeamsFromHG">&larr; Back to teams</span>
+    <h2 style="font-size:20px;">Home grown</h2>
+    <p class="hint" style="max-width:640px;">A "home-grown" player is one who has only ever appeared for the <strong>one club</strong> across every season on file — no moves in or out (joint/merged teams don\'t count against it). In this selection, <strong>${pctStr(leaguePct)}</strong> of players (${totalHome} of ${totalPlayers}) are one-club players. ${subtitle}</p>
+    <div class="warn-box" style="max-width:640px;">"Home grown" only reflects the seasons on file, not necessarily a player\'s whole career — coverage varies by year and gets thinner the further back it goes. An older player who genuinely moved clubs early on, before that season was tracked, can still read as one-club here simply because their earlier club isn\'t recorded. Treat this as "no move found in the data," not proof one never happened — the more recent and complete a player\'s history, the more that reads.</div>
+    <div class="players-toolbar">
+      <p class="hint" style="margin:0 0 6px;">Search for a specific ${f.mode==='clubs'?'club':'team'}</p>
+      <div class="search-input-wrap">
+        <input type="text" id="hgSearch" placeholder="${searchPlaceholder}" class="player-search-input" value="${(f.search||'').replace(/"/g,'&quot;')}">
+      </div>
+      <div class="filter-strip">${filterStrip}</div>
+    </div>
+    ${body}
+    <p class="hint" style="margin-top:12px;color:var(--muted);">Home-grown status is judged across a player\'s whole history, not just the filtered seasons. Based on name-matched history, so it can\'t tell apart two people with the same name — treat it as a strong indication, not a roll-call.</p>`;
+
+  document.getElementById('backToTeamsFromHG').onclick = backToTeamsFromRankings;
+  const bind = (id, fn) => { const el = document.getElementById(id); if(el) el.onchange = ()=>{ fn(el.value); renderHomeGrown(); }; };
+  bind('hgMode', v=>{ f.mode = v; f.search=''; });
+  bind('hgClub', v=>{ f.club = v; });
+  bind('hgAge', v=>{ f.ageGroup = v; });
+  bind('hgDivision', v=>{ f.division = v; });
+  bind('hgYear', v=>{ f.year = v; });
+  bind('hgMinPlayers', v=>{ f.minPlayers = parseInt(v,10); });
+  bind('hgMinRoster', v=>{ f.minRoster = parseInt(v,10); });
+  const sr = document.getElementById('hgSearch');
+  if(sr) sr.oninput = ()=>{ const pos = sr.selectionStart; f.search = sr.value; renderHomeGrown(); const s2 = document.getElementById('hgSearch'); if(s2){ s2.focus(); try{ s2.setSelectionRange(pos,pos); }catch(e){} } };
+  // Click a team to drill into its squad breakdown; click a club to see just that club's teams.
+  wrap.querySelectorAll('.hg-team-row').forEach(tr=> tr.onclick = ()=>{
+    homeGrownDetail = { name: tr.dataset.name, year: parseInt(tr.dataset.year,10) };
+    renderHomeGrown();
+  });
+  wrap.querySelectorAll('.hg-club-row').forEach(tr=> tr.onclick = ()=>{
+    f.club = tr.dataset.club; f.mode = 'teams'; f.search = '';
+    renderHomeGrown();
+  });
 }
 
 function renderSquadProgressions(){
@@ -9216,37 +9775,207 @@ function renderGameDetail(id, editMode){
   };
 }
 
+// ===================== Navigation: breadcrumbs + back/forward + deep links =====================
+// navStack holds the user's current drill-down path within a tab, e.g.
+// [ {id:'teams', label:'Teams', ...}, {id:'team-detail', label:'Newcomb Power U16', ...} ].
+// Every open___()/back___() pair in the app now routes through navPush/navReset/navBack below
+// instead of hand-toggling .active classes, so: (a) the top nav tab always shows the right
+// tab highlighted, (b) a breadcrumb trail renders whenever you're more than one level deep,
+// and (c) the browser's own Back/Forward buttons and a page refresh both do something sensible.
+let navStack = [];
+let navRestoring = false; // true while a browser back/forward is driving the render, so we don't push a duplicate history entry for it
+
+function navEsc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+const TAB_LABELS = { home:'Home', players:'Players', teams:'Teams', games:'Games', tools:'Tools' };
+
+function navRenderBreadcrumb(){
+  const bar = document.getElementById('breadcrumbBar');
+  if(!bar) return;
+  if(navStack.length <= 1){ bar.style.display = 'none'; bar.innerHTML=''; return; }
+  bar.style.display = 'block';
+  bar.innerHTML = navStack.map((entry, i)=>{
+    const isLast = i === navStack.length - 1;
+    if(isLast) return `<span class="crumb current">${navEsc(entry.label)}</span>`;
+    return `<span class="crumb" data-idx="${i}">${navEsc(entry.label)}</span><span class="crumb-sep">/</span>`;
+  }).join('');
+  bar.querySelectorAll('.crumb[data-idx]').forEach(el=>{
+    el.onclick = ()=> navGoTo(parseInt(el.dataset.idx,10));
+  });
+}
+
+function navSetHash(hash){
+  if(navRestoring) return; // a popstate already moved the URL; don't push another entry on top of it
+  const url = '#' + hash;
+  if(('#'+location.hash.replace(/^#/,'')) !== url){
+    try{ history.pushState({ navDepth: navStack.length }, '', url); }catch(e){}
+  }
+}
+
+// Start a fresh drill-down path from a top-level tab (Home/Players/Teams/Games/Tools).
+function navReset(id, label, hash){
+  navStack = [{ id, label, hash, render: ()=> goToTabInternal(id) }];
+  navRenderBreadcrumb();
+  navSetHash(hash);
+  syncFiltersBarVisibility();
+}
+
+// Push a new page onto the current drill-down path (a team, a player, a tool page, etc).
+// `render` is how to redraw this exact page later, when the user comes back to it via a
+// breadcrumb click or the browser's Back button.
+function navPush(id, label, hash, render){
+  // A "return to X" jump often re-opens the same page (e.g. Player Movement) that's already
+  // sitting at the top of the stack — replace it in place instead of stacking a duplicate.
+  if(navStack.length && navStack[navStack.length-1].id === id){
+    navStack[navStack.length-1] = { id, label, hash, render };
+  } else {
+    navStack.push({ id, label, hash, render });
+  }
+  navRenderBreadcrumb();
+  navSetHash(hash);
+  syncFiltersBarVisibility();
+}
+
+// Jump back to a specific point in the breadcrumb trail (or one step, via navBack()).
+function navGoTo(index){
+  navStack = navStack.slice(0, Math.max(0,index) + 1);
+  navRenderBreadcrumb();
+  const entry = navStack[navStack.length - 1];
+  if(!entry) return;
+  navSetHash(entry.hash);
+  entry.render();
+  syncFiltersBarVisibility();
+}
+function navBack(){
+  if(navStack.length > 1) navGoTo(navStack.length - 2);
+  else { activateTab('home'); navReset('home', 'Home', 'home'); }
+}
+
+window.addEventListener('popstate', (e)=>{
+  navRestoring = true;
+  try{
+    if(e.state && typeof e.state.navDepth === 'number' && e.state.navDepth >= 1 && e.state.navDepth <= navStack.length){
+      navStack = navStack.slice(0, e.state.navDepth);
+      navRenderBreadcrumb();
+      const entry = navStack[navStack.length - 1];
+      if(entry) entry.render();
+      syncFiltersBarVisibility();
+    } else {
+      navResolveHash();
+    }
+  } finally {
+    navRestoring = false;
+  }
+});
+
+// Rebuilds just the current page from the URL hash — used on first load / a hard refresh, and as
+// a fallback when a Back/Forward lands somewhere this session's in-memory navStack doesn't cover.
+// This restores the page you were looking at, not the full click-by-click trail that led there.
+function navResolveHash(){
+  const raw = (location.hash || '').replace(/^#/, '');
+  if(!raw){ activateTab('home'); navReset('home', 'Home', 'home'); return; }
+  const parts = raw.split('/');
+  const root = parts[0], type = parts[1];
+  const seedRoot = (tabId)=> navReset(tabId, TAB_LABELS[tabId] || tabId, tabId);
+  try{
+    if(root === 'team' && type){ seedRoot('teams'); openTeamDetail(decodeURIComponent(type)); return; }
+    if(root === 'player' && type){ seedRoot('players'); openPlayerDetail(decodeURIComponent(type)); return; }
+    if(root === 'game' && type){ seedRoot('games'); openGameDetail(decodeURIComponent(type)); return; }
+    if(root === 'fixture' && type){ seedRoot('games'); openFixturePreview(decodeURIComponent(type)); return; }
+    if(root === 'tools' && type){
+      const openers = {
+        'power-rankings': ()=>openPowerRankings(), 'compare-players': ()=>openComparePlayers(),
+        'compare-teams': ()=>openCompareTeams(), 'squad-progressions': ()=>openSquadProgressions(),
+        'home-grown': ()=>openHomeGrown(), 'player-movement': ()=>openPlayerMovement(),
+        'merge-players': ()=>openMergePlayers(), 'manage-clubs': ()=>openManageClubs(),
+        'suggest-divisions': ()=>openSuggestDivisions(), 'top-players': ()=>openTopPlayers(),
+        'prediction-accuracy': ()=>openPredictionAccuracy()
+      };
+      if(openers[type]){ seedRoot('tools'); openers[type](); return; }
+    }
+    if(TAB_LABELS[root]){ activateTab(root); navReset(root, TAB_LABELS[root], root); return; }
+    activateTab('home'); navReset('home', 'Home', 'home');
+  }catch(e){
+    console.error('Could not restore view from link', e);
+    activateTab('home'); navReset('home', 'Home', 'home');
+  }
+}
+
+// Panels where the Phase/Year season filter has no effect on what's shown — hidden there so it
+// doesn't look like it should be doing something. Every other page (including most of the Tools
+// pages) reads computeAggregates(), which IS scoped by this filter. Player Movement is the one
+// tool that deliberately looks across every season regardless — it says so on its own page.
+const FILTER_IRRELEVANT_PANELS = new Set(['add','game-detail','player-movement']);
+
+// Redraws a top-level tab with whatever state it currently has (filters, sub-view, etc) —
+// used both right after activateTab() resets that state for a fresh click, AND on its own when
+// Back/Forward or a breadcrumb click restores this tab without wanting to reset anything.
+function goToTabInternal(tabId){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  const btn = document.querySelector(`nav.tabs button[data-tab="${tabId}"]`);
+  if(btn) btn.classList.add('active');
+  const panelEl = document.getElementById('panel-' + tabId);
+  if(panelEl) panelEl.classList.add('active');
+  renderPhaseFilterBar();
+  renderYearFilterBar();
+  renderHomeSnapshot();
+  if(tabId==='players') renderPlayers();
+  if(tabId==='teams') renderTeams();
+  if(tabId==='games') renderGamesLanding();
+  syncFiltersBarVisibility();
+}
+
+// Resets a tab's own filters/search/sub-view back to its defaults, then shows it — this is what
+// an explicit click on a top nav tab (or a Home card) does; arriving via Back should NOT reset
+// anything, which is why this is separate from goToTabInternal above.
+function activateTab(tabId){
+  if(tabId==='players'){
+    playersShowAllOverride = false;
+    document.getElementById('playerSearch').value = '';
+    document.getElementById('clubFilter').value = 'ALL';
+    document.getElementById('teamFilter').value = 'ALL';
+    document.getElementById('ageGroupFilter').value = 'ALL';
+    document.getElementById('divisionFilter').value = 'ALL';
+  }
+  if(tabId==='teams'){
+    teamsShowAllOverride = false;
+    document.getElementById('teamClubFilter').value = 'ALL';
+    document.getElementById('teamYearFilter').value = 'ALL';
+    document.getElementById('teamNameFilter').value = 'ALL';
+    document.getElementById('teamAgeGroupFilter').value = 'ALL';
+    document.getElementById('teamDivisionFilter').value = 'ALL';
+  }
+  if(tabId==='games'){
+    gamesSubView = null;
+  }
+  goToTabInternal(tabId);
+}
+
+// Which top-level tab a given panel should show as "active" under, for panels reached only
+// via navPush (team/player/game detail pages, and every Tools page).
+const PANEL_OWNER_TAB = {
+  'add':'games', 'team-detail':'teams', 'player-detail':'players', 'game-detail':'games', 'fixture-preview':'games',
+  'power-rankings':'tools', 'compare-players':'tools', 'compare-teams':'tools', 'squad-progressions':'tools',
+  'home-grown':'tools', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools',
+  'suggest-divisions':'tools', 'top-players':'tools', 'prediction-accuracy':'tools'
+};
+function showPanel(panelId){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  const owner = PANEL_OWNER_TAB[panelId] || panelId;
+  const btn = document.querySelector(`nav.tabs button[data-tab="${owner}"]`);
+  if(btn) btn.classList.add('active');
+  const panelEl = document.getElementById('panel-' + panelId);
+  if(panelEl) panelEl.classList.add('active');
+}
+
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
   btn.onclick = ()=>{
-    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    renderPhaseFilterBar();
-    renderYearFilterBar();
-    renderHomeSnapshot();
-    if(btn.dataset.tab==='players'){
-      playersShowAllOverride = false;
-      document.getElementById('playerSearch').value = '';
-      document.getElementById('clubFilter').value = 'ALL';
-      document.getElementById('teamFilter').value = 'ALL';
-      document.getElementById('ageGroupFilter').value = 'ALL';
-      document.getElementById('divisionFilter').value = 'ALL';
-      renderPlayers();
-    }
-    if(btn.dataset.tab==='teams'){
-      teamsShowAllOverride = false;
-      document.getElementById('teamClubFilter').value = 'ALL';
-      document.getElementById('teamYearFilter').value = 'ALL';
-      document.getElementById('teamNameFilter').value = 'ALL';
-      document.getElementById('teamAgeGroupFilter').value = 'ALL';
-      document.getElementById('teamDivisionFilter').value = 'ALL';
-      renderTeams();
-    }
-    if(btn.dataset.tab==='games'){
-      gamesSubView = null;
-      renderGamesLanding();
-    }
+    activateTab(btn.dataset.tab);
+    navReset(btn.dataset.tab, TAB_LABELS[btn.dataset.tab] || btn.dataset.tab, btn.dataset.tab);
   };
 });
 
@@ -9372,6 +10101,67 @@ document.getElementById('teamClubFilter').addEventListener('change', renderTeams
 document.getElementById('teamYearFilter').addEventListener('change', renderTeams);
 document.getElementById('teamNameFilter').addEventListener('change', renderTeams);
 document.getElementById('playerSearch').addEventListener('input', renderPlayers);
+
+// Header search — finds a player, team or club from any page, not just the Players list.
+function renderHeaderSearch(){
+  const input = document.getElementById('headerSearchInput');
+  const dropdown = document.getElementById('headerSearchResults');
+  const raw = input.value.trim();
+  const q = raw.toLowerCase();
+  if(!q){ dropdown.classList.remove('show'); dropdown.innerHTML = ''; return; }
+  let playerMatches = [], teamMatches = [], clubMatches = [];
+  try{
+    const { playerList, teamList } = computeAggregates();
+    playerMatches = playerList.filter(p=> p.name.toLowerCase().includes(q)).slice(0,6);
+    teamMatches = teamList.filter(t=> t.name.toLowerCase().includes(q)).slice(0,6);
+    clubMatches = (knownClubs||[]).filter(c=> c.toLowerCase().includes(q)).slice(0,4);
+  }catch(e){ /* leave lists empty rather than throw mid-keystroke */ }
+
+  if(!playerMatches.length && !teamMatches.length && !clubMatches.length){
+    dropdown.innerHTML = `<div class="empty">No matches for "${navEsc(raw)}".</div>`;
+    dropdown.classList.add('show');
+    return;
+  }
+  let html = '';
+  if(playerMatches.length){
+    html += `<div class="search-group-label">Players</div>` + playerMatches.map(p=>
+      `<div class="picker-result" data-type="player" data-key="${navEsc(p.key)}">${navEsc(p.name)} <span style="color:var(--muted);">(${navEsc(p.club)})</span></div>`
+    ).join('');
+  }
+  if(teamMatches.length){
+    html += `<div class="search-group-label">Teams</div>` + teamMatches.map(t=>
+      `<div class="picker-result" data-type="team" data-key="${navEsc(t.key)}">${navEsc(t.name)} <span style="color:var(--muted);">(${navEsc(t.year||'—')})</span></div>`
+    ).join('');
+  }
+  if(clubMatches.length){
+    html += `<div class="search-group-label">Clubs</div>` + clubMatches.map(c=>
+      `<div class="picker-result" data-type="club" data-key="${navEsc(c)}">${navEsc(c)}</div>`
+    ).join('');
+  }
+  dropdown.innerHTML = html;
+  dropdown.classList.add('show');
+  dropdown.querySelectorAll('.picker-result').forEach(row=>{
+    row.onclick = ()=>{
+      dropdown.classList.remove('show');
+      input.value = '';
+      const type = row.dataset.type, key = row.dataset.key;
+      if(type==='player') openPlayerDetail(key);
+      else if(type==='team') openTeamDetail(key);
+      else if(type==='club'){
+        activateTab('teams');
+        navReset('teams', TAB_LABELS.teams, 'teams');
+        const clubSel = document.getElementById('teamClubFilter');
+        if(clubSel){ clubSel.value = key; clubSel.dispatchEvent(new Event('change')); }
+      }
+    };
+  });
+}
+document.getElementById('headerSearchInput').addEventListener('input', renderHeaderSearch);
+document.addEventListener('click', (e)=>{
+  const wrap = document.querySelector('.header-search');
+  const dropdown = document.getElementById('headerSearchResults');
+  if(wrap && dropdown && !wrap.contains(e.target)) dropdown.classList.remove('show');
+});
 document.getElementById('exportBtn').onclick = exportToXlsx;
 document.getElementById('backupBtn').onclick = backupAllData;
 document.getElementById('restoreBtn').onclick = ()=> document.getElementById('restoreFileInput').click();
@@ -9380,12 +10170,15 @@ document.getElementById('restoreFileInput').onchange = (e)=>{
   if(file) restoreAllData(file);
   e.target.value = '';
 };
+function doOpenAddGame(){
+  showPanel('add');
+}
 function openAddGame(){
-  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-add').classList.add('active');
+  doOpenAddGame();
+  navPush('add', 'Add Game', 'games/add', doOpenAddGame);
 }
 document.getElementById('addGameHeaderBtn').onclick = openAddGame;
+document.getElementById('backFromAddGame').onclick = navBack;
 document.getElementById('comparePlayersBtn').onclick = openComparePlayers;
 document.getElementById('mergePlayersBtn').onclick = openMergePlayers;
 document.getElementById('playerMovementBtn').onclick = openPlayerMovement;
@@ -9396,7 +10189,27 @@ document.getElementById('compareTeamsBtn').onclick = openCompareTeams;
 document.getElementById('suggestDivisionsBtn').onclick = openSuggestDivisions;
 document.getElementById('powerRankingsBtn').onclick = openPowerRankings;
 document.getElementById('squadProgressionsPageBtn').onclick = ()=> openSquadProgressions();
+document.getElementById('homeGrownPageBtn').onclick = ()=> openHomeGrown();
 document.getElementById('showAllTeamsBtn').onclick = ()=>{ teamsShowAllOverride = true; renderTeams(); };
+
+// Tools tab — every tile just opens the same tool the existing shortcut buttons do.
+document.getElementById('toolTileTopPlayers').onclick = ()=> openTopPlayers();
+document.getElementById('toolTileComparePlayers').onclick = ()=> openComparePlayers();
+document.getElementById('toolTilePlayerMovement').onclick = ()=> openPlayerMovement();
+document.getElementById('toolTileMergePlayers').onclick = ()=> openMergePlayers();
+document.getElementById('toolTilePowerRankings').onclick = ()=> openPowerRankings();
+document.getElementById('toolTileCompareTeams').onclick = ()=> openCompareTeams();
+document.getElementById('toolTileSquadProgressions').onclick = ()=> openSquadProgressions();
+document.getElementById('toolTileHomeGrown').onclick = ()=> openHomeGrown();
+document.getElementById('toolTilePredictionAccuracy').onclick = ()=> openPredictionAccuracy();
+document.getElementById('toolTileSuggestDivisions').onclick = ()=> openSuggestDivisions();
+document.getElementById('toolTileManageClubs').onclick = ()=> openManageClubs();
+
+// Home page — "Jump straight to a tool" row.
+document.getElementById('homeToolPowerRankings').onclick = ()=> openPowerRankings();
+document.getElementById('homeToolComparePlayers').onclick = ()=> openComparePlayers();
+document.getElementById('homeToolCompareTeams').onclick = ()=> openCompareTeams();
+document.getElementById('homeToolPlayerMovement').onclick = ()=> openPlayerMovement();
 
 function goToTab(tabName){
   const btn = document.querySelector(`nav.tabs button[data-tab="${tabName}"]`);
@@ -9408,13 +10221,17 @@ document.getElementById('homeCardGames').onclick = ()=> goToTab('games');
 document.getElementById('gamesCardCompleted').onclick = ()=>{ gamesSubView = 'completed'; retroCheckOpen = false; renderGamesLanding(); };
 document.getElementById('gamesCardUpcoming').onclick = ()=>{ gamesSubView = 'upcoming'; renderGamesLanding(); };
 
-// Hide the phase/year filter bar on the Home page — it doesn't filter anything there
+// Hide the phase/year filter bar wherever it has no effect on what's shown — see
+// FILTER_IRRELEVANT_PANELS above. Called explicitly from the nav functions after every
+// navigation (rather than inferred from which panel is .active), since several panels can
+// share the same visibility outcome and a plain "did panel-home's class change" watcher missed
+// transitions between two non-home panels with different needs.
 const filtersBarEl = document.getElementById('filtersBar');
-const homePanelEl = document.getElementById('panel-home');
 function syncFiltersBarVisibility(){
-  filtersBarEl.style.display = homePanelEl.classList.contains('active') ? 'none' : '';
+  const activePanel = document.querySelector('.panel.active');
+  const id = activePanel ? activePanel.id.replace(/^panel-/, '') : 'home';
+  filtersBarEl.style.display = (id === 'home' || FILTER_IRRELEVANT_PANELS.has(id)) ? 'none' : '';
 }
-new MutationObserver(syncFiltersBarVisibility).observe(homePanelEl, { attributes:true, attributeFilter:['class'] });
 syncFiltersBarVisibility();
 
 // When hosted as a static site, a data.json sitting next to this page (just a renamed
@@ -9510,6 +10327,8 @@ async function seedFromPublishedData(){
   if(failures.length){
     showToast(`Couldn't load: ${failures.join(', ')}. Everything else loaded normally.`);
   }
+  try{ navResolveHash(); }
+  catch(e){ console.error('Could not restore view from URL', e); }
 })();
 </script>
 </body>
