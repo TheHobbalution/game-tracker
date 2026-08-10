@@ -388,7 +388,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 09082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 10082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -8422,8 +8422,9 @@ function renderMergePlayers(){
     <div id="mergePlayersResult"></div>
 
     ${suspectMerges.length>0 ? `
-    <h3 style="font-size:14px;margin-top:28px;color:var(--gold);">⚠ Possibly wrong merges</h3>
-    <p class="hint">These merges have real PlayHQ profile IDs on file for BOTH the merged-away name and the one it was folded into — and the IDs never match. That's the exact pattern that proved the Eli Edwards merge wrong: two different real people who happened to share a name. Worth checking each one before trusting it.</p>
+    <h3 style="font-size:14px;margin-top:28px;color:var(--gold);">⚠ Possibly wrong merges (${suspectMerges.length})</h3>
+    <p class="hint">These merges have real PlayHQ profile IDs on file for BOTH the merged-away name and the one it was folded into — and the IDs never match. That's the exact pattern that proved the Eli Edwards merge wrong: two different real people who happened to share a name. Worth a quick scan, but every one listed here has the same solid evidence behind it.</p>
+    ${suspectMerges.length>1 ? `<button class="ghost" id="undoAllSuspectMergesBtn" style="margin-bottom:10px;">Undo all ${suspectMerges.length}</button>` : ''}
     <div class="chip-list" style="max-height:300px;flex-direction:column;flex-wrap:nowrap;align-items:stretch;">
       ${suspectMerges.map(r=>`
         <div class="merge-check-row" style="justify-content:space-between;background:var(--warn-bg,rgba(201,162,39,0.08));">
@@ -8461,6 +8462,15 @@ function renderMergePlayers(){
       renderMergePlayers();
     };
   });
+  const undoAllBtn = document.getElementById('undoAllSuspectMergesBtn');
+  if(undoAllBtn) undoAllBtn.onclick = async ()=>{
+    const toUndo = computeSuspectMerges(); // re-check fresh, not the stale render-time list
+    toUndo.forEach(r=>{ delete playerAliases[r.rawKey]; });
+    await savePlayerAliases();
+    invalidateAggregateCache();
+    showToast(`${toUndo.length} merge${toUndo.length!==1?'s':''} undone.`);
+    renderMergePlayers();
+  };
 
   const searchInput = document.getElementById('mergeSearchInput');
   searchInput.oninput = ()=>{
