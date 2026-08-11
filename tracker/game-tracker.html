@@ -395,6 +395,7 @@
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;">
     <button class="ghost" id="backupBtn" title="Downloads a JSON file with every game, fixture, alias and club setting — use this to move all your data into a new copy of this app" style="margin-top:0;">Backup all data</button>
+    <button class="ghost" id="publishGzipBtn" title="Downloads a GZIP-COMPRESSED data.json.gz — for publishing this as a hosted site (e.g. GitHub Pages), where a full multi-year export can be too large for GitHub's 100MB per-file commit limit. Commit the .gz file, not a plain data.json." style="margin-top:0;">Download data.json.gz (for hosting)</button>
     <button class="ghost" id="restoreBtn" title="Restore all data from a JSON backup, or rebuild games from an exported .xlsx spreadsheet. This replaces everything currently saved here." style="margin-top:0;">Restore from backup</button>
     <input type="file" id="restoreFileInput" accept="application/json,.json,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;">
     <button class="ghost" id="exportBtn" title="Downloads an .xlsx file — opens directly in Excel or Google Sheets (File > Import > Upload)" style="margin-top:0;">Export to spreadsheet</button>
@@ -1227,6 +1228,53 @@ function backupAllData(){
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Backup downloaded');
+}
+
+// The published dataset (data.json next to the hosted page) is the same payload as "Backup all
+// data" — but real-world size means it can outgrow GitHub's 100MB per-file commit limit, since a
+// full multi-year backfill puts a real (repeated, 36-character) PlayHQ profile id on tens of
+// thousands of rows. Gzip alone cuts this JSON to roughly a tenth of its size, since the same
+// keys and long id strings repeat on every game/player row — confirmed against a real ~80MB
+// export: 84,436,306 bytes -> 8,294,074 gzipped, ~10% of original. Downloads the RAW compressed
+// bytes as data.json.gz, not base64 (which would give back about a third of that saving) — commit
+// this file as data.json.gz instead of data.json, and seedFromPublishedData() below fetches and
+// decompresses whichever one it finds. Falls back to a plain, uncompressed download with a clear
+// warning if CompressionStream isn't available in this browser.
+async function exportPublishedDataGzip(){
+  const payload = {
+    _backupType: 'game-tracker',
+    _backupVersion: 1,
+    _exportedAt: new Date().toISOString(),
+    games,
+    fixtures,
+    byes,
+    playerAliases,
+    dismissedMatchGroups: [...dismissedMatchGroups],
+    dismissedBestMismatches: [...dismissedBestMismatches],
+    knownClubs,
+    teamClubOverrides,
+    clubNicknames
+  };
+  const json = JSON.stringify(payload);
+  if(!canCompressStorage()){
+    const blob = new Blob([json], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'data.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('This browser can\'t compress — downloaded a plain data.json instead (may be too large for GitHub if over 100MB)');
+    return;
+  }
+  const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+  const gzBlob = await new Response(stream).blob();
+  const url = URL.createObjectURL(gzBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'data.json.gz';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  const origMB = (json.length/1024/1024).toFixed(1), gzMB = (gzBlob.size/1024/1024).toFixed(1);
+  showToast(`data.json.gz downloaded — ${origMB}MB → ${gzMB}MB gzipped. Commit this as data.json.gz (not data.json) in your repo.`);
 }
 
 let pendingRestore = null; // { gameCount, wipeCase, label, detail, apply }
@@ -11474,6 +11522,7 @@ document.addEventListener('click', (e)=>{
 });
 document.getElementById('exportBtn').onclick = exportToXlsx;
 document.getElementById('backupBtn').onclick = backupAllData;
+document.getElementById('publishGzipBtn').onclick = exportPublishedDataGzip;
 document.getElementById('restoreBtn').onclick = ()=> document.getElementById('restoreFileInput').click();
 document.getElementById('restoreFileInput').onchange = (e)=>{
   const file = e.target.files[0];
@@ -11558,14 +11607,23 @@ async function seedFromPublishedData(){
     // Even when hosted, never let a slow or hanging request hold up startup.
     const controller = new AbortController();
     const timeout = setTimeout(()=>controller.abort(), 20000);
-    let res;
+    let payload = null;
     try{
-      res = await fetch('data.json', { cache: 'no-store', signal: controller.signal });
+      // Prefer the gzipped file — a full multi-year export with PlayHQ profile ids on every row
+      // can exceed GitHub's 100MB per-file commit limit; gzip alone brings a real ~80MB export
+      // down to about 8MB. Falls back to a plain data.json for anyone who committed that instead
+      // (an older publish, or a browser too old for DecompressionStream on the export side).
+      let res = await fetch('data.json.gz', { cache: 'no-store', signal: controller.signal });
+      if(res.ok && typeof DecompressionStream !== 'undefined'){
+        const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+        payload = await new Response(stream).json();
+      } else {
+        res = await fetch('data.json', { cache: 'no-store', signal: controller.signal });
+        if(res.ok) payload = await res.json();
+      }
     } finally {
       clearTimeout(timeout);
     }
-    if(!res.ok) return false;
-    const payload = await res.json();
     if(!payload || (payload._backupType !== 'game-tracker' && payload._backupType !== 'newcomb-u16-stats-tracker')) return false;
 
     const publishedStamp = payload._exportedAt || 'unknown';
