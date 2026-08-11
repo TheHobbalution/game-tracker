@@ -388,7 +388,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 10082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 11082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -517,6 +517,16 @@
       <div class="chip-list" id="cumulativeChartPicker"></div>
     </div>
     <div class="chart-wrap"><canvas id="cumulativeChart"></canvas></div>
+    <div class="chart-controls">
+      <div class="mini-actions">
+        <span class="hint" style="margin:0;">Times named in best — players shown:</span>
+        <button class="ghost mini" data-chart="bests" data-action="top">Top 10</button>
+        <button class="ghost mini" data-chart="bests" data-action="all">All</button>
+        <button class="ghost mini" data-chart="bests" data-action="clear">Clear</button>
+      </div>
+      <div class="chip-list" id="bestsChartPicker"></div>
+    </div>
+    <div class="chart-wrap"><canvas id="bestsChart"></canvas></div>
     <div id="playersTableWrap"></div>
   </section>
 
@@ -574,6 +584,7 @@
     <div class="tools-section-label">Games &amp; fixtures</div>
     <div class="tools-grid">
       <div class="tool-tile tool-tile-green" id="toolTilePredictionAccuracy"><div class="tool-tile-title">Prediction accuracy</div><div class="tool-tile-desc">How well the forecast model has called results so far.</div></div>
+      <div class="tool-tile tool-tile-green" id="toolTileQuarterComebacks"><div class="tool-tile-title">Biggest turnarounds</div><div class="tool-tile-desc">Games where the lead changed hands — comebacks and collapses.</div></div>
     </div>
     <div class="tools-section-label">Data &amp; admin</div>
     <div class="tools-grid tools-grid-muted">
@@ -591,6 +602,11 @@
   <!-- JUNIOR PATHWAY -->
   <section class="panel" id="panel-junior-pathway">
     <div id="juniorPathwayWrap"></div>
+  </section>
+
+  <!-- QUARTER COMEBACKS -->
+  <section class="panel" id="panel-quarter-comebacks">
+    <div id="quarterComebacksWrap"></div>
   </section>
 
   <!-- COMPARE PLAYERS -->
@@ -820,6 +836,7 @@ let teamSplitScope = 'season';
 let currentFixturePreviewId = null;
 let pendingParsed = null;
 let chartInstance = null;
+let bestsChartInstance = null;
 let playerSort = { key: 'totalGoals', dir: 'desc' };
 let playersShowAllOverride = false;
 let teamSort = { key: 'name', dir: 'asc' };
@@ -828,6 +845,7 @@ let confirmDeleteId = null;
 let gamesSubView = null; // null | 'completed' | 'upcoming' — which landing card was picked on the Games tab
 let goalsChartSelected = null;
 let cumulativeChartSelected = null;
+let bestsChartSelected = null;
 let lastTeamFilterForCharts = null;
 let phaseFilter = new Set(['Grading','Regular Season','Finals']);
 let yearFilter = null; // null = default to all years present in the data
@@ -3554,7 +3572,7 @@ function renderPlayerLinks(wrap){
 
   const statusCell = r => {
     if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
-    if(r.status==='lapsed') return `<span style="color:var(--gold);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    if(r.status==='lapsed') return `<span style="color:var(--red);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
     return '<span style="color:var(--muted);">Unknown</span>';
   };
 
@@ -4464,7 +4482,7 @@ function computeAggregates(gamesOverride){
     // MVP score: context-weighted goals (x2 — close games worth more than blowouts, wins over
     // losses, gentle diminishing on big bags) + best-player rank points (1-6/game) + games played
     // (durability). The win/loss context now lives inside weightedGoals, so no separate win bonus.
-    const mvpScore = (p.weightedGoals*2) + p.weightedBest + p.gamesPlayed;
+    const mvpScore = Math.round((p.weightedGoals*2) + p.weightedBest + p.gamesPlayed);
     // Form score: recent scoring rate(3pts/goal) + recent best-player recognition(2pts per appearance in last 3 games)
     const formScore = +((rollingGoals3*3) + (rb3.count*2)).toFixed(1);
     const ageGroup = getAgeGroupLabel(p.team);
@@ -4812,6 +4830,7 @@ function renderPlayers(){
   }
   if(typeof Chart === 'undefined'){
     document.getElementById('cumulativeChart').closest('.chart-wrap').innerHTML = '<div class="empty">Charts unavailable (chart library failed to load) — tables and sorting still work.</div>';
+    document.getElementById('bestsChart').closest('.chart-wrap').innerHTML = '<div class="empty">Charts unavailable (chart library failed to load) — tables and sorting still work.</div>';
     return;
   }
 
@@ -4819,17 +4838,22 @@ function renderPlayers(){
   if(teamFilter !== lastTeamFilterForCharts){
     goalsChartSelected = null;
     cumulativeChartSelected = null;
+    bestsChartSelected = null;
     lastTeamFilterForCharts = teamFilter;
   }
   const byGoalsDesc = [...filtered].sort((a,b)=>b.totalGoals-a.totalGoals);
+  const byBestsDesc = [...filtered].sort((a,b)=>b.bestCount-a.bestCount);
   if(goalsChartSelected === null) goalsChartSelected = new Set(byGoalsDesc.slice(0,10).map(p=>p.key));
   if(cumulativeChartSelected === null) cumulativeChartSelected = new Set(byGoalsDesc.slice(0,6).map(p=>p.key));
+  if(bestsChartSelected === null) bestsChartSelected = new Set(byBestsDesc.filter(p=>p.bestCount>0).slice(0,10).map(p=>p.key));
 
   renderChipPicker('goalsChartPicker', byGoalsDesc, goalsChartSelected, renderGoalsChart);
   renderChipPicker('cumulativeChartPicker', byGoalsDesc, cumulativeChartSelected, ()=>renderCumulativeChart(filtered));
+  renderChipPicker('bestsChartPicker', byBestsDesc, bestsChartSelected, renderBestsChart);
 
   renderGoalsChart();
   renderCumulativeChart(filtered);
+  renderBestsChart();
 }
 
 function renderChipPicker(containerId, players, selectedSet, onChange){
@@ -4863,11 +4887,15 @@ document.addEventListener('click', (e)=>{
   if(divisionFilterVal !== 'ALL') filtered = filtered.filter(p=>p.divisions.includes(divisionFilterVal));
   if(searchTextVal) filtered = filtered.filter(p=>p.name.toLowerCase().includes(searchTextVal));
   const byGoalsDesc = [...filtered].sort((a,b)=>b.totalGoals-a.totalGoals);
-  const n = chart==='goals' ? 10 : 6;
-  const targetSet = chart==='goals' ? (goalsChartSelected ||= new Set()) : (cumulativeChartSelected ||= new Set());
+  const byBestsDesc = [...filtered].sort((a,b)=>b.bestCount-a.bestCount);
+  const n = chart==='goals' ? 10 : chart==='bests' ? 10 : 6;
+  const sourceList = chart==='bests' ? byBestsDesc : byGoalsDesc;
+  const targetSet = chart==='goals' ? (goalsChartSelected ||= new Set())
+    : chart==='bests' ? (bestsChartSelected ||= new Set())
+    : (cumulativeChartSelected ||= new Set());
   targetSet.clear();
-  if(action==='top') byGoalsDesc.slice(0,n).forEach(p=>targetSet.add(p.key));
-  else if(action==='all') byGoalsDesc.forEach(p=>targetSet.add(p.key));
+  if(action==='top') sourceList.slice(0,n).forEach(p=>targetSet.add(p.key));
+  else if(action==='all') sourceList.forEach(p=>targetSet.add(p.key));
   // 'clear' just leaves it empty
   renderPlayers();
 });
@@ -4896,6 +4924,33 @@ function renderGoalsChart(){
         y:{ stacked:true, ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } }
       },
       plugins:{ legend:{ labels:{ color:'#EDF1F0' } } }
+    }
+  });
+}
+
+function renderBestsChart(){
+  const { playerList } = computeAggregates();
+  const teamFilter = document.getElementById('teamFilter').value;
+  const filtered = teamFilter === 'ALL' ? playerList : playerList.filter(p=>p.team===teamFilter);
+  const top = filtered.filter(p=>bestsChartSelected.has(p.key)).sort((a,b)=>b.bestCount-a.bestCount);
+  const ctx = document.getElementById('bestsChart').getContext('2d');
+  if(bestsChartInstance) bestsChartInstance.destroy();
+  if(top.length===0) return;
+  bestsChartInstance = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: top.map(p=>p.name),
+      datasets:[
+        { label:'Times named in best', data: top.map(p=>p.bestCount), backgroundColor:'#C9A227' }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      scales:{
+        x:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } },
+        y:{ ticks:{ color:'#8FA0A3', precision:0 }, grid:{ color:'#2E3A3E' } }
+      },
+      plugins:{ legend:{ display:false } }
     }
   });
 }
@@ -5479,7 +5534,7 @@ function renderYearFilterBar(){
         const y = parseInt(chip.dataset.year,10);
         if(yearFilter.has(y)) yearFilter.delete(y); else yearFilter.add(y);
       }
-      goalsChartSelected = null; cumulativeChartSelected = null; lastTeamFilterForCharts = null;
+      goalsChartSelected = null; cumulativeChartSelected = null; bestsChartSelected = null; lastTeamFilterForCharts = null;
       renderAll();
     };
   });
@@ -5493,7 +5548,7 @@ function renderPhaseFilterBar(){
     chip.onclick = ()=>{
       const ph = chip.dataset.phase;
       if(phaseFilter.has(ph)) phaseFilter.delete(ph); else phaseFilter.add(ph);
-      goalsChartSelected = null; cumulativeChartSelected = null; lastTeamFilterForCharts = null;
+      goalsChartSelected = null; cumulativeChartSelected = null; bestsChartSelected = null; lastTeamFilterForCharts = null;
       renderAll();
     };
   });
@@ -6247,7 +6302,7 @@ function renderPlayerTeammateLinks(p){
 
   const statusCell = r => {
     if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
-    if(r.status==='lapsed') return `<span style="color:var(--gold);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    if(r.status==='lapsed') return `<span style="color:var(--red);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
     return '<span style="color:var(--muted);">Unknown</span>';
   };
 
@@ -6325,6 +6380,39 @@ function computeTeamPossibleLinks(teamObj, playerList){
       const latest = years.length ? byYear[years[0]] : null;
       const confidentClub = latest && !latest.ambiguous && latest.clubs.size===1 ? [...latest.clubs][0] : null;
       const { team: currentTeamLabel, divisionLabel: currentDivisionLabel } = currentSeasonTeamDivision(latest, years[0], divisionsOf, gradeHasDivisions);
+
+      // Career-strength figures — how substantial is this lead, not just how recent. Summed
+      // across every player record matching this name (same name-matching trust level the rest
+      // of this feature already uses, since results here are keyed by name, not a resolved
+      // identity). Highest grade reached uses the SAME Seniors>Reserves>U18>...>U8 order as
+      // everywhere else in the app; within that grade, the best (lowest-numbered) real division
+      // seen is tracked too, so "Division 1 juniors" ranks above "Division 5 juniors" at the same
+      // grade. A best appearance (any bestRank) counts once per game, matching bestCount elsewhere.
+      const matchingPlayers = playerList.filter(pl=> pl.name.toLowerCase()===nm);
+      let gamesPlayed=0, totalGoals=0, bestCount=0, bestGradeRank=99, bestDivisionRank=null;
+      matchingPlayers.forEach(pl=>{
+        gamesPlayed += pl.gamesPlayed||0;
+        totalGoals += pl.totalGoals||0;
+        bestCount += pl.bestCount||0;
+        (pl.timeline||[]).forEach(t=>{
+          const gRank = gradeDisplayRank(getAgeGroupLabel(t.team));
+          if(gRank < bestGradeRank){ bestGradeRank = gRank; bestDivisionRank = null; } // new best grade resets the division comparison — a Div 5 Senior still outranks a Div 1 junior
+          if(gRank === bestGradeRank){
+            const dRank = divisionRank(t.division);
+            if(dRank!=null && (bestDivisionRank==null || dRank < bestDivisionRank)) bestDivisionRank = dRank;
+          }
+        });
+      });
+      const bestGradeLabel = bestGradeRank<99 ? (Object.keys(GRADE_DISPLAY_ORDER).find(k=>GRADE_DISPLAY_ORDER[k]===bestGradeRank) || null) : null;
+
+      // One combined score for the default "best leads first" ranking: games played is the base
+      // (a long, real history matters most), goals and bests add on top (real quality signal),
+      // and reaching a higher grade/division gives a meaningful multiplier — a Div 1 Senior
+      // career should clearly outrank a single U12 game even with modest goals/bests, without
+      // grade alone swamping someone who's played 80 solid junior games.
+      const gradeMultiplier = bestGradeRank<99 ? (1 + (7-bestGradeRank)*0.15) : 1;
+      const strengthScore = Math.round((gamesPlayed*2 + totalGoals + bestCount*3) * gradeMultiplier);
+
       return {
         name: info.name,
         connections: [...new Map(info.connections.map(c=>[c.teammate+'|'+c.team+'|'+c.year, c])).values()].sort((a,b)=> b.year-a.year),
@@ -6332,10 +6420,11 @@ function computeTeamPossibleLinks(teamObj, playerList){
         currentClub: confidentClub, currentTeams: latest ? [...latest.teams] : [],
         currentTeamLabel, currentDivisionLabel,
         playerKey: confidentClub ? resolvePlayerKey(confidentClub + '||' + nm) : null,
-        status: !years.length ? 'unknown' : (years[0] === latestYear ? 'active' : 'lapsed')
+        status: !years.length ? 'unknown' : (years[0] === latestYear ? 'active' : 'lapsed'),
+        gamesPlayed, totalGoals, bestCount, bestGradeLabel, bestDivisionRank, strengthScore,
       };
     }).filter(r=> r.currentClub !== myClub); // still filter out anyone whose current club IS this one
-    results.sort((a,b)=> (b.mostRecentYear||0) - (a.mostRecentYear||0) || b.connections.length - a.connections.length);
+    results.sort((a,b)=> b.strengthScore - a.strengthScore || (b.mostRecentYear||0) - (a.mostRecentYear||0));
     return { results, latestYear };
   });
 }
@@ -6404,7 +6493,7 @@ function renderTeamPossibleLinks(teamObj, playerList){
 
   const statusCell = r => {
     if(r.status==='active') return `<span style="color:var(--green);">Active</span> — ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
-    if(r.status==='lapsed') return `<span style="color:var(--gold);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
+    if(r.status==='lapsed') return `<span style="color:var(--red);">Not currently playing</span> — last seen ${r.currentClub||r.currentTeams.join(', ')} (${r.mostRecentYear})`;
     return '<span style="color:var(--muted);">Unknown</span>';
   };
 
@@ -6420,17 +6509,27 @@ function renderTeamPossibleLinks(teamObj, playerList){
     return `${shown}<details style="margin-top:2px;"><summary style="cursor:pointer;color:var(--muted);font-size:11.5px;">+${r.connections.length-2} more</summary><div style="margin-top:2px;">${rest}</div></details>`;
   };
 
-  // Sortable columns. Status sorts active-before-lapsed-before-unknown, then by how recently the
-  // player was last seen; Team/Division sorts alphabetically by their current team; Connected via
-  // sorts by how many roster members they link back through (the strongest leads first).
+  // Sortable columns. Default is Strength — games played, goals, bests, weighted up for reaching
+  // a higher grade/division — so a real, substantial career (Div 1 juniors through to Seniors,
+  // plenty of games/goals/bests) ranks above a single game from years ago, without hiding that
+  // second player entirely; they're just further down, sortable back to the top by anyone who
+  // specifically wants the most-recent or highest-connection-count lead instead.
   const statusRank = r => (r.status==='active' ? 2 : r.status==='lapsed' ? 1 : 0);
+  const gradeCell = r => r.bestGradeLabel
+    ? `${r.bestGradeLabel}${r.bestDivisionRank!=null ? ` (Div ${r.bestDivisionRank})` : ''}`
+    : '<span style="color:var(--muted);">—</span>';
   const COLUMNS = [
+    { key:'strength', label:'Strength', defaultDir:'desc', val:r=> r.strengthScore },
     { key:'name',    label:'Player',          defaultDir:'asc',  val:r=> (r.name||'').toLowerCase() },
+    { key:'grade',   label:'Highest level',   defaultDir:'desc', val:r=> (r.bestGradeLabel ? (99-gradeDisplayRank(r.bestGradeLabel))*1000 - (r.bestDivisionRank||0) : -1) },
+    { key:'games',   label:'Games',           defaultDir:'desc', val:r=> r.gamesPlayed },
+    { key:'goals',   label:'Goals',           defaultDir:'desc', val:r=> r.totalGoals },
+    { key:'bests',   label:'Bests',           defaultDir:'desc', val:r=> r.bestCount },
     { key:'recency', label:'Status',          defaultDir:'desc', val:r=> statusRank(r)*10000 + (r.mostRecentYear||0) },
     { key:'team',    label:'Team / Division',  defaultDir:'asc',  val:r=> (r.currentTeamLabel||'').toLowerCase() },
     { key:'links',   label:'Connected via',    defaultDir:'desc', val:r=> r.connections.length }
   ];
-  const sortCol = COLUMNS.find(c=>c.key===teamPossibleLinksSort.key) || COLUMNS[1];
+  const sortCol = COLUMNS.find(c=>c.key===teamPossibleLinksSort.key) || COLUMNS[0];
   const dirMul = teamPossibleLinksSort.dir==='asc' ? 1 : -1;
   const sorted = filtered.slice().sort((a,b)=>{
     const av = sortCol.val(a), bv = sortCol.val(b);
@@ -6446,7 +6545,7 @@ function renderTeamPossibleLinks(teamObj, playerList){
 
   wrap.innerHTML = `
     <h3 style="font-size:14px;margin-top:24px;">Possible player links</h3>
-    <div class="warn-box" style="margin:0 0 12px;">Every player who's shared a team-season with someone currently on this team, and isn't already here themselves — teammates, not opponents, so this is a lead list, not a scouting report. ${results.length} found${latestYear?`; status checked against ${latestYear}, the most recent season on file`:''}.</div>
+    <div class="warn-box" style="margin:0 0 12px;">Every player who's shared a team-season with someone currently on this team, and isn't already here themselves — teammates, not opponents, so this is a lead list, not a scouting report. Ranked by Strength by default (games, goals, bests, weighted for the highest grade/division reached), so a real, established player sits above a one-off game from years back — click any column to sort differently. ${results.length} found${latestYear?`; status checked against ${latestYear}, the most recent season on file`:''}.</div>
     <div class="controls-row" style="margin-bottom:12px;">
       <select id="teamPossibleLinksFilter">
         <option value="ALL" ${teamPossibleLinksFilter==='ALL'?'selected':''}>Any club — show everyone</option>
@@ -6457,7 +6556,12 @@ function renderTeamPossibleLinks(teamObj, playerList){
     ${filtered.length===0 ? '<div class="empty">Nobody matches that filter.</div>' : `
     <table><thead><tr>${thHtml}</tr></thead>
     <tbody>${visible.map(r=>`<tr style="vertical-align:top;">
+      <td class="num">${r.strengthScore}</td>
       <td>${r.playerKey ? `<span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>` : r.name}</td>
+      <td>${gradeCell(r)}</td>
+      <td class="num">${r.gamesPlayed}</td>
+      <td class="num">${r.totalGoals}</td>
+      <td class="num">${r.bestCount}</td>
       <td>${statusCell(r)}</td>
       <td>${r.currentTeamLabel||'<span style="color:var(--muted);">—</span>'}${r.currentDivisionLabel?`<div style="font-size:11.5px;color:var(--muted);">${r.currentDivisionLabel}</div>`:''}</td>
       <td>${connectionsCell(r)}</td>
@@ -7237,7 +7341,7 @@ function computeSeasonScopedPlayerStats(playerList, years){
     const rollingGoals3 = last3.length ? +(last3.reduce((s,t)=>s+t.goals,0)/last3.length).toFixed(2) : 0;
     const rb3Count = last3.filter(t=>t.isBest).length;
     const formScore = +((rollingGoals3*3) + (rb3Count*2)).toFixed(1);
-    const mvpScore = (weightedGoals*2) + weightedBest + gamesPlayed;
+    const mvpScore = Math.round((weightedGoals*2) + weightedBest + gamesPlayed);
     return { key:p.key, name:p.name, totalGoals, weightedBest, formScore, mvpScore, gamesPlayed };
   }).filter(Boolean);
 }
@@ -7263,6 +7367,130 @@ function computeCohortPlayerKeys(playerList, startYear, startAgeGroup){
 // Audits every alias currently in effect (playerAliases) for the same red flag that proved the
 // Eli Edwards merge wrong: real PlayHQ profile IDs on file for the RAW (merged-away) identity
 // that never match any ID seen for the CANONICAL identity it was folded into. A merge made
+// Finds the biggest turnaround in every game that has real quarter-by-quarter scores: the
+// largest gap between the two teams at any checkpoint (end of Q1/Q2/Q3) compared to how the game
+// actually finished. A team trailing by 30 at three-quarter-time who wins is a genuine comeback;
+// a team leading by 30 at that point who loses is a collapse — same underlying number, opposite
+// direction, both worth surfacing. Only covers games where quarterScores is actually present
+// (~80-84% of played games per season, confirmed earlier this session) — a game with no quarter
+// data simply isn't included, not treated as "no comeback happened".
+function computeQuarterComebacks(year){
+  return withAllDataFilters(()=>{
+    const results = [];
+    getVisibleGames().forEach(g=>{
+      if(!g.quarterScores || !g.teamA || !g.teamB) return;
+      if(year && getGameYear(g)!==year) return;
+      const qa = g.quarterScores.teamA, qb = g.quarterScores.teamB;
+      if(!Array.isArray(qa) || !Array.isArray(qb) || qa.length<4 || qb.length<4) return;
+
+      const finalMargin = g.teamA.total - g.teamB.total; // positive = A won by this much
+      let biggestGapForA = 0, biggestGapAtQuarter = null; // the largest LEAD either team held, signed +A/-B
+      for(let i=0;i<3;i++){ // check after Q1, Q2, Q3 — not Q4, since that's just the final result itself
+        const gap = qa[i] - qb[i];
+        if(Math.abs(gap) > Math.abs(biggestGapForA)){ biggestGapForA = gap; biggestGapAtQuarter = i+1; }
+      }
+      if(biggestGapAtQuarter==null) return;
+
+      // A comeback/collapse only counts if the LEAD CHANGED HANDS by full time — same team
+      // leading throughout isn't a turnaround, it's just a consistent performance.
+      const sameSign = (biggestGapForA>0 && finalMargin>0) || (biggestGapForA<0 && finalMargin<0);
+      if(sameSign || biggestGapForA===0) return;
+
+      const turnaround = Math.abs(biggestGapForA) + Math.abs(finalMargin);
+      const trailingTeam = biggestGapForA>0 ? g.teamB.name : g.teamA.name; // the team that was behind at the checkpoint
+      const winningTeam = g.winner;
+      // Age group taken from teamA's name, falling back to teamB — matches how Missing Games and
+      // other Tools pages derive it (a game's two sides are always the same age group in this
+      // competition, so either side gives the right answer).
+      const ageGroupA = getAgeGroupLabel(g.teamA.name);
+      const ageGroup = ageGroupA!=='Other' ? ageGroupA : getAgeGroupLabel(g.teamB.name);
+      results.push({
+        gameId:g.id, dateTime:g.dateTime, teamA:g.teamA.name, teamB:g.teamB.name,
+        deficitAtQuarter:biggestGapAtQuarter, deficitAmount:Math.abs(biggestGapForA),
+        finalMargin:Math.abs(finalMargin), turnaround,
+        trailingTeam, winningTeam, isComeback: trailingTeam===winningTeam,
+        ageGroup, division: getDivision(g),
+      });
+    });
+    return results.sort((a,b)=> b.turnaround - a.turnaround);
+  });
+}
+
+// For junior players (U-grade) whose FIRST season on file happened long enough ago that we can
+// actually tell whether they kept playing or not, compares their first-season experience —
+// games played, win rate, goals, bests, and exposure to big losses — between two groups:
+// players who only ever appeared in 1-2 seasons total (before stopping, or just never playing
+// again) versus players who went on to play 3 or more seasons. The question this answers: does a
+// rough first season (losses, blowouts, no goals/bests) actually predict who leaves?
+//
+// Deliberately excludes anyone whose first season is too recent to judge — someone who debuted
+// last year hasn't had the CHANCE to play a third season yet, so counting them as "left after 1"
+// would be wrong; they just haven't had time to prove either way. "Long enough ago" = their debut
+// year is at least 2 years before the most recent year in the dataset, so a genuine 3rd-season
+// opportunity has passed.
+//
+// Uses the real canonical player identity (computeAggregates' playerList), not the bare-name
+// movement trail Lapsed Players uses — a player who changed clubs mid-journey is correctly
+// followed as one person, not miscounted as two different one-season players.
+function computeJuniorRetentionAnalysis(){
+  return withAllDataFilters(()=>{
+    const { playerList } = computeAggregates();
+    const allYears = [...new Set(playerList.flatMap(p=>p.timeline.map(t=>t.date?new Date(t.date).getFullYear():null).filter(Boolean)))];
+    if(!allYears.length) return null;
+    const latestYear = Math.max(...allYears);
+    const judgeableCutoff = latestYear - 2; // debut year must be at or before this to be judgeable
+
+    const players = [];
+    playerList.forEach(p=>{
+      const juniorEntries = p.timeline.filter(t=> t.date && isJuniorGrade(getAgeGroupLabel(t.team)));
+      if(!juniorEntries.length) return;
+      const byYear = new Map();
+      juniorEntries.forEach(t=>{
+        const year = new Date(t.date).getFullYear();
+        if(!byYear.has(year)) byYear.set(year, []);
+        byYear.get(year).push(t);
+      });
+      const juniorYears = [...byYear.keys()].sort((a,b)=>a-b);
+      const debutYear = juniorYears[0];
+      if(debutYear > judgeableCutoff) return; // too recent to judge — hasn't had the chance to prove either way
+
+      const seasonCount = juniorYears.length;
+      const firstSeasonEntries = byYear.get(debutYear);
+      const gamesPlayed = firstSeasonEntries.length;
+      const wins = firstSeasonEntries.filter(t=>t.result==='W').length;
+      const winRate = gamesPlayed>0 ? wins/gamesPlayed : 0;
+      const totalGoals = firstSeasonEntries.reduce((s,t)=>s+t.goals,0);
+      const bestCount = firstSeasonEntries.filter(t=>t.isBest).length;
+      const scorelessGames = firstSeasonEntries.filter(t=>t.goals===0).length;
+      // A "blowout" the player was on the losing side of — margin is always stored positive (the
+      // winning margin), so this only counts losses with a large gap, not any big win.
+      const blowoutLosses = firstSeasonEntries.filter(t=> t.result==='L' && (t.margin||0) >= 40).length;
+
+      players.push({
+        key:p.key, name:p.name, debutYear, seasonCount,
+        stayed: seasonCount >= 3,
+        gamesPlayed, wins, winRate, totalGoals, bestCount, scorelessGames, blowoutLosses,
+        goalsPerGame: gamesPlayed>0 ? totalGoals/gamesPlayed : 0,
+      });
+    });
+
+    const left = players.filter(p=>!p.stayed);
+    const stayed = players.filter(p=>p.stayed);
+    const avg = (list, key) => list.length ? list.reduce((s,p)=>s+p[key],0)/list.length : 0;
+
+    return {
+      latestYear, judgeableCutoff,
+      totalJudgeable: players.length,
+      left: { count:left.length, players:left,
+        avgWinRate:avg(left,'winRate'), avgGoalsPerGame:avg(left,'goalsPerGame'), avgBests:avg(left,'bestCount'),
+        avgScorelessGames:avg(left,'scorelessGames'), avgBlowoutLosses:avg(left,'blowoutLosses'), avgGamesPlayed:avg(left,'gamesPlayed') },
+      stayed: { count:stayed.length, players:stayed,
+        avgWinRate:avg(stayed,'winRate'), avgGoalsPerGame:avg(stayed,'goalsPerGame'), avgBests:avg(stayed,'bestCount'),
+        avgScorelessGames:avg(stayed,'scorelessGames'), avgBlowoutLosses:avg(stayed,'blowoutLosses'), avgGamesPlayed:avg(stayed,'gamesPlayed') },
+    };
+  });
+}
+
 // before ID data existed can't be checked this way at the time — but once games with real IDs
 // exist for both sides, a genuine mismatch becomes visible after the fact. Works from raw GAME
 // rows, not the already-merged aggregate player objects — by the time computeAggregates() has
@@ -7752,6 +7980,112 @@ function renderJuniorPathway(){
       }
       renderJuniorPathway();
     };
+  });
+}
+
+let quarterComebacksYear = null;
+let quarterComebacksFilter = 'ALL'; // 'ALL', 'COMEBACKS', 'COLLAPSES'
+let quarterComebacksAgeGroup = 'ALL';
+let quarterComebacksDivision = 'ALL';
+
+function doOpenQuarterComebacks(){
+  showPanel('quarter-comebacks');
+  renderQuarterComebacks();
+}
+function openQuarterComebacks(){
+  doOpenQuarterComebacks();
+  navPush('quarter-comebacks', 'Biggest Turnarounds', 'tools/quarter-comebacks', doOpenQuarterComebacks);
+}
+function backToToolsFromQuarterComebacks(){ navBack(); }
+
+function renderQuarterComebacks(){
+  const wrap = document.getElementById('quarterComebacksWrap');
+  if(!wrap) return;
+
+  const years = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
+  if(quarterComebacksYear == null || !years.includes(quarterComebacksYear)){
+    quarterComebacksYear = years[0] ?? null;
+  }
+  if(quarterComebacksYear == null){
+    wrap.innerHTML = `<span class="back-link" id="backToToolsFromQuarterComebacks">&larr; Back to tools</span>
+      <h2 style="font-size:20px;">Biggest turnarounds</h2>
+      <div class="empty">No games on file yet.</div>`;
+    document.getElementById('backToToolsFromQuarterComebacks').onclick = backToToolsFromQuarterComebacks;
+    return;
+  }
+
+  const all = computeQuarterComebacks(quarterComebacksYear);
+
+  // Age groups present THIS year, ordered the same way as everywhere else in the app (Seniors,
+  // Reserves, U18, U16, U14, U12) — not alphabetical.
+  const ageGroupsThisYear = [...new Set(all.map(r=>r.ageGroup).filter(a=>a && a!=='Other'))]
+    .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  if(quarterComebacksAgeGroup!=='ALL' && !ageGroupsThisYear.includes(quarterComebacksAgeGroup)) quarterComebacksAgeGroup = 'ALL';
+
+  // Divisions scoped to whatever age group is CURRENTLY selected — same reasoning as Missing
+  // Games: picking "Seniors" should only offer the senior leagues, not junior Division numbers,
+  // and vice versa. Re-derived every render so changing age group naturally narrows this list.
+  const matchesAgeGroup = r => quarterComebacksAgeGroup==='ALL' || r.ageGroup===quarterComebacksAgeGroup;
+  const divisionsThisYear = [...new Set(all.filter(matchesAgeGroup).map(r=>r.division).filter(Boolean))]
+    .sort((a,b)=>(divisionRank(a)??999)-(divisionRank(b)??999));
+  if(quarterComebacksDivision!=='ALL' && !divisionsThisYear.includes(quarterComebacksDivision)) quarterComebacksDivision = 'ALL';
+
+  const matchesFilters = r => matchesAgeGroup(r) && (quarterComebacksDivision==='ALL' || r.division===quarterComebacksDivision);
+  const scoped = all.filter(matchesFilters);
+  const filtered = quarterComebacksFilter==='COMEBACKS' ? scoped.filter(r=>r.isComeback)
+    : quarterComebacksFilter==='COLLAPSES' ? scoped.filter(r=>!r.isComeback)
+    : scoped;
+
+  const showGradeColumn = quarterComebacksAgeGroup==='ALL';
+
+  const rowHtml = r => `<tr>
+    <td><span class="game-link" data-key="${r.gameId}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.teamA} v ${r.teamB}</span></td>
+    <td>${r.dateTime}</td>
+    ${showGradeColumn ? `<td>${r.ageGroup||'—'}</td>` : ''}
+    <td>${r.isComeback ? `<span style="color:var(--green);">Comeback</span>` : `<span style="color:var(--red);">Collapse</span>`}</td>
+    <td>${r.trailingTeam} trailed by ${r.deficitAmount} at Q${r.deficitAtQuarter}</td>
+    <td class="num">${r.winningTeam} won by ${r.finalMargin}</td>
+    <td class="num">${r.turnaround}</td>
+  </tr>`;
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToToolsFromQuarterComebacks">&larr; Back to tools</span>
+    <h2 style="font-size:20px;">Biggest turnarounds</h2>
+    <p class="hint" style="margin:0 0 12px;">Every game with real quarter-by-quarter scores, ranked by how much the lead changed between the biggest gap at any quarter-time checkpoint and the final result. Only covers games where PlayHQ actually recorded a quarter breakdown — usually 80-84% of a season's games, the rest aren't included at all rather than assumed to have no turnaround.</p>
+    <div class="controls-row" style="margin-bottom:14px;">
+      <select id="quarterComebacksYearSelect">
+        ${years.map(y=>`<option value="${y}" ${y===quarterComebacksYear?'selected':''}>${y}</option>`).join('')}
+      </select>
+      <select id="quarterComebacksAgeGroupSelect">
+        <option value="ALL" ${quarterComebacksAgeGroup==='ALL'?'selected':''}>All age groups</option>
+        ${ageGroupsThisYear.map(a=>`<option value="${a}" ${quarterComebacksAgeGroup===a?'selected':''}>${a}</option>`).join('')}
+      </select>
+      <select id="quarterComebacksDivisionSelect">
+        <option value="ALL">All divisions</option>
+        ${divisionsThisYear.map(d=>`<option value="${d}" ${quarterComebacksDivision===d?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <select id="quarterComebacksFilterSelect">
+        <option value="ALL" ${quarterComebacksFilter==='ALL'?'selected':''}>Comebacks &amp; collapses</option>
+        <option value="COMEBACKS" ${quarterComebacksFilter==='COMEBACKS'?'selected':''}>Comebacks only</option>
+        <option value="COLLAPSES" ${quarterComebacksFilter==='COLLAPSES'?'selected':''}>Collapses only</option>
+      </select>
+    </div>
+    ${filtered.length===0 ? '<div class="empty">No turnarounds found for this filter.</div>' : `
+    <table><thead><tr><th>Game</th><th>Date</th>${showGradeColumn?'<th>Grade</th>':''}<th>Type</th><th>Biggest gap</th><th class="num">Result</th><th class="num">Turnaround</th></tr></thead>
+    <tbody>${filtered.slice(0,50).map(rowHtml).join('')}</tbody></table>
+    ${filtered.length>50 ? `<p class="hint" style="margin-top:10px;">Showing the top 50 of ${filtered.length}.</p>` : ''}`}
+  `;
+  document.getElementById('backToToolsFromQuarterComebacks').onclick = backToToolsFromQuarterComebacks;
+  const yearSel = document.getElementById('quarterComebacksYearSelect');
+  if(yearSel) yearSel.onchange = e=>{ quarterComebacksYear = parseInt(e.target.value,10); renderQuarterComebacks(); };
+  const ageGroupSel = document.getElementById('quarterComebacksAgeGroupSelect');
+  if(ageGroupSel) ageGroupSel.onchange = e=>{ quarterComebacksAgeGroup = e.target.value; renderQuarterComebacks(); };
+  const divisionSel = document.getElementById('quarterComebacksDivisionSelect');
+  if(divisionSel) divisionSel.onchange = e=>{ quarterComebacksDivision = e.target.value; renderQuarterComebacks(); };
+  const filterSel = document.getElementById('quarterComebacksFilterSelect');
+  if(filterSel) filterSel.onchange = e=>{ quarterComebacksFilter = e.target.value; renderQuarterComebacks(); };
+  wrap.querySelectorAll('.game-link').forEach(el=>{
+    el.onclick = ()=> openGameDetail(el.dataset.key);
   });
 }
 
@@ -10936,7 +11270,7 @@ const PANEL_OWNER_TAB = {
   'add':'games', 'team-detail':'teams', 'player-detail':'players', 'game-detail':'games', 'fixture-preview':'games',
   'power-rankings':'tools', 'compare-players':'tools', 'compare-teams':'tools', 'squad-progressions':'tools',
   'home-grown':'tools', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools',
-  'suggest-divisions':'tools', 'top-players':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'tools'
+  'suggest-divisions':'tools', 'top-players':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'tools', 'quarter-comebacks':'tools'
 };
 function showPanel(panelId){
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
@@ -11179,6 +11513,7 @@ document.getElementById('toolTileSquadProgressions').onclick = ()=> openSquadPro
 document.getElementById('toolTileHomeGrown').onclick = ()=> openHomeGrown();
 document.getElementById('toolTileAbsenceLeaderboard').onclick = ()=> openAbsenceLeaderboard();
 document.getElementById('toolTileJuniorPathway').onclick = ()=> openJuniorPathway();
+document.getElementById('toolTileQuarterComebacks').onclick = ()=> openQuarterComebacks();
 document.getElementById('toolTilePredictionAccuracy').onclick = ()=> openPredictionAccuracy();
 document.getElementById('toolTileSuggestDivisions').onclick = ()=> openSuggestDivisions();
 document.getElementById('toolTileManageClubs').onclick = ()=> openManageClubs();
