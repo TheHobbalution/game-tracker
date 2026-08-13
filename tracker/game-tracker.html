@@ -30,19 +30,6 @@
     margin:0; background:var(--bg); color:var(--text);
     font-family:'Inter',sans-serif; -webkit-font-smoothing:antialiased;
   }
-  /* Faint tiled club-crest background — purely a relative-path reference to a "Logos" folder
-     the user hosts alongside data.json on their own site; this file never contains or embeds the
-     image bytes themselves. Sits behind all real content (z-index 0, page content stacks above
-     it), desaturated and very low-opacity so it reads as a subtle texture, not a distraction.
-     Any filename that doesn't match what's actually in the user's Logos folder just quietly
-     hides itself (onerror below) rather than showing a broken-image icon. */
-  .logo-tessellation-bg{
-    position:fixed; inset:0; z-index:-1; overflow:hidden; pointer-events:none;
-  }
-  .logo-tessellation-bg img{
-    position:absolute; width:76px; height:76px; object-fit:contain;
-    filter:grayscale(1) contrast(0.55) brightness(2.4); opacity:0.03;
-  }
   h1,h2,h3, .display{ font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.03em; }
   .mono{ font-family:'IBM Plex Mono',monospace; }
 
@@ -418,90 +405,6 @@
 </style>
 </head>
 <body>
-
-<div class="logo-tessellation-bg" id="logoTessellationBg" aria-hidden="true">
-  <img src="../Logos/Aireys_Inlet_AFL_Barwon-23244e12.webp" onerror="this.style.display='none'">
-  <img src="../Logos/ALVIE_FNC-016f552f.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Anakie-5d173a5a.webp" onerror="this.style.display='none'">
-  <img src="../Logos/anglesea_jpg-709fe65f.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Apollo_Bay-2195d597.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Armstrong_Creek-32d969a9.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Bannockburn-c331acdd.webp" onerror="this.style.display='none'">
-  <img src="../Logos/barwonheads_jpg-f36a2819.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Bell_Park_2024-fb4017c1.webp" onerror="this.style.display='none'">
-  <img src="../Logos/BellPostHill.jpg" onerror="this.style.display='none'">
-  <img src="../Logos/Belmont_Lions-03fcab85.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Birregurra-a8d6d216.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Colac_2024-55f3fa8b.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Colac_Imperials-bb635b62.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Corio_Devils-b6235174.webp" onerror="this.style.display='none'">
-  <img src="../Logos/drysdale-ad02c6e3.webp" onerror="this.style.display='none'">
-  <img src="../Logos/East_Geelong-ab14c6a8.webp" onerror="this.style.display='none'">
-  <img src="../Logos/geelongamatuers-82594bfe.webp" onerror="this.style.display='none'">
-  <img src="../Logos/geelong-west-ab62a212.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Grovedale_2024-d2fcbe0b.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Inverleigh_Hawks-14217ffe.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Irrewarra_Beeac-0b42e3aa.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Lara_2024-baa842d1.webp" onerror="this.style.display='none'">
-  <img src="../Logos/leopold-58add1ca.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Lethbridge_AFL_Barwon-7a9a82f0.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Lorne-28452d66.webp" onerror="this.style.display='none'">
-  <img src="../Logos/modewarre-44509172.webp" onerror="this.style.display='none'">
-  <img src="../Logos/newcomb_jpg-d975d42b.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Newtown_Chilwell_2024-95e5d73a.webp" onerror="this.style.display='none'">
-  <img src="../Logos/North_Geelong-de0052a5.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Northern_Stars-0406a462.webp" onerror="this.style.display='none'">
-  <img src="../Logos/north-shore-3f4ce411.webp" onerror="this.style.display='none'">
-  <img src="../Logos/OGFNC-6c99accb.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Otway_Districts-86091f7e.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Peninsula_Sharks-9351e7ae.webp" onerror="this.style.display='none'">
-  <img src="../Logos/portarlington_jpg-05b832db.webp" onerror="this.style.display='none'">
-  <img src="../Logos/queenscliff-fb635181.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Simpson-578819f3.webp" onerror="this.style.display='none'">
-  <img src="../Logos/South_Barwon-a834680c.webp" onerror="this.style.display='none'">
-  <img src="../Logos/South_Colac-dc7fc758.webp" onerror="this.style.display='none'">
-  <img src="../Logos/St_Albans_2024-f98c712a.webp" onerror="this.style.display='none'">
-  <img src="../Logos/St_Josephs_2024-32cdd4c7.webp" onerror="this.style.display='none'">
-  <img src="../Logos/St_Marys_2024-75b174c1.webp" onerror="this.style.display='none'">
-  <img src="../Logos/SurfCoast-118a97b8.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Teesdale_AFL_Barwon-2c6cbc77.webp" onerror="this.style.display='none'">
-  <img src="../Logos/TFNC-2ac39da3.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Thomson-50893535.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Werribee_Centrals_New_2026-4e64b113.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Western_Eagles-aa7ab617.webp" onerror="this.style.display='none'">
-  <img src="../Logos/Winch_Logo-2cf80e24.webp" onerror="this.style.display='none'">
-</div>
-<script>
-  // Brick/masonry stagger, like a wall — each row offset by half a tile-width from the row
-  // above/below it, rather than a straight grid. Computed in JS (row/col math, absolute
-  // positioning) since CSS alone can't reliably offset "every other row" once the row count
-  // depends on viewport width. Only touches layout — every <img src> is still exactly the plain
-  // relative-path reference declared above, nothing about the images themselves changes.
-  (function(){
-    const bg = document.getElementById('logoTessellationBg');
-    if(!bg) return;
-    const sources = Array.from(bg.querySelectorAll('img')).map(img=>img.getAttribute('src'));
-    if(!sources.length) return;
-    bg.innerHTML = '';
-    const tile = 76, gap = 18;
-    const colPitch = tile + gap, rowPitch = tile + gap * 0.6; // rows sit a bit closer than columns — reads more like brick coursing
-    const cols = Math.ceil(window.innerWidth / colPitch) + 2;
-    const rows = Math.ceil(window.innerHeight / rowPitch) + 2;
-    let idx = 0;
-    for(let r=0; r<rows; r++){
-      const offset = (r % 2 === 1) ? colPitch/2 : 0;
-      for(let c=0; c<cols; c++){
-        const img = document.createElement('img');
-        img.src = sources[idx % sources.length];
-        img.onerror = function(){ this.style.display='none'; };
-        img.style.left = (c*colPitch + offset) + 'px';
-        img.style.top = (r*rowPitch) + 'px';
-        bg.appendChild(img);
-        idx++;
-      }
-    }
-  })();
-</script>
 
 <header class="top">
   <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 12082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
