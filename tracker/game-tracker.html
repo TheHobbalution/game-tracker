@@ -455,10 +455,10 @@
     <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across the AFL Barwon FNL, all pulled together in one place — goals, records, form trends, head-to-head history, and team rankings, updated as results come in.</p>
     <div id="privacyBanner" class="warn-box" style="max-width:760px;margin-bottom:18px;"><strong>This is your own copy.</strong> Anything you add, edit or delete here changes only what <em>you</em> see — it isn't shared with anyone else, and it doesn't alter the real results.</div>
     <div id="homeSnapshot" class="home-snapshot">
-      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">0</div><div class="label">Games tracked (all-time)</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">0</div><div class="label">Teams</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">0</div><div class="label">Players with stats tracked</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--red);"><div class="value">0</div><div class="label">Goals scored</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">0</div><div class="label">Players with stats tracked</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">0</div><div class="label">Teams</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">0</div><div class="label">Games tracked (all-time)</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">0</div><div class="label">Goals scored</div></div>
     </div>
     <p class="hint" style="margin:22px 0 14px;">Pick where you want to go:</p>
     <div class="home-grid">
@@ -511,7 +511,7 @@
     </div>
     <div class="tools-section-label">Quick actions</div>
     <div class="tools-grid">
-      <div class="tool-tile tool-tile-green" id="toolTilePlayersShowAll"><div class="tool-tile-title">Show everyone</div><div class="tool-tile-desc">Every player's stats in one sortable table, right here on this page.</div></div>
+      <div class="tool-tile tool-tile-green" id="toolTilePlayersShowAll"><div class="tool-tile-title">Find players</div><div class="tool-tile-desc">Browse by age group, or search for someone specific.</div></div>
       <div class="tool-tile tool-tile-green" id="toolTilePlayersTop"><div class="tool-tile-title">Top players</div><div class="tool-tile-desc">This season's leaders across goals, bests and form.</div></div>
       <div class="tool-tile tool-tile-green" id="toolTilePlayersCompare"><div class="tool-tile-title">Compare players</div><div class="tool-tile-desc">Head-to-head stats, teammate history and league context for two players.</div></div>
       <div class="tool-tile tool-tile-green" id="toolTilePlayersMovement"><div class="tool-tile-title">Player movement</div><div class="tool-tile-desc">Who's changed clubs, lapsed entirely, or shares a roster history — recruiting leads.</div></div>
@@ -554,6 +554,11 @@
       <div class="chart-wrap"><canvas id="bestsChart"></canvas></div>
       <div id="playersTableWrap"></div>
     </div>
+  </section>
+
+  <!-- FIND PLAYERS -->
+  <section class="panel" id="panel-find-players">
+    <div id="findPlayersWrap"></div>
   </section>
 
   <!-- TEAMS -->
@@ -602,6 +607,7 @@
     <div class="tools-grid">
       <div class="tool-tile tool-tile-blue" id="toolTilePowerRankings"><div class="tool-tile-title">Team rankings</div><div class="tool-tile-desc">Every team ranked regardless of division, age group or year.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileLadder"><div class="tool-tile-title">Ladders</div><div class="tool-tile-desc">Standings for one year, age group and division — U14 and older only.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileFinalsChances"><div class="tool-tile-title">Finals chances</div><div class="tool-tile-desc">Simulated % chance to make finals, plus what's still up for grabs on the cusp.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileCompareTeams"><div class="tool-tile-title">Compare teams</div><div class="tool-tile-desc">Head-to-head record and squad overlap for two teams.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Season trends, most improved all-time, and a club-wide leaderboard.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileClubPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
@@ -620,6 +626,8 @@
       <div class="tool-tile tool-tile-muted" id="toolTileMergePlayers"><div class="tool-tile-title">Merge players</div><div class="tool-tile-desc">Fix duplicate player records — typos, or a player who switched clubs mid-season.</div></div>
       <div class="tool-tile tool-tile-muted" id="toolTileSuggestDivisions"><div class="tool-tile-title">Suggest divisions</div><div class="tool-tile-desc">Flags teams that may be sitting in the wrong division.</div></div>
       <div class="tool-tile tool-tile-muted" id="toolTileManageClubs"><div class="tool-tile-title">Manage clubs</div><div class="tool-tile-desc">Resolve unrecognised team names to a real club, and set nicknames.</div></div>
+      <div class="tool-tile tool-tile-muted" id="toolTileRefreshPublishedData"><div class="tool-tile-title">Refresh published data</div><div class="tool-tile-desc">Re-check the hosted data.json.gz for changes and reload it — no re-upload needed.</div></div>
+      <div class="tool-tile tool-tile-muted" id="toolTileResetPublishedData"><div class="tool-tile-title">Reset to published version</div><div class="tool-tile-desc">Always reload from the published data, discarding any local changes — for undoing a broken local copy.</div></div>
     </div>
   </section>
 
@@ -706,7 +714,7 @@
       </div>
     </div>
     <div class="tools-grid" style="max-width:700px;margin:14px auto 0;">
-      <div class="tool-tile tool-tile-green" id="toolTileGamesLadder"><div class="tool-tile-title">Ladders</div><div class="tool-tile-desc">Standings for one year, age group and division — U14 and older only.</div></div>
+      <div class="tool-tile tool-tile-purple" id="toolTileGamesLadder"><div class="tool-tile-title" style="font-size:19px;">Ladders</div><div class="tool-tile-desc">Standings for one year, age group and division — U14 and older only.</div></div>
     </div>
     <div id="gamesSubView"></div>
   </section>
@@ -2295,7 +2303,7 @@ function isLadderEligibleGrade(grade){
   return r <= ladderMinGradeRank;
 }
 
-let ladderFilters = { year:null, ageGroup:null, division:null };
+let ladderFilters = { year:null, ageGroup:null, division:null, mode:'ladder', finalsSpotsOverride:null, extraGamesPerTeam:0 };
 
 // Standard AFL community-footy points (4/2/0) and percentage (for/against), Regular Season games
 // only — Grading rounds (used to sort teams into divisions) and Finals aren't part of the table
@@ -2379,6 +2387,236 @@ function computeFinals({ year, ageGroup, division }){
   });
 }
 
+// ─── Finals chances projection ─────────────────────────────────────────────────────────────
+// Looks at the most recent PRIOR year with finals data for this exact age group + division, and
+// counts the distinct teams that appeared in Finals-phase games that year — used as the assumed
+// number of finals spots this year, rather than requiring it to be configured by hand every
+// season. Returns null if no prior finals data exists for this combo (a brand new division, or
+// one that's never reached finals in the data on file) — the caller falls back to a plain
+// top-4 default in that case, clearly labelled as a guess rather than inferred.
+// Cached per (ageGroup|division|year|_aggVersion) — a plain-name-scan over the whole games array
+// with no memoization was re-running on every Ladder render (every dropdown change, every finals-
+// spots override toggle), which adds up on an 11,000+ game dataset. Invalidates itself the moment
+// the underlying data actually changes, same pattern as the app's other per-render caches.
+const _finalsSpotCache = new Map();
+function inferFinalsSpotCount(ageGroup, division, currentYear){
+  const cacheKey = `${ageGroup}|${division}|${currentYear}|${_aggVersion}`;
+  if(_finalsSpotCache.has(cacheKey)) return _finalsSpotCache.get(cacheKey);
+  const priorYears = [...new Set(
+    games.filter(g=> g.teamA && g.teamB && isFinalsGame(g) &&
+      getAgeGroupLabel(g.teamA.name)===ageGroup && getDivision(g)===division &&
+      Number(getGameYear(g)) < Number(currentYear)
+    ).map(g=>getGameYear(g))
+  )].sort((a,b)=>b-a);
+  let result = null;
+  if(priorYears.length){
+    const sourceYear = priorYears[0];
+    const teams = new Set();
+    games.forEach(g=>{
+      if(!g.teamA || !g.teamB || !isFinalsGame(g)) return;
+      if(String(getGameYear(g)) !== String(sourceYear)) return;
+      if(getAgeGroupLabel(g.teamA.name) !== ageGroup || getDivision(g) !== division) return;
+      teams.add(g.teamA.name); teams.add(g.teamB.name);
+    });
+    result = { count: teams.size, sourceYear };
+  }
+  _finalsSpotCache.set(cacheKey, result);
+  return result;
+}
+
+// How many regular-season games each team in this division has actually got on file for the
+// current year — completed (already in `games`) plus scheduled-but-not-yet-played (in
+// `fixtures`) — versus how many games teams in this same division actually played across the
+// whole of the most recent PRIOR season. A shortfall here almost always means the upcoming
+// fixture list simply hasn't been filled in that far ahead yet, not that the season is genuinely
+// shorter — surfaced as a warning with a manual override, rather than silently under-projecting
+// every team's finals chances. Cached the same way as inferFinalsSpotCount above, for the same reason.
+const _seasonLengthCache = new Map();
+function checkSeasonLengthMismatch(year, ageGroup, division, teamNames){
+  const cacheKey = `${year}|${ageGroup}|${division}|${_aggVersion}`;
+  if(_seasonLengthCache.has(cacheKey)) return _seasonLengthCache.get(cacheKey);
+  const result = checkSeasonLengthMismatchUncached(year, ageGroup, division, teamNames);
+  _seasonLengthCache.set(cacheKey, result);
+  return result;
+}
+function checkSeasonLengthMismatchUncached(year, ageGroup, division, teamNames){
+  const completedCounts = {};
+  teamNames.forEach(n=> completedCounts[n]=0);
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB) return;
+    if(String(getGameYear(g))!==String(year) || g.phase==='Grading' || isFinalsGame(g)) return;
+    if(getAgeGroupLabel(g.teamA.name)!==ageGroup || getDivision(g)!==division) return;
+    if(teamNames.includes(g.teamA.name)) completedCounts[g.teamA.name]++;
+    if(teamNames.includes(g.teamB.name)) completedCounts[g.teamB.name]++;
+  });
+  const upcomingCounts = {};
+  teamNames.forEach(n=> upcomingCounts[n]=0);
+  fixtures.forEach(f=>{
+    if(String(f.year)!==String(year)) return;
+    if(getAgeGroupLabel(f.teamA)!==ageGroup || getDivision(f)!==division) return;
+    if(teamNames.includes(f.teamA)) upcomingCounts[f.teamA]++;
+    if(teamNames.includes(f.teamB)) upcomingCounts[f.teamB]++;
+  });
+  const projectedTotals = teamNames.map(n=> (completedCounts[n]||0) + (upcomingCounts[n]||0));
+  const medianProjected = projectedTotals.length ? projectedTotals.slice().sort((a,b)=>a-b)[Math.floor(projectedTotals.length/2)] : 0;
+
+  const priorYears = [...new Set(
+    games.filter(g=> g.teamA && g.teamB && g.phase!=='Grading' && !isFinalsGame(g) &&
+      getAgeGroupLabel(g.teamA.name)===ageGroup && getDivision(g)===division &&
+      Number(getGameYear(g)) < Number(year)
+    ).map(g=>getGameYear(g))
+  )].sort((a,b)=>b-a);
+  if(!priorYears.length) return { mismatch:false, medianProjected, medianPrior:null, priorYear:null, completedCounts, upcomingCounts };
+  const priorYear = priorYears[0];
+  const priorCounts = {};
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB) return;
+    if(String(getGameYear(g))!==String(priorYear) || g.phase==='Grading' || isFinalsGame(g)) return;
+    if(getAgeGroupLabel(g.teamA.name)!==ageGroup || getDivision(g)!==division) return;
+    priorCounts[g.teamA.name] = (priorCounts[g.teamA.name]||0)+1;
+    priorCounts[g.teamB.name] = (priorCounts[g.teamB.name]||0)+1;
+  });
+  const priorVals = Object.values(priorCounts);
+  const medianPrior = priorVals.length ? priorVals.slice().sort((a,b)=>a-b)[Math.floor(priorVals.length/2)] : null;
+  const mismatch = medianPrior!=null && medianProjected < medianPrior - 1; // more than 1 game short of last year's typical season
+  return { mismatch, medianProjected, medianPrior, priorYear, completedCounts, upcomingCounts };
+}
+
+// Only meaningful once it's genuinely down to the wire — percentage only decides anything if a
+// team could plausibly finish LEVEL ON POINTS with a rival near the cutoff line, which only
+// becomes calculable with real numbers once each side has (at most) one game left. Uses each
+// team's own season-average scoring rate as the assumed scoreline for that last game — there's no
+// way to know the real final score in advance, so this is a genuine, worked-through threshold
+// rather than a guess, but still an estimate: the actual game could go very differently to a
+// team's average.
+function computePercentageScenarios(proj){
+  const scenarios = [];
+  const { rows, finalsSpots } = proj;
+  const cuspWindow = rows.filter(r=> r.rank >= Math.max(1, finalsSpots-2) && r.rank <= finalsSpots+2);
+  cuspWindow.forEach(t=>{
+    if(t.remaining.length !== 1 || t.gamesPlayed === 0) return;
+    const tAvgAgainst = t.pointsAgainst / t.gamesPlayed;
+    const tFinalPointsIfWin = t.points + 4;
+    cuspWindow.forEach(r=>{
+      if(r.name === t.name) return;
+      // Only a real percentage battle if they could plausibly finish level on points.
+      let rFinalPointsRange;
+      if(r.remaining.length === 0) rFinalPointsRange = [r.points, r.points];
+      else if(r.remaining.length === 1) rFinalPointsRange = [r.points, r.points+4];
+      else return; // 2+ games left for the rival — too many branches for this pass
+      if(!(tFinalPointsIfWin >= rFinalPointsRange[0] && tFinalPointsIfWin <= rFinalPointsRange[1])) return;
+
+      let rPct, rivalNote;
+      if(r.remaining.length===0){
+        rPct = r.percentage;
+        rivalNote = `${r.name} has no games left, sitting on ${r.percentage.toFixed(1)}%`;
+      } else {
+        const rAvgFor = r.gamesPlayed ? r.pointsFor/r.gamesPlayed : 0, rAvgAgainst = r.gamesPlayed ? r.pointsAgainst/r.gamesPlayed : 0;
+        rPct = ((r.pointsFor+rAvgFor)/(r.pointsAgainst+rAvgAgainst))*100;
+        rivalNote = `if ${r.name} also wins their last game (assuming a typical result for them)`;
+      }
+
+      // Minimum score T needs in their last game (assuming they concede their own season-average)
+      // for their percentage to at least match the rival's, if both finish on the same points.
+      const neededFor = (rPct/100) * (t.pointsAgainst + tAvgAgainst);
+      const neededMargin = Math.ceil(neededFor - t.pointsFor - tAvgAgainst);
+
+      scenarios.push({
+        team: t.name, opponent: t.remaining[0].opponent, rival: r.name, rivalPct: rPct, rivalNote, neededMargin
+      });
+    });
+  });
+  return scenarios;
+}
+
+// Monte Carlo projection — simulates the rest of the season many times using each team's real
+// win probability (the same power-rating model behind Compare Teams' predicted results), replays
+// the ladder each time, and checks who lands in the top N. A team's "chance" is simply how often
+// they made it across every simulated season — this is the standard way real sports-analytics
+// sites compute these numbers, not a shortcut. extraGamesPerTeam (from the manual override, when
+// the season-length check flags a shortfall) adds that many additional simulated games per team
+// against a randomly drawn division opponent, clearly separate from real scheduled fixtures.
+function computeFinalsProjection({ year, ageGroup, division, finalsSpots, extraGamesPerTeam, ladderRows }){
+  return withAllDataFilters(()=>{
+    // Accepts the ladder rows renderLadder() already computed, rather than running computeLadder()
+    // a second time with identical params — this alone was doubling the cost of every single
+    // Ladder page render, since the projection used to always recompute its own copy from scratch.
+    ladderRows = ladderRows || computeLadder({ year, ageGroup, division });
+    if(!ladderRows.length) return null;
+    const teamNames = ladderRows.map(r=>r.name);
+    const seasonCheck = checkSeasonLengthMismatch(year, ageGroup, division, teamNames);
+
+    const remainingFixtures = fixtures.filter(f=>
+      String(f.year)===String(year) && getAgeGroupLabel(f.teamA)===ageGroup && getDivision(f)===division &&
+      teamNames.includes(f.teamA) && teamNames.includes(f.teamB)
+    ).map(f=>({ teamA:f.teamA, teamB:f.teamB }));
+
+    if(extraGamesPerTeam > 0){
+      // Synthetic games — clearly an assumption, not real fixture data. Each team gets
+      // extraGamesPerTeam additional games against a randomly drawn division opponent (excluding
+      // itself), weighted toward opponents it has faced least often so far this season.
+      const opponentCount = {};
+      teamNames.forEach(a=> teamNames.forEach(b=>{ if(a!==b) opponentCount[a+'||'+b]=0; }));
+      [...remainingFixtures, ...ladderRows.flatMap(()=>[])].forEach(()=>{}); // no-op, kept simple
+      teamNames.forEach(team=>{
+        for(let i=0;i<extraGamesPerTeam;i++){
+          const others = teamNames.filter(t=>t!==team);
+          const opp = others[Math.floor(Math.random()*others.length)];
+          remainingFixtures.push({ teamA:team, teamB:opp, synthetic:true });
+        }
+      });
+    }
+
+    const marginRatings = computeMarginRatings();
+    const teamObjByName = {};
+    ladderRows.forEach(r=> teamObjByName[r.name] = r);
+    const ratingKey = name => name + '__' + year;
+
+    const SIMULATIONS = 3000;
+    const madeFinalsCount = {}; teamNames.forEach(n=> madeFinalsCount[n]=0);
+    const finishPositionSum = {}; teamNames.forEach(n=> finishPositionSum[n]=0);
+
+    for(let sim=0; sim<SIMULATIONS; sim++){
+      const simPoints = {}, simPct = {};
+      ladderRows.forEach(r=>{ simPoints[r.name]=r.points; simPct[r.name]=r.percentage; });
+      remainingFixtures.forEach(fx=>{
+        const expMargin = predictedMargin(marginRatings, ratingKey(fx.teamA), ratingKey(fx.teamB), teamObjByName[fx.teamA], teamObjByName[fx.teamB]);
+        const winProbA = marginToWinProbability(expMargin);
+        const roll = Math.random();
+        if(roll < winProbA * 0.96){ simPoints[fx.teamA] += 4; }
+        else if(roll < winProbA * 0.96 + 0.04){ simPoints[fx.teamA] += 2; simPoints[fx.teamB] += 2; } // small, fixed draw chance
+        else { simPoints[fx.teamB] += 4; }
+      });
+      const order = teamNames.slice().sort((a,b)=> simPoints[b]-simPoints[a] || simPct[b]-simPct[a]);
+      order.forEach((name, idx)=>{
+        finishPositionSum[name] += idx+1;
+        if(idx < finalsSpots) madeFinalsCount[name]++;
+      });
+    }
+
+    const maxRemainingByTeam = {};
+    teamNames.forEach(n=> maxRemainingByTeam[n] = remainingFixtures.filter(f=>f.teamA===n||f.teamB===n).length);
+    const cutoffCurrentPoints = ladderRows[finalsSpots-1] ? ladderRows[finalsSpots-1].points : null; // current Nth-place points, for the ceiling check
+
+    const rows = ladderRows.map(r=>{
+      const remaining = remainingFixtures.filter(f=>f.teamA===r.name||f.teamB===r.name)
+        .map(f=> f.teamA===r.name ? { opponent:f.teamB, synthetic:!!f.synthetic } : { opponent:f.teamA, synthetic:!!f.synthetic });
+      const ceiling = r.points + maxRemainingByTeam[r.name]*4;
+      const cutoffRow = ladderRows[finalsSpots-1];
+      const mathematicallyOut = cutoffRow && r.rank > finalsSpots && ceiling < cutoffRow.points;
+      const mathematicallyIn = cutoffRow && r.rank <= finalsSpots && (r.points - (ladderRows[finalsSpots] ? ladderRows[finalsSpots].points : -Infinity)) > maxRemainingByTeam[ladderRows[finalsSpots] ? ladderRows[finalsSpots].name : '']*4;
+      return {
+        ...r,
+        chancePct: Math.round((madeFinalsCount[r.name]/SIMULATIONS)*100),
+        avgFinishPos: +(finishPositionSum[r.name]/SIMULATIONS).toFixed(1),
+        remaining, ceiling, mathematicallyOut, mathematicallyIn: !!mathematicallyIn
+      };
+    });
+
+    return { rows, finalsSpots, cutoffCurrentPoints, seasonCheck, remainingFixturesCount: remainingFixtures.length };
+  });
+}
+
 function doOpenLadder(preset){
   if(preset){
     if(preset.year != null) ladderFilters.year = String(preset.year);
@@ -2432,6 +2670,16 @@ function renderLadder(){
 
   const rows = f.ageGroup ? computeLadder({ year:f.year, ageGroup:f.ageGroup, division:f.division }) : [];
   const finalsRounds = f.ageGroup ? computeFinals({ year:f.year, ageGroup:f.ageGroup, division:f.division }) : [];
+
+  // Finals-chance projection computed right alongside the ladder itself now, so its Chance/Status
+  // columns can be folded directly into the one ladder table below instead of a second, separate
+  // table repeating the same rows.
+  const inferredSpots = f.ageGroup ? inferFinalsSpotCount(f.ageGroup, f.division, f.year) : null;
+  const finalsSpots = f.finalsSpotsOverride || (inferredSpots ? inferredSpots.count : 4);
+  const proj = f.ageGroup ? computeFinalsProjection({ year:f.year, ageGroup:f.ageGroup, division:f.division, finalsSpots, extraGamesPerTeam: f.extraGamesPerTeam||0, ladderRows: rows }) : null;
+  const projByName = {};
+  if(proj) proj.rows.forEach(r=> projByName[r.name] = r);
+  const chanceColor = pct => pct>=75?'var(--green)':pct>=25?'var(--gold)':'var(--red)';
 
   // A "division" label is only ever a bare number for graded junior comps (Division 3, etc). For
   // Seniors/Reserves it's a full league name instead (this league runs 3 separate senior
@@ -2504,10 +2752,12 @@ function renderLadder(){
         <th>#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th><th class="num">D</th>
         <th class="num" title="Byes this season — not counted for or against">Byes</th>
         <th class="num">For</th><th class="num">Against</th><th class="num">%</th><th class="num">Pts</th>
+        <th class="num" title="Simulated % chance of finishing in a finals spot — see the Finals chances section below for how this is worked out">Chance</th><th title="Mathematically locked in or eliminated, based on games remaining — a hard fact, not a simulation">Status</th>
       </tr></thead><tbody>
       ${rows.map(r=>{
         const cc = getClubColor(getClub(r.name));
         const swatch = cc ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${cc.primary};border:1px solid ${cc.secondary};margin-right:7px;vertical-align:middle;" title="${getClub(r.name)} colours"></span>` : '';
+        const p = projByName[r.name];
         return `<tr>
         <td>${r.rank}</td>
         <td>${swatch}<span class="team-link" data-key="${r.key.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span></td>
@@ -2520,8 +2770,13 @@ function renderLadder(){
         <td class="num">${r.pointsAgainst}</td>
         <td class="num">${r.percentage.toFixed(1)}</td>
         <td class="num" style="font-weight:600;color:var(--gold);">${r.points}</td>
+        <td class="num" style="font-weight:600;color:${p?chanceColor(p.chancePct):'var(--muted)'};">${p ? p.chancePct+'%' : '—'}</td>
+        <td style="font-size:12px;">${p && p.mathematicallyIn ? '<span style="color:var(--green);">Locked in</span>' : p && p.mathematicallyOut ? '<span style="color:var(--red);">Eliminated</span>' : ''}</td>
       </tr>`;}).join('')}
-      </tbody></table>${finalsHtml}`
+      </tbody></table>${finalsHtml}
+      <div style="border-top:1px solid var(--line);margin:32px 0 24px;"></div>
+      <h2 style="font-size:19px;margin:0 0 4px;">Finals chances</h2>
+      ${renderFinalsChancesHtml(f, proj, inferredSpots, finalsSpots)}`
     )}
   `;
   document.getElementById('backFromLadder').onclick = backToFromLadder;
@@ -2533,6 +2788,86 @@ function renderLadder(){
   if(ageSel) ageSel.onchange = e=>{ f.ageGroup = e.target.value; f.division = null; renderLadder(); };
   const divSel = document.getElementById('ladderDivSel');
   if(divSel) divSel.onchange = e=>{ f.division = e.target.value; renderLadder(); };
+  if(rows.length) bindFinalsChancesEvents(wrap);
+}
+
+// Renders the "Finals chances" section below the ladder table (which now carries the Chance and
+// Status columns directly) — this covers everything else: the finals-spots source/override, the
+// season-length warning, the cusp cards, and the percentage-battle cards. proj/inferred/finalsSpots
+// are computed once in renderLadder and passed in, so they're not recalculated a second time here.
+function renderFinalsChancesHtml(f, proj, inferred, finalsSpots){
+  if(!f.ageGroup) return '<div class="empty">No ladder-eligible grade has games for this year.</div>';
+  if(!proj) return '<div class="empty">No regular season games found for this selection.</div>';
+
+  const spotsSourceNote = f.finalsSpotsOverride
+    ? `set manually to top ${finalsSpots}`
+    : inferred
+      ? `inferred from ${inferred.sourceYear} (top ${inferred.count} played finals that year)`
+      : `no prior-year finals data for this division — defaulted to top ${finalsSpots}, please confirm`;
+
+  const seasonWarningHtml = proj.seasonCheck.mismatch ? `
+    <div class="warn-box" style="margin:0 0 14px;">
+      This season's fixture list only accounts for about ${proj.seasonCheck.medianProjected} games per team so far, versus a typical ${proj.seasonCheck.medianPrior} across all of ${proj.seasonCheck.priorYear} — likely means Upcoming Fixtures just hasn't been filled in that far ahead yet, not that the season is genuinely shorter. The projection above only knows about the ${proj.remainingFixturesCount} scheduled games actually on file.
+      <div style="margin-top:10px;">
+        <label style="font-size:12.5px;color:var(--muted);">Assume this many EXTRA games per team beyond what's scheduled (against a random division opponent, clearly separate from real fixtures):</label><br>
+        <input type="number" id="fcExtraGames" min="0" max="15" value="${f.extraGamesPerTeam||0}" style="width:70px;margin-top:6px;">
+      </div>
+    </div>` : '';
+
+  const rows = proj.rows;
+
+  const cuspTeams = rows.filter(r=> r.chancePct>10 && r.chancePct<90 && !r.mathematicallyIn && !r.mathematicallyOut);
+  const cuspHtml = cuspTeams.length ? `
+    <h3 style="font-size:15px;margin:24px 0 10px;">On the cusp</h3>
+    <p class="hint" style="margin:0 0 12px;">Teams whose finals spot is genuinely still up for grabs, with what's left on their own fixture list.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">
+      ${cuspTeams.map(r=>`
+        <div class="stat-card" style="text-align:left;">
+          <div style="font-weight:600;font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:13px;color:var(--gold);">${r.name}</div>
+          <div style="font-size:12px;color:var(--muted);margin:4px 0 8px;">#${r.rank} now &middot; ${r.points} pts &middot; ${r.chancePct}% chance</div>
+          ${r.remaining.length===0 ? '<div style="font-size:12px;color:var(--muted);">No games left on file this season.</div>' :
+            `<div style="font-size:12.5px;">${r.remaining.map(g=>`v ${g.opponent}${g.synthetic?' <span style="color:var(--muted);">(assumed)</span>':''}`).join('<br>')}</div>`}
+        </div>`).join('')}
+    </div>` : '';
+
+  const pctScenarios = computePercentageScenarios(proj);
+  const percentageBattleHtml = pctScenarios.length ? `
+    <h3 style="font-size:15px;margin:24px 0 10px;">Percentage battle</h3>
+    <p class="hint" style="margin:0 0 12px;">Down to the last game for these teams, where percentage could genuinely decide the last spot. The margin below assumes a typical result at each team's own season-average scoring rate — a real, worked-through threshold, but still an estimate, since the actual final score could differ from a team's average.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+      ${pctScenarios.map(s=>`
+        <div class="stat-card" style="text-align:left;">
+          <div style="font-size:13px;">
+            <span style="color:var(--gold);font-weight:600;">${s.team}</span> v ${s.opponent} —
+            needs to win by roughly <strong>${s.neededMargin > 0 ? s.neededMargin+' pts' : 'any margin'}</strong> or more
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:6px;">to have the percentage edge over <strong>${s.rival}</strong> (~${s.rivalPct.toFixed(1)}%), ${s.rivalNote}, if both finish level on points.</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  return `
+    <div class="warn-box" style="margin:0 0 14px;">
+      <strong>Finals spots:</strong> top ${finalsSpots} — ${spotsSourceNote}.
+      <div style="margin-top:8px;">
+        <label style="font-size:12.5px;color:var(--muted);">Override finals spots:</label>
+        <select id="fcSpotsOverride" style="margin-left:6px;">
+          <option value="" ${!f.finalsSpotsOverride?'selected':''}>Auto (${inferred?inferred.count:4})</option>
+          ${[4,5,6,8].map(n=>`<option value="${n}" ${f.finalsSpotsOverride===n?'selected':''}>Top ${n}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    ${seasonWarningHtml}
+    <p class="hint" style="margin:0 0 12px;">Simulates the rest of the season 3,000 times using each team's real win probability (the same model behind Compare Teams' predicted results), replays the ladder each time, and reports how often each team finishes inside the top ${finalsSpots} — shown as the Chance and Status columns in the ladder table above. A genuine estimate from simulation, not a guarantee — and not the same as a formally proven mathematical elimination.</p>
+    ${cuspHtml}
+    ${percentageBattleHtml}
+  `;
+}
+function bindFinalsChancesEvents(wrap){
+  const f = ladderFilters;
+  const spotsSel = document.getElementById('fcSpotsOverride');
+  if(spotsSel) spotsSel.onchange = e=>{ f.finalsSpotsOverride = e.target.value ? Number(e.target.value) : null; renderLadder(); };
+  const extraInput = document.getElementById('fcExtraGames');
+  if(extraInput) extraInput.onchange = e=>{ f.extraGamesPerTeam = Math.max(0, Number(e.target.value)||0); renderLadder(); };
 }
 
 
@@ -3327,7 +3662,20 @@ function checkAgePlausibility(entriesA, entriesB){
 // Shared groundwork for anything that needs "what did every player do, season by season" —
 // currently Player Movement and the Lapsed Players lookup below. Kept as one function so the
 // two features can't quietly drift into different definitions of a player's trail or division.
+// Cached per (yearFilter|phaseFilter|_aggVersion|gamesList.length) — this is a genuinely expensive
+// full-dataset scan, and it was being run completely fresh from SEVEN different places (Player
+// Movement, Lapsed Players, Check Player Links, Player Links, Team Squad Origins, and twice more
+// inside Home Grown) with zero sharing between them, even when the scope hadn't changed between
+// calls. Invalidates the moment the underlying data or the top filter bar actually changes.
+const _movementContextCache = new Map();
 function buildMovementContext(gamesList){
+  const cacheKey = `${yearFilter}|${[...phaseFilter].sort().join(',')}|${_aggVersion}|${gamesList.length}`;
+  if(_movementContextCache.has(cacheKey)) return _movementContextCache.get(cacheKey);
+  const result = buildMovementContextUncached(gamesList);
+  _movementContextCache.set(cacheKey, result);
+  return result;
+}
+function buildMovementContextUncached(gamesList){
   // How many divisions each grade-season actually runs, so a division can be expressed as a
   // relative level rather than a bare number.
   const maxDiv = {};
@@ -3373,9 +3721,20 @@ function buildMovementContext(gamesList){
   const trail = {};
   const trailKeyOwner = {}; // trail key -> the real id that claimed it
   const idToTrailKey = {};  // real id -> the trail key it resolves to
-  function resolveTrailKey(name, playhqId, grade){
+  // real id -> { year -> club first seen for that id in that year } — same guard as
+  // computeAggregates' ensurePlayer: a real person can't genuinely play for two DIFFERENT clubs
+  // within one season, so a same-id/same-year club conflict means the id got attached to the
+  // wrong row somewhere, not a real move. Doesn't flag U18+Seniors/Reserves at the SAME club in
+  // one year — that's normal, and never conflicts since the club itself is identical.
+  const trailIdYearClub = {};
+  function resolveTrailKey(name, playhqId, grade, year, club){
     const nm = (name||'').toLowerCase();
-    if(!playhqId) return nm; // no id evidence — plain name matching, same as always
+    let useId = !!playhqId;
+    if(useId && year != null && club){
+      const seenClub = trailIdYearClub[playhqId] && trailIdYearClub[playhqId][year];
+      if(seenClub && seenClub !== club) useId = false;
+    }
+    if(!useId) return nm; // no id evidence, or a same-year cross-club conflict — plain name matching
     if(idToTrailKey[playhqId]) return idToTrailKey[playhqId];
     let key;
     if(!trailKeyOwner[nm] || trailKeyOwner[nm] === playhqId){
@@ -3390,6 +3749,10 @@ function buildMovementContext(gamesList){
     }
     trailKeyOwner[key] = playhqId;
     idToTrailKey[playhqId] = key;
+    if(year != null && club){
+      trailIdYearClub[playhqId] = trailIdYearClub[playhqId] || {};
+      if(!trailIdYearClub[playhqId][year]) trailIdYearClub[playhqId][year] = club;
+    }
     return key;
   }
   gamesList.forEach(g=>{
@@ -3402,7 +3765,8 @@ function buildMovementContext(gamesList){
       (t.players||[]).forEach(row=>{
         const raw = (row.name||'').trim();
         if(isPlaceholderPlayerName(raw)) return;
-        const trailKey = resolveTrailKey(raw, row.playhqId, grade);
+        const rowClub = merged ? playerClubForTeam(t.name, row.tag) : getClub(t.name);
+        const trailKey = resolveTrailKey(raw, row.playhqId, grade, yr, rowClub);
         const byYear = (trail[trailKey] = trail[trailKey] || {});
         const e = (byYear[yr] = byYear[yr] || { clubs:new Set(), teams:new Set(), grades:new Set(), divGames:{}, games:0, goals:0, bestCount:0, display:raw, ambiguous:false });
         e.teams.add(t.name); e.grades.add(grade);
@@ -4839,18 +5203,37 @@ function computeAggregates(gamesOverride){
   // silently merged into one profile despite having different ids the whole time. This registry
   // lets the SECOND distinct real id sharing a name+club get its own separate key instead.
   const rawKeyOwner = {};
+  // playhqId -> { year -> club first seen for that id in that year }. A real person can't
+  // genuinely play for two DIFFERENT clubs within the same season — so if this same id later
+  // shows a DIFFERENT club in a year already recorded, that's evidence the id got attached to the
+  // wrong row somewhere upstream (bad scrape/backfill match, or two different real people sharing
+  // one id by mistake), not a real club change. The one thing this deliberately does NOT flag: a
+  // player fielding both U18 and Seniors/Reserves for the SAME club in the same year — completely
+  // normal (a junior stepping up) — since the club itself is identical in that case, so no
+  // conflict is ever recorded.
+  const idYearClub = {};
 
-  function ensurePlayer(team, name, tag, playhqId){
+  function ensurePlayer(team, name, tag, playhqId, year){
     const rawKey = resolvePlayerKey(rawPlayerIdentityKey(team, name, tag));
+    const club = getClub(team);
+    // Trust this id UNLESS it conflicts with itself — i.e. it already claimed a DIFFERENT club in
+    // this exact year. When that happens, treat this row as if it had no id at all for identity
+    // purposes, so it can't silently merge into whichever profile the id was previously linked to.
+    let useId = !!playhqId;
+    if(useId && year != null && club){
+      const seenClub = idYearClub[playhqId] && idYearClub[playhqId][year];
+      if(seenClub && seenClub !== club) useId = false;
+    }
     // If this exact person (by PlayHQ id) already has a canonical key from an earlier game in
     // this pass, use THAT key even though this game's club/name would normally point elsewhere —
     // this is what lets a real club move or a name-spelling change still land on one player
     // record without a manual alias. A blank/missing id (fill-ins, private profiles, older
-    // seasons scraped before this was captured) just falls back to the name/club key as before.
+    // seasons scraped before this was captured), or an id whose own history conflicts with
+    // itself, just falls back to the name/club key as before.
     let key;
-    if(playhqId && idToKey[playhqId]){
+    if(useId && idToKey[playhqId]){
       key = idToKey[playhqId];
-    } else if(playhqId){
+    } else if(useId){
       if(!rawKeyOwner[rawKey] || rawKeyOwner[rawKey] === playhqId){
         // First real id ever seen under this exact name+club — they get the plain key.
         key = rawKey;
@@ -4869,8 +5252,12 @@ function computeAggregates(gamesOverride){
         }
       }
       rawKeyOwner[key] = playhqId;
+      if(year != null && club){
+        idYearClub[playhqId] = idYearClub[playhqId] || {};
+        if(!idYearClub[playhqId][year]) idYearClub[playhqId][year] = club;
+      }
     } else {
-      key = rawKey; // no id evidence at all — fall back to plain name/club matching, same as before
+      key = rawKey; // no id evidence at all, or a same-year cross-club conflict — plain name/club matching
     }
     if(!players[key]){
       players[key] = {
@@ -4879,7 +5266,7 @@ function computeAggregates(gamesOverride){
         shareSum:0, shareGames:0, timeline:[], _bestRun:0, bestStreak:0, playhqId:''
       };
     }
-    if(playhqId && !idToKey[playhqId]) idToKey[playhqId] = key;
+    if(useId && !idToKey[playhqId]) idToKey[playhqId] = key;
     players[key].teams.add(team);
     players[key].team = team;   // games are processed chronologically, so these end up as their
     players[key].club = getClub(team); // most recent team AND club — a merged mover shows where they are now, not where they started
@@ -4958,7 +5345,7 @@ function computeAggregates(gamesOverride){
 
     g.teamA.players.forEach(row=>{
       if(isPlaceholderName(row.name)) return;
-      const p = ensurePlayer(g.teamA.name, row.name, row.tag, row.playhqId);
+      const p = ensurePlayer(g.teamA.name, row.name, row.tag, row.playhqId, getGameYear(g));
       if(row.playhqId && !p.playhqId) p.playhqId = row.playhqId;
       p.gamesPlayed++; p.totalGoals += row.goals;
       p.weightedGoals += contextGoalWeight(row.goals, g.margin, aRes);
@@ -4975,7 +5362,7 @@ function computeAggregates(gamesOverride){
     });
     g.teamB.players.forEach(row=>{
       if(isPlaceholderName(row.name)) return;
-      const p = ensurePlayer(g.teamB.name, row.name, row.tag, row.playhqId);
+      const p = ensurePlayer(g.teamB.name, row.name, row.tag, row.playhqId, getGameYear(g));
       if(row.playhqId && !p.playhqId) p.playhqId = row.playhqId;
       p.gamesPlayed++; p.totalGoals += row.goals;
       p.weightedGoals += contextGoalWeight(row.goals, g.margin, bRes);
@@ -4994,13 +5381,13 @@ function computeAggregates(gamesOverride){
     g.teamA.best.forEach((name,idx)=>{
       if(isPlaceholderName(name)) return;
       const matchRow = g.teamA.players.find(r=>r.name.toLowerCase()===name.toLowerCase());
-      const p = ensurePlayer(g.teamA.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null);
+      const p = ensurePlayer(g.teamA.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null, getGameYear(g));
       p.bestCount++; p.weightedBest += Math.max(6-idx, 1);
     });
     g.teamB.best.forEach((name,idx)=>{
       if(isPlaceholderName(name)) return;
       const matchRow = g.teamB.players.find(r=>r.name.toLowerCase()===name.toLowerCase());
-      const p = ensurePlayer(g.teamB.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null);
+      const p = ensurePlayer(g.teamB.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null, getGameYear(g));
       p.bestCount++; p.weightedBest += Math.max(6-idx, 1);
     });
   });
@@ -6121,7 +6508,7 @@ function renderYearFilterBar(){
         if(yearFilter.has(y)) yearFilter.delete(y); else yearFilter.add(y);
       }
       goalsChartSelected = null; cumulativeChartSelected = null; bestsChartSelected = null; lastTeamFilterForCharts = null;
-      renderAll();
+      refreshAfterFilterChange();
     };
   });
 }
@@ -6135,7 +6522,7 @@ function renderPhaseFilterBar(){
       const ph = chip.dataset.phase;
       if(phaseFilter.has(ph)) phaseFilter.delete(ph); else phaseFilter.add(ph);
       goalsChartSelected = null; cumulativeChartSelected = null; bestsChartSelected = null; lastTeamFilterForCharts = null;
-      renderAll();
+      refreshAfterFilterChange();
     };
   });
 }
@@ -6430,6 +6817,25 @@ function refreshCurrentDetailView(){
   if(document.getElementById('panel-manage-clubs').classList.contains('active')){
     renderManageClubs();
   }
+  if(document.getElementById('panel-ladder').classList.contains('active')){
+    renderLadder(); // was missing entirely — the Ladder page silently went stale on a filter change
+  }
+}
+
+// The top Year/Phase filter bar changes far more often, per session, than the app loads — every
+// click here used to call the full renderAll(), which (correctly, for a first page load) also
+// rebuilds Players/Teams/Games in the background. On a filter change that's pure waste: those
+// tabs' DATA hasn't structurally changed, only the filter scope has, and re-rendering three tabs
+// nobody's looking at before finally reaching the one actually on screen is exactly what read as
+// "hanging" whenever the year/phase pills were clicked. This only touches whatever's genuinely
+// visible right now.
+function refreshAfterFilterChange(){
+  renderHomeSnapshot();
+  const activeId = document.querySelector('.panel.active')?.id;
+  if(activeId === 'panel-players'){ renderPlayers(); return; }
+  if(activeId === 'panel-teams'){ renderTeams(); return; }
+  if(activeId === 'panel-games' && !gamesSubView){ renderGamesLanding(); return; }
+  refreshCurrentDetailView(); // covers every other open detail/tool panel, including Ladder now
 }
 
 // Home is the only panel actually visible on first load, but this used to render Players (full
@@ -6500,27 +6906,26 @@ function renderPrivacyBanner(){
 //  2. Real — once renderHomeSnapshot() actually has the true values, each element hands off
 //     smoothly: the indeterminate loop is stopped and a normal count-up continues from WHEREVER
 //     that element's number happened to be, landing on the exact real value — never resets to 0.
-let _homeSnapshotState = []; // per-tile: { current, handedOff }
-function startHomeSnapshotIndeterminate(){
-  const els = document.querySelectorAll('#homeSnapshot .home-snapshot-item .value');
-  const start = performance.now();
-  els.forEach((el, i)=>{
-    const state = _homeSnapshotState[i] = { current:0, handedOff:false };
-    function tick(now){
-      if(state.handedOff) return; // real data arrived — animateCountUp has taken over this element
-      const elapsedSec = (now-start)/1000;
-      state.current = Math.round(600 * (1 - Math.exp(-elapsedSec/1.4)));
-      el.textContent = state.current;
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  });
-}
-function animateCountUp(el, target, index, duration=600){
+// Real per-tile numbers as of the last time this was updated (see HOME_SNAPSHOT_BASELINE below) —
+// shown INSTANTLY on page load via a single smooth count-up, rather than the old indeterminate
+// "guess upward while we wait" animation. That version visibly stuttered: the browser's main
+// thread is genuinely busy decompressing and parsing the dataset, then building thousands of
+// player/team records, during that window — nothing can animate smoothly while JS itself is
+// blocked doing that work, no matter how the animation code is written. Baking in the real figure
+// sidesteps the wait entirely. If it's gone stale (new data scraped since this was last updated),
+// renderHomeSnapshot() below quietly corrects it once the real numbers are ready — re-animating
+// only if the number actually changed, so a stale baseline is at worst a brief pause before the
+// true number appears, never a wrong number left sitting on screen.
+//
+// UPDATE THESE 4 NUMBERS whenever you scrape a meaningful batch of new data — ask Claude to
+// recompute them from your latest backup, or just read them off this Home page after a load and
+// paste them in here.
+const HOME_SNAPSHOT_BASELINE = { games: 11329, teams: 280, players: 7195, goals: 23480 };
+
+function animateCountUp(el, target, duration=800){
   if(!el) return;
-  const state = _homeSnapshotState[index];
-  const from = state ? state.current : 0;
-  if(state) state.handedOff = true; // stop the indeterminate loop above for this element
+  const from = parseInt(el.textContent, 10) || 0;
+  if(from === target) return; // already showing the right number — nothing to animate
   const start = performance.now();
   function tick(now){
     const t = Math.min(1, (now-start)/duration);
@@ -6531,26 +6936,31 @@ function animateCountUp(el, target, index, duration=600){
   }
   requestAnimationFrame(tick);
 }
+function startHomeSnapshotBaseline(){
+  const els = document.querySelectorAll('#homeSnapshot .home-snapshot-item .value');
+  const targets = [HOME_SNAPSHOT_BASELINE.players, HOME_SNAPSHOT_BASELINE.teams, HOME_SNAPSHOT_BASELINE.games, HOME_SNAPSHOT_BASELINE.goals];
+  els.forEach((el,i)=> animateCountUp(el, targets[i] ?? 0));
+}
 
 function renderHomeSnapshot(){
   const snap = document.getElementById('homeSnapshot');
   if(!snap) return;
   const { playerList, teamList } = computeAggregates();
   const totalGoals = playerList.reduce((s,p)=>s+p.totalGoals, 0);
-  // Each stat gets its own accent colour (cycling the app's existing palette) rather than a single
-  // uniform gold — makes the row read as four distinct things at a glance, not one repeated card.
-  // "Games this season" was dropped: it tracked whatever the top Year/Phase filter bar happened to
-  // be set to (global, changeable state), not literally the current season — a real mislabeling
-  // risk, on top of being the least interesting of the five numbers.
+  // Colours and order match the Home page's own tab tiles — Players green, Teams blue, Games
+  // gold, Tools' purple borrowed for Goals since it has no direct tab of its own. "Games this
+  // season" was dropped: it tracked whatever the top Year/Phase filter bar happened to be set to
+  // (global, changeable state), not literally the current season — a real mislabeling risk, on
+  // top of being the least interesting of the five original numbers.
   const items = [
-    { value: games.length, label: `Game${games.length!==1?'s':''} tracked (all-time)`, color:'var(--green)' },
-    { value: teamList.length, label: `Team${teamList.length!==1?'s':''}`, color:'var(--gold)' },
-    { value: playerList.length, label: `Player${playerList.length!==1?'s':''} with stats tracked`, color:'var(--purple)' },
-    { value: totalGoals, label: `Goal${totalGoals!==1?'s':''} scored`, color:'var(--red)' }
+    { value: playerList.length, label: `Player${playerList.length!==1?'s':''} with stats tracked`, color:'var(--green)' },
+    { value: teamList.length, label: `Team${teamList.length!==1?'s':''}`, color:'var(--blue)' },
+    { value: games.length, label: `Game${games.length!==1?'s':''} tracked (all-time)`, color:'var(--gold)' },
+    { value: totalGoals, label: `Goal${totalGoals!==1?'s':''} scored`, color:'var(--purple)' }
   ];
-  // The tiles already exist in the static HTML (so something's on screen and counting from the
-  // very first paint) — update them in place rather than rebuilding, so the in-flight
-  // indeterminate count-up can hand off smoothly instead of being torn down and losing its place.
+  // The tiles already exist in the static HTML (so the baked-in baseline is already showing) —
+  // update them in place rather than rebuilding, so animateCountUp reads the currently-displayed
+  // number as its starting point and only actually animates if the real figure differs from it.
   let valueEls = snap.querySelectorAll('.home-snapshot-item .value');
   if(valueEls.length !== items.length){
     snap.innerHTML = items.map(i=>`<div class="home-snapshot-item" style="--accent-color:${i.color};"><div class="value">0</div><div class="label">${i.label}</div></div>`).join('');
@@ -6558,7 +6968,7 @@ function renderHomeSnapshot(){
   } else {
     snap.querySelectorAll('.home-snapshot-item .label').forEach((el,i)=> el.textContent = items[i].label);
   }
-  valueEls.forEach((el,i)=> animateCountUp(el, items[i].value, i));
+  valueEls.forEach((el,i)=> animateCountUp(el, items[i].value));
 }
 
 // ---------- Export ----------
@@ -10031,6 +10441,126 @@ function openTopPlayers(){
 }
 function backToPlayersFromTop(){ navBack(); }
 
+let findPlayersFilters = { ageGroup:null, club:'ALL', search:'', showAllColumns:false, sortKey:'totalGoals', sortDir:'desc' };
+function doOpenFindPlayers(){
+  showPanel('find-players');
+  renderFindPlayers();
+}
+function openFindPlayers(){
+  doOpenFindPlayers();
+  navPush('find-players', 'Find Players', 'players/find', doOpenFindPlayers);
+}
+function backFromFindPlayers(){ navBack(); }
+
+// "Find players" — replaces the old "Show everyone" tile, which defaulted straight to dumping
+// every player in the competition into one table. Lands on a set of browsing chips instead (age
+// group presets, plus "All players" as an explicit choice rather than the accident default), so
+// the list you land on is purposeful and right-sized rather than the whole competition at once.
+function renderFindPlayers(){
+  const wrap = document.getElementById('findPlayersWrap');
+  if(!wrap) return;
+  const { playerList } = computeAggregates();
+  const f = findPlayersFilters;
+
+  const ageGroups = [...new Set(playerList.map(p=>p.ageGroup).filter(a=>a && a!=='Other'))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  const clubs = [...new Set(playerList.map(p=>p.club).filter(Boolean))].sort();
+
+  const chip = (val, label) => {
+    const active = f.ageGroup === val;
+    return `<button class="ghost fp-age-chip" data-age="${val}" style="margin:0;${active?'border-color:var(--gold);color:var(--gold);':''}">${label}</button>`;
+  };
+
+  const hasSelection = f.ageGroup !== null || f.search.trim() !== '';
+  let filtered = [];
+  if(hasSelection){
+    filtered = playerList;
+    if(f.ageGroup === 'JUNIOR') filtered = filtered.filter(p=> isJuniorGrade(p.ageGroup));
+    else if(f.ageGroup === 'SENIOR') filtered = filtered.filter(p=> p.ageGroup==='Seniors' || p.ageGroup==='Reserves');
+    else if(f.ageGroup && f.ageGroup !== 'ALL_PLAYERS') filtered = filtered.filter(p=> p.ageGroup === f.ageGroup);
+    if(f.club !== 'ALL') filtered = filtered.filter(p=> p.club === f.club);
+    if(f.search.trim()) filtered = filtered.filter(p=> p.name.toLowerCase().includes(f.search.trim().toLowerCase()));
+    filtered = [...filtered].sort((a,b)=>{
+      const cmp = compareValues(a,b,f.sortKey);
+      return f.sortDir==='asc' ? cmp : -cmp;
+    });
+  }
+
+  // Core = the handful of stats most people actually want at a glance. Full = the same 21 columns
+  // the old inline table always showed everyone, now opt-in via a toggle instead of the default.
+  // A 5th tuple element (displayKey) covers the two "bests" columns, where the field sorted on
+  // (rolling3Best/rolling5Best) differs from the field actually shown (...Label variants).
+  const coreCols = [
+    ['name','Player','',''], ['team','Team','',''],
+    ['gamesPlayed','GP','num',''], ['totalGoals','Goals','num',''],
+    ['bestCount','Bests','num',''], ['avgGoals','Avg/gm','num','']
+  ];
+  const fullCols = [
+    ['name','Player','',''], ['team','Team','',''],
+    ['gamesPlayed','GP','num',''], ['totalGoals','Goals','num',''], ['avgGoals','Avg/gm','num',''],
+    ['rolling3','L3 avg','num',''], ['rolling5','L5 avg','num',''],
+    ['goalsInWins','Goals (W)','num',''], ['goalsInLosses','Goals (L)','num',''],
+    ['scoringShare','Share %','num',''],
+    ['multiGoal2','2+ gm','num',''], ['multiGoal3','3+ gm','num',''], ['multiGoal5','5+ gm','num',''],
+    ['bestCount','Bests','num',''], ['bestsPerGame','Bests/gm','num',''], ['weightedBest','Best pts','num',''], ['bestStreak','Best streak','num',''],
+    ['rolling3Best','L3 bests','num','','rolling3BestLabel'], ['rolling5Best','L5 bests','num','','rolling5BestLabel'],
+    ['mvpScore','MVP pts','num',''], ['formScore','Form score','num','']
+  ];
+  const cols = f.showAllColumns ? fullCols : coreCols;
+
+  let resultsHtml = '';
+  if(hasSelection){
+    resultsHtml = `
+      <p class="hint" style="margin:14px 0 10px;">${filtered.length} player${filtered.length===1?'':'s'} found. <span id="fpToggleColumns" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${f.showAllColumns?'Show fewer columns':'Show all columns'}</span></p>
+      ${filtered.length===0 ? '<div class="empty">No players match.</div>' : `
+      <table>
+        <thead><tr>${cols.map(([key,label,cls])=>`<th class="${cls} sortable fp-sort-th" data-key="${key}">${label}${f.sortKey===key?(f.sortDir==='asc'?' ▲':' ▼'):''}</th>`).join('')}</tr></thead>
+        <tbody>${filtered.map(p=>`<tr>
+          ${cols.map(([key,,,,displayKey])=> key==='name'
+            ? `<td><span class="player-link" data-key="${p.key}">${p.name}</span></td>`
+            : key==='team' ? `<td>${p.team}</td>` : `<td class="num">${p[displayKey||key]}</td>`
+          ).join('')}
+        </tr>`).join('')}</tbody>
+      </table>`}
+    `;
+  }
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backFromFindPlayers">&larr; Back to players</span>
+    <h2 style="font-size:20px;">Find players</h2>
+    <p class="hint">Browse by age group, or search for someone specific.</p>
+    <div class="search-input-wrap" style="margin-bottom:14px;max-width:320px;">
+      <input type="text" id="fpSearchInput" placeholder="Search player name..." class="player-search-input" value="${f.search}">
+    </div>
+    <div class="controls-row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+      ${chip('JUNIOR','All juniors')}
+      ${chip('SENIOR','Seniors/Reserves')}
+      ${ageGroups.map(a=>chip(a,a)).join('')}
+      ${chip('ALL_PLAYERS','All players')}
+    </div>
+    ${f.ageGroup !== null ? `<div class="controls-row" style="margin-bottom:6px;"><select id="fpClubSel"><option value="ALL">All clubs</option>${clubs.map(c=>`<option value="${c}" ${f.club===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
+    <div id="fpResults">${!hasSelection ? '<p class="hint" style="margin-top:14px;">Pick an age group above, or search for a name, to see a list.</p>' : resultsHtml}</div>
+  `;
+  document.getElementById('backFromFindPlayers').onclick = backFromFindPlayers;
+  wrap.querySelectorAll('.player-link').forEach(el=>{ el.onclick = ()=> openPlayerDetail(el.dataset.key); });
+  const searchInput = document.getElementById('fpSearchInput');
+  if(searchInput) searchInput.oninput = e=>{ f.search = e.target.value; renderFindPlayers(); };
+  wrap.querySelectorAll('.fp-age-chip').forEach(el=>{
+    el.onclick = ()=>{ f.ageGroup = el.dataset.age; f.club = 'ALL'; renderFindPlayers(); };
+  });
+  const clubSel = document.getElementById('fpClubSel');
+  if(clubSel) clubSel.onchange = e=>{ f.club = e.target.value; renderFindPlayers(); };
+  const toggleCols = document.getElementById('fpToggleColumns');
+  if(toggleCols) toggleCols.onclick = ()=>{ f.showAllColumns = !f.showAllColumns; renderFindPlayers(); };
+  wrap.querySelectorAll('.fp-sort-th').forEach(th=>{
+    th.onclick = ()=>{
+      const key = th.dataset.key;
+      if(f.sortKey===key) f.sortDir = f.sortDir==='asc'?'desc':'asc';
+      else { f.sortKey=key; f.sortDir = (key==='name'||key==='team') ? 'asc' : 'desc'; }
+      renderFindPlayers();
+    };
+  });
+}
+
 function renderTopPlayers(){
   const { playerList } = computeAggregates();
   const wrap = document.getElementById('topPlayersWrap');
@@ -11221,9 +11751,21 @@ function computeClubYearRosters(gamesList){
   const map = {};
   const nameOwner = {}; // bare name -> the first real playhqId claiming it, per the SAME collision
   const idToKey = {};   // guard as everywhere else — two different real people sharing a name
-  function resolveKey(name, playhqId, grade){ // shouldn't be silently counted as one person here.
+  // real id -> { year -> club first seen for that id in that year } — same conflict guard used
+  // everywhere else: one real person can't genuinely play for two DIFFERENT clubs in one season,
+  // so a same-id/same-year club conflict means the id was attached to the wrong row somewhere,
+  // not a real move. Joint teams are player-attributed via playerClubForTeam below (per the SP
+  // tag), so a genuine U18+Seniors dual-registration at ONE club never trips this — the club
+  // itself is identical in that case.
+  const idYearClub = {};
+  function resolveKey(name, playhqId, grade, year, club){
     const nm = (name||'').toLowerCase();
-    if(!playhqId) return nm;
+    let useId = !!playhqId;
+    if(useId && year != null && club){
+      const seenClub = idYearClub[playhqId] && idYearClub[playhqId][year];
+      if(seenClub && seenClub !== club) useId = false;
+    }
+    if(!useId) return nm;
     if(idToKey[playhqId]) return idToKey[playhqId];
     let key;
     if(!nameOwner[nm] || nameOwner[nm] === playhqId){
@@ -11238,6 +11780,10 @@ function computeClubYearRosters(gamesList){
     }
     nameOwner[key] = playhqId;
     idToKey[playhqId] = key;
+    if(year != null && club){
+      idYearClub[playhqId] = idYearClub[playhqId] || {};
+      if(!idYearClub[playhqId][year]) idYearClub[playhqId][year] = club;
+    }
     return key;
   }
   gamesList.forEach(g=>{
@@ -11250,7 +11796,7 @@ function computeClubYearRosters(gamesList){
         if(!row.name || isPlaceholderPlayerName(row.name)) return;
         const club = playerClubForTeam(t.name, row.tag);
         if(!club) return;
-        const key = resolveKey(row.name, row.playhqId, ageGroup);
+        const key = resolveKey(row.name, row.playhqId, ageGroup, year, club);
         map[club] = map[club] || {};
         map[club][year] = map[club][year] || {};
         (map[club][year][ageGroup] = map[club][year][ageGroup] || new Set()).add(key);
@@ -11375,9 +11921,20 @@ function computeNameClubs(gamesList){
   const nameClubs = {};
   const nameClubsKeyOwner = {};
   const idToNameClubsKey = {};
-  function resolveNameClubsKey(name, playhqId, grade){
+  // real id -> { year -> club first seen for that id in that year } — same conflict guard as
+  // computeAggregates/buildMovementContext: one real person can't genuinely play for two
+  // DIFFERENT clubs in the same season, so a same-id/same-year club conflict means the id was
+  // attached to the wrong row, not a real move. Merged-team rows never reach this function at all
+  // (skipped below), so there's no U18/Seniors-at-one-club case to worry about excluding here.
+  const idYearClub = {};
+  function resolveNameClubsKey(name, playhqId, grade, year, club){
     const nm = (name||'').toLowerCase();
-    if(!playhqId) return nm;
+    let useId = !!playhqId;
+    if(useId && year != null && club){
+      const seenClub = idYearClub[playhqId] && idYearClub[playhqId][year];
+      if(seenClub && seenClub !== club) useId = false;
+    }
+    if(!useId) return nm;
     if(idToNameClubsKey[playhqId]) return idToNameClubsKey[playhqId];
     let key;
     if(!nameClubsKeyOwner[nm] || nameClubsKeyOwner[nm] === playhqId){
@@ -11392,17 +11949,22 @@ function computeNameClubs(gamesList){
     }
     nameClubsKeyOwner[key] = playhqId;
     idToNameClubsKey[playhqId] = key;
+    if(year != null && club){
+      idYearClub[playhqId] = idYearClub[playhqId] || {};
+      if(!idYearClub[playhqId][year]) idYearClub[playhqId][year] = club;
+    }
     return key;
   }
   gamesList.forEach(g=>{
+    const yr = getGameYear(g);
     ['teamA','teamB'].forEach(side=>{
-      const t = g[side]; if(!t || isMergedTeam(t.name, getGameYear(g))) return;
+      const t = g[side]; if(!t || isMergedTeam(t.name, yr)) return;
       const club = getClub(t.name); if(!club) return;
       const grade = getAgeGroupLabel(t.name);
       (t.players||[]).forEach(row=>{
         const nm = (row.name||'').trim();
         if(!nm || isPlaceholderPlayerName(row.name)) return;
-        const key = resolveNameClubsKey(nm, row.playhqId, grade);
+        const key = resolveNameClubsKey(nm, row.playhqId, grade, yr, club);
         (nameClubs[key] = nameClubs[key] || new Set()).add(club);
       });
     });
@@ -11410,11 +11972,20 @@ function computeNameClubs(gamesList){
   nameClubs.resolveNameClubsKey = resolveNameClubsKey; // exposed for callers holding a specific person's id
   return nameClubs;
 }
+// Cached the same way as buildMovementContext above — another full-dataset scan (career-wide,
+// deliberately unfiltered by design) that was being redone from scratch by three separate callers
+// (Home Grown's league table, its per-team detail view, and Team Squad Origins) even when nothing
+// about the underlying data had changed between them.
+const _nameClubsCache = new Map();
 function computeNameClubsWithResolver(gamesList){
+  const cacheKey = `${_aggVersion}|${gamesList.length}`;
+  if(_nameClubsCache.has(cacheKey)) return _nameClubsCache.get(cacheKey);
   const nameClubs = computeNameClubs(gamesList);
   const resolveNameClubsKey = nameClubs.resolveNameClubsKey;
   delete nameClubs.resolveNameClubsKey;
-  return { nameClubs, resolveNameClubsKey };
+  const result = { nameClubs, resolveNameClubsKey };
+  _nameClubsCache.set(cacheKey, result);
+  return result;
 }
 
 function computeHomeGrown(){
@@ -12982,7 +13553,7 @@ function navResolveHash(){
     if(root === 'fixture' && type){ seedRoot('games'); openFixturePreview(decodeURIComponent(type)); return; }
     if(root === 'tools' && type){
       const openers = {
-        'power-rankings': ()=>openPowerRankings(), 'ladder': ()=>openLadder(), 'compare-players': ()=>openComparePlayers(),
+        'power-rankings': ()=>openPowerRankings(), 'ladder': ()=>openLadder(), 'find-players': ()=>openFindPlayers(), 'compare-players': ()=>openComparePlayers(),
         'compare-teams': ()=>openCompareTeams(), 'squad-progressions': ()=>openSquadProgressions(null,'trend'),
         'home-grown': ()=>openHomeGrown(), 'player-movement': ()=>openPlayerMovement(),
         'merge-players': ()=>openMergePlayers(), 'manage-clubs': ()=>openManageClubs(),
@@ -13017,6 +13588,13 @@ function goToTabInternal(tabId){
   if(panelEl) panelEl.classList.add('active');
   renderPhaseFilterBar();
   renderYearFilterBar();
+  if(tabId==='home'){
+    // Re-play the count-up every time someone actually navigates TO Home — not on every tab
+    // switch (renderHomeSnapshot() below still runs regardless, to keep the numbers correct in
+    // the background even while another tab is showing). Resetting to 0 first gives
+    // animateCountUp something to count up FROM again, same as the very first page load.
+    document.querySelectorAll('#homeSnapshot .home-snapshot-item .value').forEach(el=> el.textContent = '0');
+  }
   renderHomeSnapshot();
   if(tabId==='players') renderPlayers();
   if(tabId==='teams') renderTeams();
@@ -13055,7 +13633,7 @@ function activateTab(tabId){
 const PANEL_OWNER_TAB = {
   'add':'games', 'team-detail':'teams', 'player-detail':'players', 'game-detail':'games', 'fixture-preview':'games',
   'power-rankings':'tools', 'ladder':'tools', 'compare-players':'tools', 'compare-teams':'tools', 'squad-progressions':'tools',
-  'home-grown':'tools', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools',
+  'home-grown':'tools', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools', 'find-players':'players',
   'suggest-divisions':'tools', 'top-players':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'tools', 'quarter-comebacks':'tools'
 };
 function showPanel(panelId){
@@ -13284,13 +13862,22 @@ document.getElementById('toolTilePlayersMerge').onclick = openMergePlayers;
 document.getElementById('toolTilePlayersMovement').onclick = openPlayerMovement;
 document.getElementById('toolTileTeamsManageClubs').onclick = openManageClubs;
 document.getElementById('toolTilePlayersTop').onclick = openTopPlayers;
-document.getElementById('toolTilePlayersShowAll').onclick = ()=>{ playersShowAllOverride = true; renderPlayers(); };
+document.getElementById('toolTilePlayersShowAll').onclick = openFindPlayers;
 document.getElementById('toolTileTeamsCompare').onclick = openCompareTeams;
 document.getElementById('toolTileTeamsSuggestDivisions').onclick = openSuggestDivisions;
 document.getElementById('toolTileTeamsPowerRankings').onclick = openPowerRankings;
 document.getElementById('toolTileTeamsLadder').onclick = ()=> openLadder();
 document.getElementById('toolTileGamesLadder').onclick = ()=> openLadder();
 document.getElementById('toolTileLadder').onclick = ()=> openLadder();
+document.getElementById('toolTileFinalsChances').onclick = ()=> {
+  openLadder();
+  // Finals chances now lives further down the same Ladder page rather than a separate mode —
+  // scroll straight to it so this tile still feels like it goes somewhere specific.
+  setTimeout(()=>{
+    const heading = Array.from(document.querySelectorAll('#ladderWrap h2')).find(h=>h.textContent==='Finals chances');
+    if(heading) heading.scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 50);
+};
 document.getElementById('toolTileTeamsSquadProgressions').onclick = ()=> openSquadProgressions(null,'trend');
 document.getElementById('toolTileTeamsHomeGrown').onclick = ()=> openHomeGrown();
 document.getElementById('toolTileTeamsShowAll').onclick = ()=>{ teamsShowAllOverride = true; renderTeams(); };
@@ -13312,6 +13899,8 @@ document.getElementById('toolTileQuarterComebacks').onclick = ()=> openQuarterCo
 document.getElementById('toolTilePredictionAccuracy').onclick = ()=> openPredictionAccuracy();
 document.getElementById('toolTileSuggestDivisions').onclick = ()=> openSuggestDivisions();
 document.getElementById('toolTileManageClubs').onclick = ()=> openManageClubs();
+document.getElementById('toolTileRefreshPublishedData').onclick = ()=> refreshFromPublishedData();
+document.getElementById('toolTileResetPublishedData').onclick = ()=> resetFromPublishedData();
 
 // Home page — "Jump straight to a tool" row.
 
@@ -13344,73 +13933,184 @@ syncFiltersBarVisibility();
 // whenever a newer export is published — tracked by the export's own _exportedAt stamp — so
 // returning visitors pick up new results instead of being stuck on the version they first loaded.
 // Inside the Claude artifact (or when opened via file://) the fetch simply fails and is ignored.
-async function seedFromPublishedData(){
-  // Only meaningful when hosted as a static site. Inside the artifact there is no data.json, and
-  // awaiting that doomed fetch at startup stalls the whole app (it renders empty until the request
-  // finally gives up), so don't attempt it at all there.
-  if(!USING_LOCAL_STORAGE_FALLBACK) return false;
-  try{
-    // Even when hosted, never let a slow or hanging request hold up startup.
-    const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 20000);
-    let payload = null;
-    try{
-      // Prefer the gzipped file — a full multi-year export with PlayHQ profile ids on every row
-      // can exceed GitHub's 100MB per-file commit limit; gzip alone brings a real ~80MB export
-      // down to about 8MB. Falls back to a plain data.json for anyone who committed that instead
-      // (an older publish, or a browser too old for DecompressionStream on the export side).
-      let res = await fetch('data.json.gz', { cache: 'no-store', signal: controller.signal });
-      if(res.ok && typeof DecompressionStream !== 'undefined'){
-        const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
-        payload = await new Response(stream).json();
-      } else {
-        res = await fetch('data.json', { cache: 'no-store', signal: controller.signal });
-        if(res.ok) payload = await res.json();
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
-    if(!payload || (payload._backupType !== 'game-tracker' && payload._backupType !== 'newcomb-u16-stats-tracker')) return false;
+// A slot for Claude to embed a specific data export directly into this file for SANDBOX testing
+// only — there's no live server here to fetch data.json.gz from, so this is the sandbox
+// equivalent of that file. Stored gzip-compressed + base64 (same technique used for the games
+// chunks elsewhere in this file) since a full export raw would be tens of MB as plain text.
+// Leave this null for the copy you actually publish; only fill it in when working in this chat
+// so the refresh/reset buttons below have something to load without a manual file-picker upload
+// each time. Ask Claude to update this whenever you've given it a newer file to test against.
+const EMBEDDED_SEED_DATA_GZ_B64 = null;
 
-    const publishedStamp = payload._exportedAt || 'unknown';
+async function loadEmbeddedSeedData(){
+  if(!EMBEDDED_SEED_DATA_GZ_B64) return null;
+  try{
+    const bin = atob(EMBEDDED_SEED_DATA_GZ_B64);
+    const bytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(stream).json();
+  }catch(e){
+    console.error('Failed to decode embedded sandbox seed data', e);
+    return null;
+  }
+}
+
+async function seedFromPublishedData(force){
+  let payload = null;
+  const embedded = await loadEmbeddedSeedData();
+  if(embedded){
+    // Sandbox path — no fetch, no server, just whatever's baked in above.
+    payload = embedded;
+  } else if(USING_LOCAL_STORAGE_FALLBACK){
+    // Live/hosted path — only meaningful as a static site. Inside the artifact (no embedded seed
+    // either) there is no data.json to fetch, and awaiting that doomed request at startup would
+    // stall the whole app, so this branch is skipped entirely when neither source is available.
+    try{
+      const controller = new AbortController();
+      const timeout = setTimeout(()=>controller.abort(), 20000);
+      try{
+        // Prefer the gzipped file — a full multi-year export with PlayHQ profile ids on every row
+        // can exceed GitHub's 100MB per-file commit limit; gzip alone brings a real ~80MB export
+        // down to about 8MB. Falls back to a plain data.json for anyone who committed that instead
+        // (an older publish, or a browser too old for DecompressionStream on the export side).
+        let res = await fetch('data.json.gz', { cache: 'no-store', signal: controller.signal });
+        if(res.ok && typeof DecompressionStream !== 'undefined'){
+          const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+          payload = await new Response(stream).json();
+        } else {
+          res = await fetch('data.json', { cache: 'no-store', signal: controller.signal });
+          if(res.ok) payload = await res.json();
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    }catch(e){
+      return false; // no published data file, or the fetch itself failed/timed out
+    }
+  } else {
+    return false; // sandbox, no embedded seed — genuinely nothing to load from
+  }
+
+  if(!payload || (payload._backupType !== 'game-tracker' && payload._backupType !== 'newcomb-u16-stats-tracker')) return false;
+
+  const publishedStamp = payload._exportedAt || 'unknown';
+  if(!force){
     const seen = await window.storage.get('publishedDataStamp', false);
     if(seen && seen.value === publishedStamp) return false; // already running this published version
+  }
 
-    const put = (key, val) => window.storage.set(key, JSON.stringify(val), false);
-    try{
-      await put(STORAGE_KEY, Array.isArray(payload.games) ? payload.games : []);
-      await put('fixtures', Array.isArray(payload.fixtures) ? payload.fixtures : []);
-      await put('byes', Array.isArray(payload.byes) ? payload.byes : []);
-      await put('playerAliases', payload.playerAliases || {});
-      await put('dismissedMatchGroups', payload.dismissedMatchGroups || []);
-      await put('dismissedBestMismatches', payload.dismissedBestMismatches || []);
-      if(Array.isArray(payload.knownClubs) && payload.knownClubs.length) await put('knownClubs', payload.knownClubs);
-      if(payload.teamClubOverrides) await put('teamClubOverrides', payload.teamClubOverrides);
-      if(payload.clubNicknames) await put('clubNicknames', payload.clubNicknames);
-      // loadGames prefers the chunked/compressed layout over this legacy single key, so a
-      // manifest left on this device from an earlier visit would shadow the data just seeded and
-      // silently pin the visitor to their old snapshot. Clear it; the next save rebuilds it.
-      try{ await window.storage.delete(GAMES_META_KEY, false); }catch(e){}
-      try{ await cleanupOrphanedGameChunks(0); }catch(e){}
-      await window.storage.set('publishedDataStamp', publishedStamp, false);
-    }catch(storageErr){
-      // IndexedDB backs hosted storage now, so a genuine quota hit is unlikely — but if the
-      // device's storage really is full or blocked (e.g. private-mode restrictions), surface it
-      // instead of failing silently and leaving the page mysteriously empty.
-      showToast('Could not save the published data on this device (storage may be full or blocked) — data.json downloaded but not saved locally');
-      return false;
-    }
-    return true;
+  const put = (key, val) => window.storage.set(key, JSON.stringify(val), false);
+  try{
+    await put(STORAGE_KEY, Array.isArray(payload.games) ? payload.games : []);
+    await put('fixtures', Array.isArray(payload.fixtures) ? payload.fixtures : []);
+    await put('byes', Array.isArray(payload.byes) ? payload.byes : []);
+    await put('playerAliases', payload.playerAliases || {});
+    await put('dismissedMatchGroups', payload.dismissedMatchGroups || []);
+    await put('dismissedBestMismatches', payload.dismissedBestMismatches || []);
+    if(Array.isArray(payload.knownClubs) && payload.knownClubs.length) await put('knownClubs', payload.knownClubs);
+    if(payload.teamClubOverrides) await put('teamClubOverrides', payload.teamClubOverrides);
+    if(payload.clubNicknames) await put('clubNicknames', payload.clubNicknames);
+    // loadGames prefers the chunked/compressed layout over this legacy single key, so a
+    // manifest left on this device from an earlier visit would shadow the data just seeded and
+    // silently pin the visitor to their old snapshot. Clear it; the next save rebuilds it.
+    try{ await window.storage.delete(GAMES_META_KEY, false); }catch(e){}
+    try{ await cleanupOrphanedGameChunks(0); }catch(e){}
+    await window.storage.set('publishedDataStamp', publishedStamp, false);
+  }catch(storageErr){
+    // IndexedDB backs hosted storage now, so a genuine quota hit is unlikely — but if the
+    // device's storage really is full or blocked (e.g. private-mode restrictions), surface it
+    // instead of failing silently and leaving the page mysteriously empty.
+    showToast('Could not save the published data on this device (storage may be full or blocked) — data.json downloaded but not saved locally');
+    return false;
+  }
+  return true;
+}
+
+// Manual, on-demand version of the check above — for whenever you've re-scraped and published a
+// new data.json.gz but don't want to wait for someone to close and reopen the tab, or ask them to
+// find and re-upload a file through Restore. Reuses the exact same fetch-and-compare logic
+// (nothing double-built here), then reloads every piece of local storage into memory and
+// re-renders, so the change shows up immediately without a full page reload.
+async function refreshFromPublishedData(){
+  if(!EMBEDDED_SEED_DATA_GZ_B64 && !USING_LOCAL_STORAGE_FALLBACK){
+    showToast('Nothing to check from here — this sandbox has no embedded data and no live data.json.gz to fetch. Ask Claude to embed a file to test against, or use Restore from backup.');
+    return;
+  }
+  showToast(EMBEDDED_SEED_DATA_GZ_B64 ? 'Checking the embedded data for changes…' : 'Checking the published data.json.gz for changes…');
+  let updated = false;
+  try{
+    updated = await seedFromPublishedData(false);
   }catch(e){
-    return false; // no published data file, or the fetch itself failed/timed out — carry on with whatever is stored locally
+    console.error('Manual refresh failed', e);
+    showToast('Could not check for updated data — see the console for details.');
+    return;
+  }
+  if(!updated){
+    showToast('Already up to date — no newer published data found.');
+    return;
+  }
+  try{
+    await loadGames();
+    await loadFixtures();
+    await loadByes();
+    await loadPlayerAliases();
+    await loadDismissedMatches();
+    await loadClubData();
+    invalidateAggregateCache();
+    await renderAll();
+    showToast('Updated to the latest published data.');
+  }catch(e){
+    console.error('Reload after refresh failed', e);
+    showToast('Fetched the new data but something went wrong loading it in — try reloading the page.');
+  }
+}
+
+// Unlike Refresh above, this ALWAYS reloads from the published/embedded source and overwrites
+// whatever's currently stored on this device — it doesn't check whether anything's actually
+// changed first. For when someone's local copy has been broken or tinkered with and you want to
+// hand them back a known-good baseline without waiting for you to publish something new.
+async function resetFromPublishedData(){
+  if(!EMBEDDED_SEED_DATA_GZ_B64 && !USING_LOCAL_STORAGE_FALLBACK){
+    showToast('Nothing to reset from here — this sandbox has no embedded data and no live data.json.gz to fetch. Ask Claude to embed a file to test against, or use Restore from backup.');
+    return;
+  }
+  if(!confirm('This replaces everything currently saved on this device with the published version — any local changes here will be lost. Continue?')) return;
+  showToast('Resetting to the published version…');
+  let ok = false;
+  try{
+    ok = await seedFromPublishedData(true);
+  }catch(e){
+    console.error('Reset failed', e);
+    showToast('Could not reset — see the console for details.');
+    return;
+  }
+  if(!ok){
+    showToast('Could not load the published data to reset from.');
+    return;
+  }
+  try{
+    await loadGames();
+    await loadFixtures();
+    await loadByes();
+    await loadPlayerAliases();
+    await loadDismissedMatches();
+    await loadClubData();
+    invalidateAggregateCache();
+    await renderAll();
+    showToast('Reset to the published version.');
+  }catch(e){
+    console.error('Reload after reset failed', e);
+    showToast('Reset the stored data but something went wrong loading it in — try reloading the page.');
   }
 }
 
 // ---------- Init ----------
-// Starts the home-page number count-up immediately, before any data has loaded — the static
-// tiles are already in the page's HTML, so this can fire the moment the script parses rather
-// than waiting on the async load chain below.
-startHomeSnapshotIndeterminate();
+// Shows the home-page number count-up immediately, before any data has loaded — animating up to
+// the last-known-real baseline (see HOME_SNAPSHOT_BASELINE above), not an indeterminate guess.
+// The static tiles already exist in the page's HTML, so this can fire the moment the script
+// parses rather than waiting on the async load chain below.
+startHomeSnapshotBaseline();
 
 (async function init(){
   // Every step here is awaited, so one thrown error used to skip renderAll() entirely and leave a
