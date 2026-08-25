@@ -132,6 +132,14 @@
   .loading-bar-track{ width:180px; height:4px; background:var(--line); border-radius:2px; margin:0 auto; overflow:hidden; }
   .loading-bar-fill{ width:40%; height:100%; background:var(--gold); border-radius:2px; animation:loadingBarSlide 1s ease-in-out infinite; }
   @keyframes loadingBarSlide{ 0%{ margin-left:-40%; } 100%{ margin-left:100%; } }
+  /* Shown the instant the page loads (static markup, no JS delay) so there's an honest signal
+     during the genuinely-multi-second decompress+parse of a 15k+ game dataset, instead of the
+     app looking like it just has no data yet. Removed by init() the moment renderAll() finishes;
+     see the JS at the bottom of the file. Doesn't block clicks — tabs/buttons work underneath it,
+     they just show 0s/empty state until data actually lands, same as before this change. */
+  .startup-loading-banner{ display:flex; align-items:center; justify-content:center; gap:14px; padding:9px 16px; background:#241f10; border-bottom:1px solid var(--gold); font-size:12.5px; color:#e8d38a; }
+  .startup-loading-banner .loading-bar-track{ margin:0; flex-shrink:0; }
+  .startup-loading-banner.done{ display:none; }
 
   .preview-card{ background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:18px 20px; margin-top:16px; }
   .preview-score{ display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:10px;}
@@ -410,7 +418,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 17082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 25082026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -432,6 +440,11 @@
   <button data-tab="games">Games</button>
   <button data-tab="tools">Tools</button>
 </nav>
+
+<div id="startupLoadingBanner" class="startup-loading-banner">
+  <div class="loading-bar-track" style="max-width:220px;"><div class="loading-bar-fill"></div></div>
+  <span>Loading game data — you can click around, pages will fill in as data arrives…</span>
+</div>
 
 <div id="breadcrumbBar"></div>
 
@@ -458,10 +471,10 @@
     <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across the AFL Barwon FNL, all pulled together in one place — goals, records, form trends, head-to-head history, and team rankings, updated as results come in.</p>
     <div id="privacyBanner" class="warn-box" style="max-width:760px;margin-bottom:18px;"><strong>This is your own copy.</strong> Anything you add, edit or delete here changes only what <em>you</em> see — it isn't shared with anyone else, and it doesn't alter the real results.</div>
     <div id="homeSnapshot" class="home-snapshot">
-      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">0</div><div class="label">Players with stats tracked</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">0</div><div class="label">Teams</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">0</div><div class="label">Games tracked (all-time)</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">0</div><div class="label">Goals scored</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">15,543</div><div class="label">Players with stats tracked</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">1,897</div><div class="label">Teams</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">15,387</div><div class="label">Games tracked (all-time)</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">110,963</div><div class="label">Goals scored</div></div>
     </div>
     <p class="hint" style="margin:22px 0 14px;">Pick where you want to go:</p>
     <div class="home-grid">
@@ -825,6 +838,12 @@ if(typeof window.storage === 'undefined'){
 
 const STORAGE_KEY = 'games';
 let games = [];
+// True once the initial games load (decompress + parse — the genuinely slow part on a 15k+
+// game dataset) has actually finished, whether it succeeded or failed. Distinguishes "games is
+// empty because nothing's loaded yet" from "games is empty because there's really no data" —
+// used by the main render functions below to show a loading message instead of a misleading
+// empty state while the user is clicking around during startup.
+let initialGamesLoadDone = false;
 // Set true by seedFromPublishedData when it successfully populates `games` directly in memory —
 // tells init() to skip the otherwise-redundant loadGames() re-read that would follow (see the
 // detailed comment at the setting site in seedFromPublishedData for the bug this prevents).
@@ -1123,11 +1142,11 @@ async function loadGames(){
         parts.forEach(part=>{
           try{ const arr = JSON.parse(part); if(Array.isArray(arr)) merged.push(...arr); }catch(e){}
         });
-        games = stripJunkFixtures(merged);
+        games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(merged))));
       } else {
         let payload = parts.join('');
         if(info.encoding === 'gzip-b64') payload = await base64ToUngzip(payload);
-        games = stripJunkFixtures(payload ? JSON.parse(payload) : []);
+        games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(payload ? JSON.parse(payload) : []))));
       }
       invalidateAggregateCache();
       return;
@@ -1135,7 +1154,7 @@ async function loadGames(){
   }catch(e){ /* fall through to the legacy layout */ }
   try{
     const res = await window.storage.get(STORAGE_KEY, false);
-    games = stripJunkFixtures(res ? JSON.parse(res.value) : []);
+    games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(res ? JSON.parse(res.value) : []))));
   }catch(e){
     games = [];
   }
@@ -1154,9 +1173,102 @@ function isJunkTestFixture(g){
   const re = /^AFL\s+BARWON\s+TEST\b/i;
   return !!(g && g.teamA && g.teamB && (re.test(g.teamA.name||'') || re.test(g.teamB.name||'')));
 }
+// User's call (2026-08-25): All Abilities / Kardinia Park All-Abilities and Unders Transition
+// Comp games are out of scope for this tracker — don't want or need that data at all. Matches
+// every variant seen so far: "AFL Barwon All Abilities...", "Kardinia Park All-Abilities...",
+// "...All Abilities - Contact/Non-Contact", "Unders Transition Comp - Geelong/Torquay". Same
+// competitionRaw-substring approach as the grading detection above — deliberately broad so a
+// future re-scrape's Contact/Non-Contact-style suffix variants keep matching. Confirmed against
+// the 2026-08-25 import that nothing else in the competition list contains "abilities" or
+// "transition" (no false-positive risk).
+function isExcludedCompetition(g){
+  return !!(g && g.competitionRaw && /all.?abilities|transition comp/i.test(g.competitionRaw));
+}
 function stripJunkFixtures(list){
   if(!Array.isArray(list)) return list;
-  return list.filter(g=> !isJunkTestFixture(g));
+  return list.filter(g=> !isJunkTestFixture(g) && !isExcludedCompetition(g));
+}
+
+// BUG (fixed): the PlayHQ scraper's export format changed at some point to write each side's
+// points as teamA.score / teamB.score, but every for/against, margin, ladder, and display
+// computation in this app (thousands of lines, going back to the original pasted-text parser)
+// reads teamA.total / teamB.total. Since payload games only ever carry .score now, .total was
+// silently undefined on every single record — NaN/0 sums, and the `typeof ...total==='number'`
+// guards used throughout (e.g. head-to-head, prediction accuracy) silently excluded every game
+// rather than throwing, so this looked like "for/against isn't showing" rather than an error.
+// Fix: normalize .score -> .total (non-destructively; .score is left in place, harmless) on
+// every raw game the instant it enters the app, at the same three points stripJunkFixtures()
+// already guards (seed/load, restore apply, merge) plus the initial data.json seeding path
+// which — unlike those three — was writing payload.games straight to storage with no
+// normalization at all. If a FUTURE export reverts to .total, this is a no-op (real value wins).
+function normalizeGameScoreField(side){
+  if(side && typeof side.total !== 'number' && typeof side.score === 'number'){
+    side.total = side.score;
+  }
+}
+function normalizeGameScores(list){
+  if(!Array.isArray(list)) return list;
+  list.forEach(g=>{
+    if(g){
+      normalizeGameScoreField(g.teamA);
+      normalizeGameScoreField(g.teamB);
+    }
+  });
+  return list;
+}
+
+// BUG (fixed): the same scraper/converter rewrite that dropped .total (see normalizeGameScores)
+// also stopped tagging grading-round games as phase:'Grading' — every single grading game in a
+// fresh scrape comes through as phase:'Regular Season' instead, even though competitionRaw still
+// plainly says e.g. "2024 Under 18's Grading". Confirmed on the 2026-08-25 import: 1,244 games
+// across all 5 years have "grading" in competitionRaw but phase:'Regular Season'. This silently
+// breaks everything that branches on phase==='Grading' — the Grading Elo model saw zero games to
+// rate on, while regular-season aggregates that explicitly EXCLUDE grading games (ladder,
+// for/against, prior-season comparisons) wrongly included 1,244 grading-round blowouts/mismatches
+// instead. Fix: derive phase from competitionRaw whenever it's missing/wrong, at the same points
+// normalizeGameScores runs — mirrors the app's own paste-parser logic (line ~1971/2168) which
+// already sets phase this way for pasted games; scraper-imported games just never got the same
+// treatment. Only touches phase when competitionRaw disagrees with it, so this is a no-op the
+// moment a future scraper fix tags grading correctly upstream.
+function normalizeGamePhase(g){
+  if(g && g.competitionRaw && /grading/i.test(g.competitionRaw) && g.phase !== 'Grading'){
+    g.phase = 'Grading';
+  }
+}
+function normalizeGamePhases(list){
+  if(!Array.isArray(list)) return list;
+  list.forEach(normalizeGamePhase);
+  return list;
+}
+
+// BUG (fixed): teamA/teamB.ratio (the "9.6.60" goals.behinds.total string) is a paste-parser-only
+// field — the scraper import never populates it at all, so parseRatio's existing safe fallback
+// ({goals:0,behinds:0}) fires for every scraper-imported game. That's silent and harmless in most
+// places EXCEPT team-level "Scoring accuracy" (goalsKicked/(goalsKicked+behindsKicked)), which
+// reads as a flat 0% for every team on a scraper-only dataset — a real, visible wrong number on
+// the team page and team-compare view, not just a missing feature. Fix: derive a ratio string
+// whenever it's absent but reconstructable — sum of that side's player.goals gives goals scored
+// (AFL: 6pts/goal), and teamScore minus that gives behinds. Only applied when the result is
+// sane (behinds >= 0); the ~0.1% of sides where it comes out negative are pre-existing scrape
+// gaps (a scored side showing 0 total, or missing goalkickers) and are left alone rather than
+// papering over a real data problem with an invented number — they keep the old 0/0 fallback,
+// exactly as before this fix. No player rows at all (best-only/no-stats games) also left alone.
+function deriveGameRatio(side){
+  if(!side || side.ratio || !Array.isArray(side.players) || !side.players.length) return;
+  if(typeof side.total !== 'number') return;
+  const goals = side.players.reduce((s,p)=> s + (typeof p.goals==='number' ? p.goals : 0), 0);
+  const behinds = side.total - goals*6;
+  if(behinds >= 0) side.ratio = `${goals}.${behinds}.${side.total}`;
+}
+function deriveGameRatios(list){
+  if(!Array.isArray(list)) return list;
+  list.forEach(g=>{
+    if(g){
+      deriveGameRatio(g.teamA);
+      deriveGameRatio(g.teamB);
+    }
+  });
+  return list;
 }
 
 function ensureUniqueGameIds(){
@@ -1493,7 +1605,7 @@ function buildPendingRestore(payload, sourceLabel){
     label: `Restore ${gameCount} game${gameCount!==1?'s':''} from this ${sourceLabel}?`,
     detail: `This ${sourceLabel} has ${gameCount} game(s) and ${extraCount} extra item(s) (fixtures, byes, aliases, club settings).`,
     apply: async ()=>{
-      games = stripJunkFixtures(Array.isArray(payload.games) ? payload.games : []);
+      games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(Array.isArray(payload.games) ? payload.games : []))));
       ensureUniqueGameIds();
       fixtures = payloadFixtures;
       byes = payloadByes;
@@ -1524,7 +1636,7 @@ function buildPendingRestore(payload, sourceLabel){
     // match is added as new. Games only present locally (not in the backup) are kept as-is.
     mergeApply: async ()=>{
       const sig = g => `${g.dateTime}||${g.teamA.name}||${g.teamB.name}`;
-      const payloadGamesList = (Array.isArray(payload.games) ? payload.games : []).filter(g=> g && g.teamA && g.teamB);
+      const payloadGamesList = normalizeGamePhases(deriveGameRatios(normalizeGameScores((Array.isArray(payload.games) ? payload.games : []).filter(g=> g && g.teamA && g.teamB))));
       const payloadGameSigs = new Set(payloadGamesList.map(sig));
       const keptExisting = games.filter(g=> !payloadGameSigs.has(sig(g)));
       const replacedCount = games.length - keptExisting.length;
@@ -1632,7 +1744,7 @@ function buildPendingRestore(payload, sourceLabel){
       }catch(e){
         showToast('Merged in memory, but saving to storage failed — reload with care');
       }
-      showToast(`Merged: ${replacedCount} game(s) updated, ${addedCount} new game(s) added, ${extraCount} extra item(s) merged${preservedCount ? ` — kept existing detail (quarter scores/pastes/predictions) on ${preservedCount} game(s)` : ''}${junkRemoved ? ` — ${junkRemoved} junk test fixture(s) filtered out` : ''}`);
+      showToast(`Merged: ${replacedCount} game(s) updated, ${addedCount} new game(s) added, ${extraCount} extra item(s) merged${preservedCount ? ` — kept existing detail (quarter scores/pastes/predictions) on ${preservedCount} game(s)` : ''}${junkRemoved ? ` — ${junkRemoved} junk/excluded game(s) filtered out` : ''}`);
       renderAll();
     }
   };
@@ -6156,6 +6268,11 @@ function arrowFor(key, sortState){
 }
 
 function renderPlayers(){
+  if(!initialGamesLoadDone && games.length===0){
+    const wrap = document.getElementById('playersTableWrap');
+    if(wrap) wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading players…</p></div>`;
+    return;
+  }
   const { playerList } = computeAggregates();
 
   const clubSel = document.getElementById('clubFilter');
@@ -6483,6 +6600,11 @@ let fixturesDivisionFilter = 'ALL';
 let openFixtureGroups = null; // null = default to all collapsed
 
 function renderTeams(){
+  if(!initialGamesLoadDone && games.length===0){
+    const wrap = document.getElementById('teamsTableWrap');
+    if(wrap) wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading teams…</p></div>`;
+    return;
+  }
   const { teamList } = computeAggregates();
 
   const clubSel = document.getElementById('teamClubFilter');
@@ -6840,6 +6962,10 @@ function renderGamesLanding(){
 function renderGamesSubView(){
   const wrap = document.getElementById('gamesSubView');
   if(!wrap) return;
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading games…</p></div>`;
+    return;
+  }
   if(gamesSubView === 'completed'){
     wrap.innerHTML = `
       <div class="mini-actions" style="margin:22px 0 14px;">
@@ -7415,7 +7541,6 @@ function refreshCurrentDetailView(){
 // "hanging" whenever the year/phase pills were clicked. This only touches whatever's genuinely
 // visible right now.
 function refreshAfterFilterChange(){
-  renderHomeSnapshot();
   const activeId = document.querySelector('.panel.active')?.id;
   if(activeId === 'panel-players'){ renderPlayers(); return; }
   if(activeId === 'panel-teams'){ renderTeams(); return; }
@@ -7434,7 +7559,6 @@ async function renderAll(){
   renderYearFilterBar();
   renderPrivacyBanner();
   renderDataCoverageStamp();
-  renderHomeSnapshot();
   await yieldToUI();
   renderPlayers();
   await yieldToUI();
@@ -7481,95 +7605,43 @@ function renderPrivacyBanner(){
   el.dataset.extended = '1';
 }
 
-// Animates a stat card's number from 0 up to its real value on a quick ease-out curve, rather
-// than the number just appearing already-populated — a small "counting up as it loads" moment.
-// Home snapshot count-up. Two phases:
-//  1. Indeterminate — starts the instant the page paints (called at top level below, before any
-//     data has loaded), so the numbers are visibly counting rather than sitting at a static "0"
-//     or a shimmer placeholder. Climbs with a decelerating step so it reads as "still working"
-//     without racing off to an absurd number if loading happens to take a while.
-//  2. Real — once renderHomeSnapshot() actually has the true values, each element hands off
-//     smoothly: the indeterminate loop is stopped and a normal count-up continues from WHEREVER
-//     that element's number happened to be, landing on the exact real value — never resets to 0.
-// Real per-tile numbers as of the last time this was updated (see HOME_SNAPSHOT_BASELINE below) —
-// shown INSTANTLY on page load via a single smooth count-up, rather than the old indeterminate
-// "guess upward while we wait" animation. That version visibly stuttered: the browser's main
-// thread is genuinely busy decompressing and parsing the dataset, then building thousands of
-// player/team records, during that window — nothing can animate smoothly while JS itself is
-// blocked doing that work, no matter how the animation code is written. Baking in the real figure
-// sidesteps the wait entirely. If it's gone stale (new data scraped since this was last updated),
-// renderHomeSnapshot() below quietly corrects it once the real numbers are ready — re-animating
-// only if the number actually changed, so a stale baseline is at worst a brief pause before the
-// true number appears, never a wrong number left sitting on screen.
-//
-// UPDATE THESE 4 NUMBERS whenever you scrape a meaningful batch of new data — ask Claude to
-// recompute them from your latest backup, or just read them off this Home page after a load and
-// paste them in here.
-const HOME_SNAPSHOT_BASELINE = { games: 11329, teams: 280, players: 7195, goals: 23480 };
+// Home snapshot tiles — the numbers are baked into HTML as static text (correct at build time,
+// zero data dependency) and the animation counts up purely from the constant below. No
+// computeAggregates(), no load wait. Update the 4 numbers in HOME_SNAPSHOT_BASELINE AND the
+// static HTML tiles (search for id="homeSnapshot") whenever a meaningful batch of new data is
+// scraped — ask Claude to run the harness, or just read the numbers off the live page.
+// Recomputed 2026-08-25 from the real dataset via the app's own computeAggregates().
+const HOME_SNAPSHOT_BASELINE = { games: 15387, teams: 1897, players: 15543, goals: 110963 };
 
 function animateCountUp(el, target, duration=800){
   if(!el) return;
-  // BUG (fixed): this used to have no way to cancel an animation already in flight on the same
-  // element. On page load, startHomeSnapshotBaseline() kicks off an 800ms count-up to the baked-in
-  // baseline the instant the script parses; renderHomeSnapshot() then calls this AGAIN with the
-  // real values once data has loaded — often well before that first 800ms finishes, especially
-  // when storage is empty or resolves quickly. With no cancellation, BOTH requestAnimationFrame
-  // loops kept running concurrently on the same element, each unaware of the other, and whichever
-  // one happened to render its LAST frame won — non-deterministically leaving some tiles on the
-  // correct real number and others stuck showing the stale baseline (exactly what was seen: three
-  // tiles correctly at 0, "Games" stuck at the baseline 11329). Cancelling any prior in-flight
-  // frame for THIS element before starting a new one guarantees the most recent call always wins.
   if(el._countUpRAF != null){ cancelAnimationFrame(el._countUpRAF); el._countUpRAF = null; }
-  const from = parseInt(el.textContent, 10) || 0;
-  if(from === target) return; // already showing the right number — nothing to animate
+  const from = parseInt(String(el.textContent).replace(/,/g,''), 10) || 0;
+  if(from === target) return;
   const start = performance.now();
   function tick(now){
     const t = Math.min(1, (now-start)/duration);
-    const eased = 1 - Math.pow(1-t, 3); // ease-out cubic — fast start, gentle settle
-    el.textContent = Math.round(from + (target-from)*eased);
+    const eased = 1 - Math.pow(1-t, 3);
+    el.textContent = Math.round(from + (target-from)*eased).toLocaleString('en-AU');
     if(t < 1){
       el._countUpRAF = requestAnimationFrame(tick);
     } else {
-      el.textContent = target; // land on the exact real value, not a rounding artefact
+      el.textContent = target.toLocaleString('en-AU');
       el._countUpRAF = null;
     }
   }
   el._countUpRAF = requestAnimationFrame(tick);
 }
 function startHomeSnapshotBaseline(){
+  // Reset tiles to 0 first so the count-up has something to animate FROM — the static HTML
+  // already shows the real numbers (instant correct display before JS runs), but by the time
+  // this executes the script has parsed and we can give the user the count-up flourish.
+  document.querySelectorAll('#homeSnapshot .home-snapshot-item .value').forEach(el => el.textContent = '0');
   const els = document.querySelectorAll('#homeSnapshot .home-snapshot-item .value');
   const targets = [HOME_SNAPSHOT_BASELINE.players, HOME_SNAPSHOT_BASELINE.teams, HOME_SNAPSHOT_BASELINE.games, HOME_SNAPSHOT_BASELINE.goals];
   els.forEach((el,i)=> animateCountUp(el, targets[i] ?? 0));
 }
 
-function renderHomeSnapshot(){
-  const snap = document.getElementById('homeSnapshot');
-  if(!snap) return;
-  const { playerList, teamList } = computeAggregates();
-  const totalGoals = playerList.reduce((s,p)=>s+p.totalGoals, 0);
-  // Colours and order match the Home page's own tab tiles — Players green, Teams blue, Games
-  // gold, Tools' purple borrowed for Goals since it has no direct tab of its own. "Games this
-  // season" was dropped: it tracked whatever the top Year/Phase filter bar happened to be set to
-  // (global, changeable state), not literally the current season — a real mislabeling risk, on
-  // top of being the least interesting of the five original numbers.
-  const items = [
-    { value: playerList.length, label: `Player${playerList.length!==1?'s':''} with stats tracked`, color:'var(--green)' },
-    { value: teamList.length, label: `Team${teamList.length!==1?'s':''}`, color:'var(--blue)' },
-    { value: games.length, label: `Game${games.length!==1?'s':''} tracked (all-time)`, color:'var(--gold)' },
-    { value: totalGoals, label: `Goal${totalGoals!==1?'s':''} scored`, color:'var(--purple)' }
-  ];
-  // The tiles already exist in the static HTML (so the baked-in baseline is already showing) —
-  // update them in place rather than rebuilding, so animateCountUp reads the currently-displayed
-  // number as its starting point and only actually animates if the real figure differs from it.
-  let valueEls = snap.querySelectorAll('.home-snapshot-item .value');
-  if(valueEls.length !== items.length){
-    snap.innerHTML = items.map(i=>`<div class="home-snapshot-item" style="--accent-color:${i.color};"><div class="value">0</div><div class="label">${i.label}</div></div>`).join('');
-    valueEls = snap.querySelectorAll('.home-snapshot-item .value');
-  } else {
-    snap.querySelectorAll('.home-snapshot-item .label').forEach((el,i)=> el.textContent = items[i].label);
-  }
-  valueEls.forEach((el,i)=> animateCountUp(el, items[i].value));
-}
 
 // ---------- Export ----------
 function exportToXlsx(){
@@ -15051,22 +15123,10 @@ function goToTabInternal(tabId){
   renderPhaseFilterBar();
   renderYearFilterBar();
   if(tabId==='home' && !wasAlreadyOnHome){
-    // Re-play the count-up every time someone actually navigates TO Home FROM SOMEWHERE ELSE —
-    // not on every tab switch (renderHomeSnapshot() below still runs regardless, to keep the
-    // numbers correct in the background even while another tab is showing), and not when Home was
-    // already active. Resetting to 0 first gives animateCountUp something to count up FROM again,
-    // same as the very first page load.
-    //
-    // BUG (fixed): this used to fire unconditionally whenever goToTabInternal('home') ran — which
-    // includes navResolveHash()'s fallback on every plain page load with no deep link. That call
-    // happens right after the initial renderAll() had already correctly displayed the real numbers,
-    // so the reset-to-0 here stomped on them, producing a visible "counts up, drops to zero, counts
-    // up again" flash on every load. Guarding on wasAlreadyOnHome (true on first load, since
-    // panel-home is already the active panel in the static HTML) fixes that while keeping the
-    // intended replay-on-genuine-navigation behaviour.
-    document.querySelectorAll('#homeSnapshot .home-snapshot-item .value').forEach(el=> el.textContent = '0');
+    // Re-play the count-up animation every time someone navigates TO Home FROM SOMEWHERE ELSE.
+    // Numbers come purely from HOME_SNAPSHOT_BASELINE — no data dependency.
+    startHomeSnapshotBaseline();
   }
-  renderHomeSnapshot();
   const sig = currentGlobalFilterSig();
   if(tabId==='players' && sig !== _lastPlayersRenderSig){ renderPlayers(); _lastPlayersRenderSig = sig; }
   if(tabId==='teams' && sig !== _lastTeamsRenderSig){ renderTeams(); _lastTeamsRenderSig = sig; }
@@ -15541,7 +15601,7 @@ async function seedFromPublishedData(force){
     // here gives seeding the same size-limit resilience, compression, and post-write verification
     // toast as every other save in the app, with no separate write path to drift out of sync or
     // fail differently under load.
-    games = Array.isArray(payload.games) ? payload.games : [];
+    games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(Array.isArray(payload.games) ? payload.games : []))));
     await saveGames(); // also clears the legacy STORAGE_KEY / stale manifest itself — no separate cleanup needed here
     // Signals to init() (see below) that `games` is ALREADY correctly populated in memory right
     // now, from this exact payload — no need for the subsequent loadGames() step to read it back
@@ -15692,6 +15752,12 @@ startHomeSnapshotBaseline();
     step('club settings', loadClubData)
   ]);
   parallelResults.forEach(failed => { if(failed) failures.push(failed); });
+  // Games itself is loaded (successfully or not) the moment we get here — everything after this
+  // point (id backfill, merges, fixture pruning) operates on the in-memory array but doesn't
+  // change whether there's real game data to show, so the loading banner/per-page loading states
+  // can come down now rather than waiting for those housekeeping steps too.
+  initialGamesLoadDone = true;
+  document.getElementById('startupLoadingBanner')?.classList.add('done');
   try{ if(ensureUniqueGameIds()) await saveGames(); }
   catch(e){ console.error('Startup step failed: id backfill', e); }
   try{ if(applyConfirmedMerges()) await savePlayerAliases(); }
