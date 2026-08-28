@@ -1146,18 +1146,22 @@ async function loadGames(){
       } else {
         let payload = parts.join('');
         if(info.encoding === 'gzip-b64') payload = await base64ToUngzip(payload);
-        games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(payload ? JSON.parse(payload) : []))));
+        games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(payload ? await parseJsonOffThread(payload) : []))));
       }
+      initialGamesLoadDone = true;
+      document.getElementById('startupLoadingBanner')?.classList.add('done');
       invalidateAggregateCache();
       return;
     }
   }catch(e){ /* fall through to the legacy layout */ }
   try{
     const res = await window.storage.get(STORAGE_KEY, false);
-    games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(res ? JSON.parse(res.value) : []))));
+    games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(res ? await parseJsonOffThread(res.value) : []))));
   }catch(e){
     games = [];
   }
+  initialGamesLoadDone = true;
+  document.getElementById('startupLoadingBanner')?.classList.add('done');
   invalidateAggregateCache();
 }
 
@@ -6067,6 +6071,39 @@ function computeAggregates(gamesOverride){
 // instead of the whole page appearing to freeze until everything is ready at once.
 function yieldToUI(){ return new Promise(resolve => setTimeout(resolve, 0)); }
 
+// Parses a JSON string OFF the main thread using an inline Web Worker, so the browser stays
+// responsive (clicks, animations, loading banner) during the 2+ second parse of a large dataset.
+// Falls back to a synchronous JSON.parse with yields before/after if Workers aren't available
+// (old browser, sandboxed context, CSP restriction) — the UI still freezes during the parse
+// itself in that case, but at least the loading banner gets a chance to render first.
+async function parseJsonOffThread(text){
+  if(!text) return null;
+  if(typeof Worker !== 'undefined'){
+    try{
+      return await new Promise((resolve, reject) => {
+        const blob = new Blob([
+          'self.onmessage=function(e){try{self.postMessage(JSON.parse(e.data))}catch(x){self.postMessage({__parseErr:x.message})}}'
+        ], {type: 'application/javascript'});
+        const url = URL.createObjectURL(blob);
+        const w = new Worker(url);
+        w.onmessage = e => {
+          w.terminate(); URL.revokeObjectURL(url);
+          if(e.data && e.data.__parseErr) reject(new Error(e.data.__parseErr));
+          else resolve(e.data);
+        };
+        w.onerror = e => { w.terminate(); URL.revokeObjectURL(url); reject(e); };
+        w.postMessage(text);
+      });
+    }catch(e){
+      // Worker creation failed (CSP, sandboxed iframe, etc.) — fall through to sync parse
+    }
+  }
+  await yieldToUI();
+  const result = JSON.parse(text);
+  await yieldToUI();
+  return result;
+}
+
 // Shows a lightweight loading shell (header + animated progress bar) immediately, yields so the
 // browser actually paints it, then runs the real (potentially heavy — especially the first time a
 // given filter combination hasn't been cached yet) render. Used on pages whose underlying
@@ -7764,13 +7801,18 @@ let teammateOverlapExpanded = false;
 let playerTeammateLinksFilter = 'ALL';
 let playerTeammateLinksExpanded = false;
 
-function doOpenPlayerDetail(key){
+async function doOpenPlayerDetail(key){
   currentPlayerDetailKey = key;
   playerGameLogExpanded = false;
   playerTeammateLinksExpanded = false;
   playerDetailReturnTo = null;   // default: a plain open has nowhere special to return to
   showPanel('player-detail');
-  renderPlayerDetail(key);
+  renderPlayerDetail(key); // paint immediately with whatever's already in memory (goals, games, MVP etc. are all there)
+  // Timelines (goals-per-game chart, rolling best, League Context) may still be blank right after
+  // a precomputed-publish seed — see ensurePlayerTimelines(). Only the FIRST call on a fresh load
+  // actually fetches anything; every call after that resolves immediately.
+  await ensurePlayerTimelines();
+  if(currentPlayerDetailKey === key) renderPlayerDetail(key); // re-render with timelines filled in — but only if still on this player's page
 }
 function playerLabelFor(key){
   try{
@@ -15519,6 +15561,141 @@ async function loadEmbeddedSeedData(){
   }
 }
 
+// ---------- Precomputed publish pipeline (games.json/summaries.json/config.json) ----------
+// Preferred hosted-deploy path as of the publish.js rewrite: instead of shipping one big
+// data.json(.gz) (a "Backup all data" export — raw PlayHQ-shaped games plus config all in one
+// blob) and computing every stat client-side on first load, `node publish.js` now writes:
+//   games.json            merged/normalized games (still the full per-game player rows — Player
+//                          Movement, Home Grown, ladder/Elo, quarter charts, predictions, and
+//                          squad progressions all still filter this directly, unchanged, since
+//                          they're already fast enough against it not to need precomputing too)
+//   summaries.json         { players, teams, meta } — computeAggregates()'s own output, run ONCE
+//                          at publish time instead of by every visitor's browser. Player timelines
+//                          are stripped out here (they're most of the size) — see
+//                          ensurePlayerTimelines() below.
+//   details/players.json  { playerKey: timeline[] } — fetched lazily, only once a player detail
+//                          page is actually opened.
+//   config.json           playerAliases/knownClubs/clubNicknames/teamClubOverrides/
+//                          dismissedMatchGroups/dismissedBestMismatches/fixtures/byes.
+// Falls back to the older seedFromPublishedData() (single data.json/.gz) below when these aren't
+// present — e.g. a repo that hasn't re-published since this rewrite yet.
+async function seedFromPrecomputedFiles(force){
+  if(!USING_LOCAL_STORAGE_FALLBACK) return false; // sandbox/artifact — nothing to fetch from here
+  let summariesRes;
+  try{
+    const controller = new AbortController();
+    const timeout = setTimeout(()=>controller.abort(), 20000);
+    try{
+      summariesRes = await fetch('summaries.json', { cache:'no-store', signal: controller.signal });
+    } finally { clearTimeout(timeout); }
+  }catch(e){ return false; }
+  if(!summariesRes || !summariesRes.ok) return false; // no precomputed publish here — try the old path instead
+
+  const summaries = await parseJsonOffThread(await summariesRes.text());
+  const publishedStamp = (summaries.meta && summaries.meta.generatedAt) || 'unknown';
+  if(!force){
+    // Same "already running this exact published version" guard as seedFromPublishedData —
+    // isolated in its own try/catch for the same reason (a storage hiccup here must fall through
+    // to seeding, never abort it).
+    try{
+      const seen = await window.storage.get('publishedDataStamp', false);
+      if(seen && seen.value === publishedStamp) return false;
+    }catch(checkErr){
+      console.error('Could not check publishedDataStamp — proceeding to seed anyway', checkErr);
+    }
+  }
+
+  let gamesRes, configRes;
+  try{
+    [gamesRes, configRes] = await Promise.all([
+      fetch('games.json', { cache:'no-store' }),
+      fetch('config.json', { cache:'no-store' })
+    ]);
+  }catch(e){ return false; }
+  if(!gamesRes || !gamesRes.ok) return false;
+  const rawGames = await parseJsonOffThread(await gamesRes.text());
+  const config = (configRes && configRes.ok) ? await parseJsonOffThread(await configRes.text()) : {};
+
+  // publish.js already applies these exact filters/normalizations before writing games.json —
+  // re-running them here is a cheap no-op today, and free forward-compatibility if a future
+  // publish.js version (or a manually-edited games.json) ever skips one.
+  games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(Array.isArray(rawGames) ? rawGames : []))));
+  initialGamesLoadDone = true;
+  document.getElementById('startupLoadingBanner')?.classList.add('done');
+  await yieldToUI();
+
+  if(games.length > 0) justSeededGamesInMemory = true;
+
+  try{
+    // NOTE: saveGames() itself calls invalidateAggregateCache() — so the summaries.json pre-warm
+    // below MUST happen after this, not before, or it would be wiped the instant it's set.
+    await saveGames();
+    const put = (key, val) => window.storage.set(key, JSON.stringify(val), false);
+    await put('fixtures', Array.isArray(config.fixtures) ? config.fixtures : []);
+    await put('byes', Array.isArray(config.byes) ? config.byes : []);
+    await put('playerAliases', config.playerAliases || {});
+    await put('dismissedMatchGroups', config.dismissedMatchGroups || []);
+    await put('dismissedBestMismatches', config.dismissedBestMismatches || []);
+    if(Array.isArray(config.knownClubs) && config.knownClubs.length) await put('knownClubs', config.knownClubs);
+    if(config.teamClubOverrides) await put('teamClubOverrides', config.teamClubOverrides);
+    if(config.clubNicknames) await put('clubNicknames', config.clubNicknames);
+    await window.storage.set('publishedDataStamp', publishedStamp, false);
+  }catch(storageErr){
+    console.error('seedFromPrecomputedFiles: storage write failed', storageErr);
+    showToast('Could not save the published data on this device (storage may be full or blocked) — precomputed data downloaded but not saved locally');
+    return false;
+  }
+
+  // Pre-warm the aggregate cache with the precomputed player/team tables so the very first paint
+  // of Players/Teams/Home skips recomputing from scratch client-side. This is only valid for the
+  // DEFAULT filter state (every year, every phase — the same state publish.js aggregated against),
+  // so it's seeded under that exact cache signature; changing any filter naturally falls through
+  // to a real computeAggregates() run instead, which is where timelines get correctly filled in
+  // too if ensurePlayerTimelines() hasn't already backfilled them by then. Must run after every
+  // step above that could call invalidateAggregateCache() (saveGames() does) — anything later in
+  // startup that mutates games/aliases (id backfill, auto-merges) will still correctly blow this
+  // away via the normal invalidation path if it actually changes something.
+  try{
+    const playerList = (summaries.players||[]).map(p=>({ ...p, timeline: [] }));
+    const teamList = summaries.teams || [];
+    const idToKey = {};
+    playerList.forEach(p=>{ if(p.playhqId) idToKey[p.playhqId] = p.key; });
+    getVisibleGames(); // lazily initializes yearFilter to "every year on file" before reading the signature below
+    const sig = aggregateCacheSignature();
+    if(sig) _aggCache.set(sig, { playerList, teamList, idToKey });
+  }catch(e){ console.error('Could not pre-warm aggregate cache from summaries.json', e); }
+
+  return true;
+}
+
+// Fetched once (lazily) the first time a player detail page is opened, then merged into whichever
+// playerList is currently cached — including the placeholder one seedFromPrecomputedFiles() just
+// seeded, which deliberately ships with every timeline blank to keep summaries.json small. Once a
+// real (non-override) computeAggregates() call happens for any other reason (a filter change), it
+// naturally recomputes full timelines from `games` directly and this becomes a no-op — the guard
+// below only ever fills in a timeline that's still empty.
+let _playerTimelinesLoaded = false;
+let _playerTimelinesPromise = null;
+async function ensurePlayerTimelines(){
+  if(_playerTimelinesLoaded) return;
+  if(_playerTimelinesPromise) return _playerTimelinesPromise;
+  _playerTimelinesPromise = (async () => {
+    try{
+      const res = await fetch('details/players.json', { cache:'no-store' });
+      if(!res.ok) return;
+      const map = await parseJsonOffThread(await res.text());
+      const { playerList } = computeAggregates();
+      playerList.forEach(p => {
+        if((!p.timeline || !p.timeline.length) && map[p.key]) p.timeline = map[p.key];
+      });
+      _playerTimelinesLoaded = true;
+    }catch(e){
+      console.error('Could not load details/players.json (player timelines)', e);
+    }
+  })();
+  return _playerTimelinesPromise;
+}
+
 async function seedFromPublishedData(force){
   let payload = null;
   // Visible feedback before the (now-chunked, but still multi-second for a 60MB dataset) decode
@@ -15555,10 +15732,10 @@ async function seedFromPublishedData(force){
         let res = await fetch('data.json.gz', { cache: 'no-store', signal: controller.signal });
         if(res.ok && typeof DecompressionStream !== 'undefined'){
           const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
-          payload = await new Response(stream).json();
+          payload = await parseJsonOffThread(await new Response(stream).text());
         } else {
           res = await fetch('data.json', { cache: 'no-store', signal: controller.signal });
-          if(res.ok) payload = await res.json();
+          if(res.ok) payload = await parseJsonOffThread(await res.text());
         }
       } finally {
         clearTimeout(timeout);
@@ -15602,6 +15779,9 @@ async function seedFromPublishedData(force){
     // toast as every other save in the app, with no separate write path to drift out of sync or
     // fail differently under load.
     games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(Array.isArray(payload.games) ? payload.games : []))));
+    initialGamesLoadDone = true;
+    document.getElementById('startupLoadingBanner')?.classList.add('done');
+    await yieldToUI(); // let the browser repaint with the "loaded" state before the heavy save
     await saveGames(); // also clears the legacy STORAGE_KEY / stale manifest itself — no separate cleanup needed here
     // Signals to init() (see below) that `games` is ALREADY correctly populated in memory right
     // now, from this exact payload — no need for the subsequent loadGames() step to read it back
@@ -15636,6 +15816,20 @@ async function seedFromPublishedData(force){
   return true;
 }
 
+// Tries the new precomputed publish (games.json/summaries.json/config.json) first, falling back
+// to the older single data.json(.gz)/embedded-seed path when the precomputed files aren't there —
+// e.g. a repo that hasn't re-published with publish.js yet. Every call site that used to call
+// seedFromPublishedData() directly goes through this instead, so both formats stay supported.
+async function seedFromPublishedSource(force){
+  try{
+    const gotPrecomputed = await seedFromPrecomputedFiles(force);
+    if(gotPrecomputed) return true;
+  }catch(e){
+    console.error('seedFromPrecomputedFiles failed — falling back to seedFromPublishedData', e);
+  }
+  return seedFromPublishedData(force);
+}
+
 // Manual, on-demand version of the check above — for whenever you've re-scraped and published a
 // new data.json.gz but don't want to wait for someone to close and reopen the tab, or ask them to
 // find and re-upload a file through Restore. Reuses the exact same fetch-and-compare logic
@@ -15649,7 +15843,7 @@ async function refreshFromPublishedData(){
   showToast(EMBEDDED_SEED_DATA_GZ_B64 ? 'Checking the embedded data for changes…' : 'Checking the published data.json.gz for changes…');
   let updated = false;
   try{
-    updated = await seedFromPublishedData(false);
+    updated = await seedFromPublishedSource(false);
   }catch(e){
     console.error('Manual refresh failed', e);
     showToast('Could not check for updated data — see the console for details.');
@@ -15688,7 +15882,7 @@ async function resetFromPublishedData(){
   showToast('Resetting to the published version…');
   let ok = false;
   try{
-    ok = await seedFromPublishedData(true);
+    ok = await seedFromPublishedSource(true);
   }catch(e){
     console.error('Reset failed', e);
     showToast('Could not reset — see the console for details.');
@@ -15738,7 +15932,7 @@ startHomeSnapshotBaseline();
   // so they run in parallel rather than one after another. This was the single biggest chunk of
   // startup latency: six sequential round-trips stacked end to end became one wait for the
   // slowest of them (almost always "games", which does its own internal parallel chunk-fetch too).
-  const seedFailed = await step('published data', seedFromPublishedData);
+  const seedFailed = await step('published data', () => seedFromPublishedSource(false));
   if(seedFailed) failures.push(seedFailed);
   const parallelResults = await Promise.all([
     // Skipped when seedFromPublishedData already populated `games` in memory this exact run —
