@@ -15627,9 +15627,16 @@ async function seedFromPrecomputedFiles(force){
   if(games.length > 0) justSeededGamesInMemory = true;
 
   try{
-    // NOTE: saveGames() itself calls invalidateAggregateCache() — so the summaries.json pre-warm
-    // below MUST happen after this, not before, or it would be wiped the instant it's set.
-    await saveGames();
+    // Deliberately NOT calling saveGames() here. games.json is now a real file already persisted
+    // server-side — re-persisting the full (multi-hundred-KB-per-game-row, tens of MB overall)
+    // dataset into the browser's own local storage on top of that would just be duplicating a
+    // second full copy for no benefit, and at this dataset's current size (16,500+ games) that
+    // write was landing at or over the ~15MB total local-storage ceiling this app has hit before —
+    // which is what was hanging the page on load. `games` stays populated in memory for this visit
+    // (already set above); a reload just re-fetches games.json fresh, which is the correct model
+    // for a statically-published dataset. invalidateAggregateCache() (normally called by
+    // saveGames()) is called directly instead, since the pre-warm below still needs a clean cache.
+    invalidateAggregateCache();
     const put = (key, val) => window.storage.set(key, JSON.stringify(val), false);
     await put('fixtures', Array.isArray(config.fixtures) ? config.fixtures : []);
     await put('byes', Array.isArray(config.byes) ? config.byes : []);
@@ -15642,7 +15649,7 @@ async function seedFromPrecomputedFiles(force){
     await window.storage.set('publishedDataStamp', publishedStamp, false);
   }catch(storageErr){
     console.error('seedFromPrecomputedFiles: storage write failed', storageErr);
-    showToast('Could not save the published data on this device (storage may be full or blocked) — precomputed data downloaded but not saved locally');
+    showToast('Could not save the published config on this device (storage may be full or blocked) — the data itself still loaded fine for this visit');
     return false;
   }
 
@@ -15651,10 +15658,8 @@ async function seedFromPrecomputedFiles(force){
   // DEFAULT filter state (every year, every phase — the same state publish.js aggregated against),
   // so it's seeded under that exact cache signature; changing any filter naturally falls through
   // to a real computeAggregates() run instead, which is where timelines get correctly filled in
-  // too if ensurePlayerTimelines() hasn't already backfilled them by then. Must run after every
-  // step above that could call invalidateAggregateCache() (saveGames() does) — anything later in
-  // startup that mutates games/aliases (id backfill, auto-merges) will still correctly blow this
-  // away via the normal invalidation path if it actually changes something.
+  // too if ensurePlayerTimelines() hasn't already backfilled them by then. Must run after the
+  // invalidateAggregateCache() call above, or it would be wiped the instant it's set.
   try{
     const playerList = (summaries.players||[]).map(p=>({ ...p, timeline: [] }));
     const teamList = summaries.teams || [];
