@@ -1,3 +1,8 @@
 *.json
 *.xlsx
 !tracker/data.json
+!tracker/config.json
+!tracker/summaries.json
+!tracker/games-*.json
+!tracker/details/manifest.json
+!tracker/details/players-*.json

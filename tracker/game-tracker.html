@@ -7808,10 +7808,10 @@ async function doOpenPlayerDetail(key){
   playerDetailReturnTo = null;   // default: a plain open has nowhere special to return to
   showPanel('player-detail');
   renderPlayerDetail(key); // paint immediately with whatever's already in memory (goals, games, MVP etc. are all there)
-  // Timelines (goals-per-game chart, rolling best, League Context) may still be blank right after
-  // a precomputed-publish seed — see ensurePlayerTimelines(). Only the FIRST call on a fresh load
-  // actually fetches anything; every call after that resolves immediately.
-  await ensurePlayerTimelines();
+  // Timeline (goals-per-game chart, rolling best, League Context) may still be blank right after
+  // a precomputed-publish seed — see ensurePlayerTimeline(). Only the FIRST open of a given shard
+  // actually fetches anything; every subsequent player in that same shard resolves immediately.
+  await ensurePlayerTimeline(key);
   if(currentPlayerDetailKey === key) renderPlayerDetail(key); // re-render with timelines filled in — but only if still on this player's page
 }
 function playerLabelFor(key){
@@ -15605,20 +15605,35 @@ async function seedFromPrecomputedFiles(force){
     }
   }
 
-  let gamesRes, configRes;
+  // games is now published as one file PER YEAR (games-<year>.json) plus a small
+  // games-manifest.json listing which years exist — not one combined games.json — since a single
+  // file for a multi-year competition dataset eventually exceeds GitHub's 100MB per-file limit.
+  // Every year's file is fetched in parallel and concatenated back into one flat array; nothing
+  // downstream needs to know the data ever arrived in pieces.
+  let manifestRes, configRes;
   try{
-    [gamesRes, configRes] = await Promise.all([
-      fetch('games.json', { cache:'no-store' }),
+    [manifestRes, configRes] = await Promise.all([
+      fetch('games-manifest.json', { cache:'no-store' }),
       fetch('config.json', { cache:'no-store' })
     ]);
   }catch(e){ return false; }
-  if(!gamesRes || !gamesRes.ok) return false;
-  const rawGames = await parseJsonOffThread(await gamesRes.text());
+  if(!manifestRes || !manifestRes.ok) return false;
+  const gamesManifest = await parseJsonOffThread(await manifestRes.text());
   const config = (configRes && configRes.ok) ? await parseJsonOffThread(await configRes.text()) : {};
 
-  // publish.js already applies these exact filters/normalizations before writing games.json —
+  let rawGames;
+  try{
+    const yearResults = await Promise.all(
+      (gamesManifest.years || []).map(y => fetch(`games-${y}.json`, { cache:'no-store' }))
+    );
+    if(yearResults.some(r => !r.ok)) return false;
+    const yearArrays = await Promise.all(yearResults.map(async r => parseJsonOffThread(await r.text())));
+    rawGames = yearArrays.flat();
+  }catch(e){ return false; }
+
+  // publish.js already applies these exact filters/normalizations before writing games-<year>.json —
   // re-running them here is a cheap no-op today, and free forward-compatibility if a future
-  // publish.js version (or a manually-edited games.json) ever skips one.
+  // publish.js version (or a manually-edited file) ever skips one.
   games = stripJunkFixtures(normalizeGamePhases(deriveGameRatios(normalizeGameScores(Array.isArray(rawGames) ? rawGames : []))));
   initialGamesLoadDone = true;
   document.getElementById('startupLoadingBanner')?.classList.add('done');
@@ -15673,32 +15688,61 @@ async function seedFromPrecomputedFiles(force){
   return true;
 }
 
-// Fetched once (lazily) the first time a player detail page is opened, then merged into whichever
-// playerList is currently cached — including the placeholder one seedFromPrecomputedFiles() just
-// seeded, which deliberately ships with every timeline blank to keep summaries.json small. Once a
-// real (non-override) computeAggregates() call happens for any other reason (a filter change), it
+// Player timelines are published sharded across N files (details/players-*.json + a manifest
+// recording N) rather than one combined file — a single file for 17,000+ players' full career
+// timelines came out well over GitHub's 100MB per-file limit. shardHash() below is deliberately
+// identical to the one in publish.js, so both sides always agree on which shard a given player
+// key lives in. Fetched lazily per-shard the first time a player in that shard is opened, then
+// cached — most sessions only ever touch a handful of shards, not all of them.
+function shardHash(str){
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+let _detailShardManifest = null;
+let _detailShardManifestPromise = null;
+const _loadedDetailShards = new Set();
+const _detailShardPromises = new Map();
+async function ensureDetailShardManifest(){
+  if(_detailShardManifest) return _detailShardManifest;
+  if(_detailShardManifestPromise) return _detailShardManifestPromise;
+  _detailShardManifestPromise = (async () => {
+    try{
+      const res = await fetch('details/manifest.json', { cache:'no-store' });
+      if(res.ok) _detailShardManifest = await parseJsonOffThread(await res.text());
+    }catch(e){ console.error('Could not load details/manifest.json', e); }
+    if(!_detailShardManifest || !_detailShardManifest.numShards) _detailShardManifest = { numShards: 24 }; // matches publish.js's default if the manifest is ever missing
+    return _detailShardManifest;
+  })();
+  return _detailShardManifestPromise;
+}
+// Fetched lazily the first time a player detail page in a given shard is opened, then merged into
+// whichever playerList is currently cached — including the placeholder one seedFromPrecomputedFiles()
+// just seeded, which deliberately ships with every timeline blank to keep summaries.json small. Once
+// a real (non-override) computeAggregates() call happens for any other reason (a filter change), it
 // naturally recomputes full timelines from `games` directly and this becomes a no-op — the guard
 // below only ever fills in a timeline that's still empty.
-let _playerTimelinesLoaded = false;
-let _playerTimelinesPromise = null;
-async function ensurePlayerTimelines(){
-  if(_playerTimelinesLoaded) return;
-  if(_playerTimelinesPromise) return _playerTimelinesPromise;
-  _playerTimelinesPromise = (async () => {
+async function ensurePlayerTimeline(key){
+  const manifest = await ensureDetailShardManifest();
+  const shardIndex = shardHash(key) % manifest.numShards;
+  if(_loadedDetailShards.has(shardIndex)) return;
+  if(_detailShardPromises.has(shardIndex)) return _detailShardPromises.get(shardIndex);
+  const p = (async () => {
     try{
-      const res = await fetch('details/players.json', { cache:'no-store' });
+      const res = await fetch(`details/players-${shardIndex}.json`, { cache:'no-store' });
       if(!res.ok) return;
       const map = await parseJsonOffThread(await res.text());
       const { playerList } = computeAggregates();
-      playerList.forEach(p => {
-        if((!p.timeline || !p.timeline.length) && map[p.key]) p.timeline = map[p.key];
+      playerList.forEach(pl => {
+        if((!pl.timeline || !pl.timeline.length) && map[pl.key]) pl.timeline = map[pl.key];
       });
-      _playerTimelinesLoaded = true;
+      _loadedDetailShards.add(shardIndex);
     }catch(e){
-      console.error('Could not load details/players.json (player timelines)', e);
+      console.error(`Could not load details/players-${shardIndex}.json (player timelines)`, e);
     }
   })();
-  return _playerTimelinesPromise;
+  _detailShardPromises.set(shardIndex, p);
+  return p;
 }
 
 async function seedFromPublishedData(force){
