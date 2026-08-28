@@ -15623,11 +15623,22 @@ async function seedFromPrecomputedFiles(force){
 
   let rawGames;
   try{
+    // Fetching (network) stays parallel — that part's cheap and benefits from it. But PARSING each
+    // response is deliberately sequential, not Promise.all'd: when a Web Worker finishes parsing,
+    // handing the result back to the main thread still costs real main-thread time (reconstructing
+    // a large object graph from the worker's message) — firing that for 5 year-files all at once
+    // stacked multiple heavy "receive" bursts back to back with no chance for the page to stay
+    // responsive in between, which is very likely what was actually freezing the tab. Awaiting one
+    // at a time, with a yield after each, spreads that same total cost into smaller gaps instead.
     const yearResults = await Promise.all(
       (gamesManifest.years || []).map(y => fetch(`games-${y}.json`, { cache:'no-store' }))
     );
     if(yearResults.some(r => !r.ok)) return false;
-    const yearArrays = await Promise.all(yearResults.map(async r => parseJsonOffThread(await r.text())));
+    const yearArrays = [];
+    for(const r of yearResults){
+      yearArrays.push(await parseJsonOffThread(await r.text()));
+      await yieldToUI();
+    }
     rawGames = yearArrays.flat();
   }catch(e){ return false; }
 
