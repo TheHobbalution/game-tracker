@@ -4414,18 +4414,18 @@ function computeLapsedPlayersUncached(ageGroups, year, wantRank){
     const { trail, divisionsOf } = buildMovementContext(gamesList);
 
     const latestYear = gamesList.reduce((m,g)=>{ const y = getGameYear(g); return y && y > m ? y : m; }, 0);
-    const stillPlaying = new Set();
-    if(latestYear){
-      gamesList.forEach(g=>{
-        if(getGameYear(g) !== latestYear) return;
-        ['teamA','teamB'].forEach(side=>{
-          (g[side].players||[]).forEach(row=>{
-            const raw = (row.name||'').trim();
-            if(!isPlaceholderPlayerName(raw)) stillPlaying.add(raw.toLowerCase());
-          });
-        });
-      });
-    }
+    // BUG (fixed): used to build a separate stillPlaying Set from raw player-name strings
+    // (row.name.toLowerCase()), then check trail keys against it. But trail keys are id-
+    // disambiguated — two different real people sharing a name get split into e.g. "noah jones"
+    // and "noah jones — U12" so their stats never mix. A name-only stillPlaying set can't see that
+    // split: it only ever stores the bare name, so it can never match a suffixed key, meaning
+    // anyone whose trail key got disambiguated would show as lapsed even in years they genuinely
+    // played (confirmed on real data — a real Noah Jones playing right now was wrongly flagged
+    // lapsed because a DIFFERENT Noah Jones owned the unsuffixed "noah jones" key). The trail
+    // itself already knows exactly which years each correctly-disambiguated identity played, so
+    // checking trail[nm][latestYear] directly is both simpler and actually correct — no separate
+    // set needed at all.
+
 
     // Checks one season entry against the grade/division scope; returns the parts needed for a
     // result row, or null if this season doesn't qualify.
@@ -4448,7 +4448,7 @@ function computeLapsedPlayersUncached(ageGroups, year, wantRank){
     const allYears = year === 'ALL';
     const results = [];
     Object.keys(trail).forEach(nm=>{
-      if(stillPlaying.has(nm)) return;   // showed up somewhere this latest year — never lapsed
+      if(latestYear && trail[nm][latestYear]) return;   // this exact (correctly disambiguated) identity showed up in the latest year — never lapsed
 
       let e, matchedYear, q;
       if(allYears){
@@ -4479,6 +4479,7 @@ function computeLapsedPlayersUncached(ageGroups, year, wantRank){
         // playerList entry by the real id this trail bucket resolved under, falling back to the
         // reconstructed string only when no id is available.
         playerKey: (e.playhqId && playerByPlayhqId.has(e.playhqId)) ? playerByPlayhqId.get(e.playhqId).key : resolvePlayerKey([...e.clubs][0] + '||' + nm),
+        playhqId: e.playhqId || null,
         grade: q.matchedGrades.sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b)).join('/'),
         divisionRank: q.divs.length ? q.divs[0].rank : null,
         divisionLabel: q.divs.length ? movementDivisionLabel(q.divs, false) : 'Ungraded',
@@ -4848,7 +4849,7 @@ function renderLapsedPlayers(wrap){
         <option value="links" ${f.mode==='links'?'selected':''}>Check player links</option>
       </select>
     </div>
-    <div class="warn-box" style="margin:0 0 14px;">Checked by name only, ignoring club — the question here is just "are they playing anywhere at all", not which club they're at. A same-named person elsewhere in the competition could cause a genuine lapsed player to be missed, but can't cause a false one to appear — safe for a recruiting list, since the only failure direction is under-counting, never a false lead.</div>
+    <div class="warn-box" style="margin:0 0 14px;">The question here is "are they playing anywhere at all", not which club they're at — a player who's moved clubs still counts as still-playing. Two different real people who happen to share a name are correctly kept separate, using the same identity matching (PlayHQ id where available) as the rest of the app.</div>
     <p class="hint" style="margin:0 0 12px;">${f.lapsedYear==='ALL'
       ? `Everyone who has stopped playing altogether — each shown against the last season they actually played that division, not one fixed year.`
       : `Played in the division below during that season, but hasn't shown up in a single game since.`}${latestYear?` Checked against ${latestYear}, the most recent season on file.`:''}${spansMultipleGrades?' Spanning several age groups: a division number means the top division of WHICHEVER grade that player was in, not necessarily the same competition — the Grade column shows which.':''}</p>
@@ -4872,7 +4873,7 @@ function renderLapsedPlayers(wrap){
       results.length===0 ? `<div class="empty">${f.lapsedYear==='ALL' ? 'Nobody who ever played that division has stopped playing — everyone\'s still showing up somewhere.' : 'Everyone who played that division that season is still showing up somewhere this year.'}</div>` : `
       <p class="hint" style="margin:0 0 10px;">${results.length} player${results.length===1?'':'s'} found.</p>
       <table><thead><tr>${thHtml}</tr></thead>
-      <tbody>${sortable.map(r=>`<tr><td><span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span></td>${spansMultipleGrades?`<td>${r.grade}</td>`:''}<td>${r.club}</td><td>${r.teamsLabel}</td><td>${r.divisionLabel}</td>${f.lapsedYear==='ALL'?`<td class="num">${r.lastYear}</td>`:''}<td class="num">${r.games}</td><td class="num">${r.goals}</td><td class="num">${r.bestCount}</td></tr>`).join('')}</tbody></table>`
+      <tbody>${sortable.map(r=>`<tr><td><span class="player-link" data-key="${r.playerKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>${r.playhqId ? ` <a href="https://www.playhq.com/public/profile/${encodeURIComponent(r.playhqId)}?tenant=afl" target="_blank" rel="noopener noreferrer" title="Open PlayHQ profile" style="color:var(--muted);text-decoration:none;">↗</a>` : ''}</td>${spansMultipleGrades?`<td>${r.grade}</td>`:''}<td>${r.club}</td><td>${r.teamsLabel}</td><td>${r.divisionLabel}</td>${f.lapsedYear==='ALL'?`<td class="num">${r.lastYear}</td>`:''}<td class="num">${r.games}</td><td class="num">${r.goals}</td><td class="num">${r.bestCount}</td></tr>`).join('')}</tbody></table>`
     )}
   `;
   document.getElementById('backToPlayersFromMovement').onclick = backToPlayersFromMovement;
