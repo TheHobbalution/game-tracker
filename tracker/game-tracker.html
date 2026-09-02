@@ -848,6 +848,12 @@ let initialGamesLoadDone = false;
 // tells init() to skip the otherwise-redundant loadGames() re-read that would follow (see the
 // detailed comment at the setting site in seedFromPublishedData for the bug this prevents).
 let justSeededGamesInMemory = false;
+// Set true only by seedFromPrecomputedFiles() (never the legacy seedFromPublishedData() path) —
+// publish.js now runs the same alias-audit/auto-merge pass itself before publishing (see
+// runComputeAggregates in publish.js), so config.json's playerAliases already reflect it. Lets
+// init() skip re-running that pass on every single page load — it's real work (confirmed several
+// seconds of the startup freeze at this dataset's size) that would just find nothing to do.
+let precomputedAliasesAlreadyClean = false;
 let fixtures = [];
 let byes = []; // team byes from completed rounds — { team, roundLabel, dateTime, year, phase }
 let dismissedMatchGroups = new Set(); // possible-duplicate player groups the user has dismissed
@@ -5387,15 +5393,41 @@ function splitMergeSeparator(s){
 
 // Matches just against the known club list + nicknames — no override lookup, no merge
 // detection. Used to test whether a fragment (e.g. one half of a possible merge) is a real club.
+// PERFORMANCE FIX (2026-08): re-normalized every club/nickname's words from scratch on every call
+// (see getAllClubsForTeam's cache above for the full story). Keyed off _aggVersion — the same
+// invalidation signal every other derived-data cache in this file already uses — rather than
+// object/array identity, since knownClubs/clubNicknames are edited via a mix of reassignment and
+// in-place mutation (push/delete/bracket-assignment) across a few different call sites; relying on
+// "did the reference change" would silently miss the in-place ones. saveClubData() (every club-
+// editing path's save function) already calls invalidateAggregateCache() before writing, so this
+// can't go stale in a way nothing else already guards against.
+let _clubWordsCache = null, _clubWordsCacheVersion = -1;
+function getClubWordsCache(){
+  if(_clubWordsCacheVersion === _aggVersion) return _clubWordsCache;
+  _clubWordsCache = new Map();
+  knownClubs.forEach(club => _clubWordsCache.set(club, normalizeWords(club)));
+  _clubWordsCacheVersion = _aggVersion;
+  return _clubWordsCache;
+}
+let _nickWordsCache = null, _nickWordsCacheVersion = -1;
+function getNickWordsCache(){
+  if(_nickWordsCacheVersion === _aggVersion) return _nickWordsCache;
+  _nickWordsCache = new Map();
+  Object.keys(clubNicknames).forEach(nick => _nickWordsCache.set(nick, normalizeWords(nick)));
+  _nickWordsCacheVersion = _aggVersion;
+  return _nickWordsCache;
+}
 function matchClubPlain(text){
   const stripped = stripAgeToken(text);
   if(!stripped) return { matched:false, club: text };
   const teamWords = normalizeWords(stripped);
+  const teamWordSet = new Set(teamWords);
   let best = null, bestLen = 0;
+  const clubWords = getClubWordsCache();
   for(const club of knownClubs){
-    const clubWords = normalizeWords(club);
-    if(clubWords.length > bestLen && clubWords.every(w => teamWords.includes(w))){
-      best = club; bestLen = clubWords.length;
+    const cw = clubWords.get(club);
+    if(cw.length > bestLen && cw.every(w => teamWordSet.has(w))){
+      best = club; bestLen = cw.length;
     }
   }
   if(best) return { matched:true, club:best };
@@ -5405,10 +5437,11 @@ function matchClubPlain(text){
   // entered through Manage clubs ("geelong west hannan"), which is exactly the case that needs it:
   // a side named after its coach shares no distinctive single word with its club.
   let nickBest = null, nickLen = 0;
+  const nickWords = getNickWordsCache();
   for(const nick of Object.keys(clubNicknames)){
-    const nickWords = normalizeWords(nick);
-    if(nickWords.length && nickWords.length > nickLen && nickWords.every(w => teamWords.includes(w))){
-      nickBest = clubNicknames[nick]; nickLen = nickWords.length;
+    const nw = nickWords.get(nick);
+    if(nw.length && nw.length > nickLen && nw.every(w => teamWordSet.has(w))){
+      nickBest = clubNicknames[nick]; nickLen = nw.length;
     }
   }
   if(nickBest) return { matched:true, club: nickBest };
@@ -5442,7 +5475,24 @@ function isMergedTeam(teamName, year){
 // Every club a team belongs to — for a genuine merge this is both clubs (e.g.
 // "Thomson/East Geelong" belongs to both Thomson's and East Geelong's team lists),
 // for a normal team it's just the one.
+// PERFORMANCE FIX (2026-08): getAllClubsForTeam() had no caching at all — every call re-scanned
+// all ~40 known clubs, re-normalizing each one's words from scratch, even though the exact same
+// team name (e.g. "Newcomb U16") is looked up again on every one of its ~18 games a season. At the
+// competition's current size (15,000+ games) this made computeAggregates() take 100+ seconds —
+// confirmed by direct timing — enough to freeze the page on load. Caching by exact team name,
+// invalidated on _aggVersion (the same signal every other derived-data cache in this file already
+// keys off, so this can't go stale in a way nothing else already guards against), cuts the repeat
+// work to a single Map lookup for every call after the first for that name.
+let _clubsForTeamCache = new Map();
+let _clubsForTeamCacheVersion = -1;
 function getAllClubsForTeam(teamName){
+  if(_clubsForTeamCacheVersion !== _aggVersion){ _clubsForTeamCache = new Map(); _clubsForTeamCacheVersion = _aggVersion; }
+  if(_clubsForTeamCache.has(teamName)) return _clubsForTeamCache.get(teamName);
+  const result = getAllClubsForTeamUncached(teamName);
+  _clubsForTeamCache.set(teamName, result);
+  return result;
+}
+function getAllClubsForTeamUncached(teamName){
   if(teamClubOverrides[teamName]) return [teamClubOverrides[teamName]];
   const stripped = stripAgeToken(teamName||'');
   if(isMergedTeam(teamName)){
@@ -6291,7 +6341,7 @@ function renderUnmatchedClubReview(unmatched, onResolved){
       let chosen = sel.value;
       if(chosen === '__new__'){
         chosen = newInput.value.trim();
-        if(chosen && !knownClubs.includes(chosen)) knownClubs.push(chosen);
+        if(chosen && !knownClubs.includes(chosen)) knownClubs = [...knownClubs, chosen]; // reassign, not push — matchClubPlain's word cache keys off array identity
       }
       if(chosen) teamClubOverrides[unmatched[i].teamName] = chosen;
     }
@@ -11718,7 +11768,7 @@ function renderManageClubs(){
     const input = document.getElementById('newClubName');
     const name = input.value.trim();
     if(name && !knownClubs.includes(name)){
-      knownClubs.push(name);
+      knownClubs = [...knownClubs, name]; // reassign, not push — matchClubPlain's word cache keys off array identity
       await saveClubData();
       showToast(`Added "${name}"`);
       renderAll();
@@ -11731,7 +11781,7 @@ function renderManageClubs(){
     const word = wordInput.value.trim().toLowerCase();
     const club = clubSelect.value;
     if(word && club){
-      clubNicknames[word] = club;
+      clubNicknames = { ...clubNicknames, [word]: club }; // reassign, not mutate in place — matchClubPlain's word cache keys off object identity
       await saveClubData();
       showToast(`Added nickname "${word}" → ${club}`);
       renderAll();
@@ -15697,6 +15747,7 @@ async function seedFromPrecomputedFiles(force){
     if(sig) _aggCache.set(sig, { playerList, teamList, idToKey });
   }catch(e){ console.error('Could not pre-warm aggregate cache from summaries.json', e); }
 
+  precomputedAliasesAlreadyClean = true;
   return true;
 }
 
@@ -16015,7 +16066,7 @@ startHomeSnapshotBaseline();
   document.getElementById('startupLoadingBanner')?.classList.add('done');
   try{ if(ensureUniqueGameIds()) await saveGames(); }
   catch(e){ console.error('Startup step failed: id backfill', e); }
-  try{ if(applyConfirmedMerges()) await savePlayerAliases(); }
+  try{ if(!precomputedAliasesAlreadyClean && applyConfirmedMerges()) await savePlayerAliases(); }
   catch(e){ console.error('Startup step failed: confirmed merges', e); }
   // Retroactive cleanup: clears any fixture already sitting in Upcoming that a completed game has
   // since fulfilled — covers everything saved before pruneFixturesForGames existed, so updating to
