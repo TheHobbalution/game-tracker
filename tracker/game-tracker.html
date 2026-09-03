@@ -598,6 +598,7 @@
       <div class="tool-tile tool-tile-blue" id="toolTileTeamsCompare"><div class="tool-tile-title">Compare teams</div><div class="tool-tile-desc">Head-to-head record and squad overlap for two teams.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileTeamsSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Season trends, most improved all-time, and a club-wide leaderboard.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileTeamsHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileTeamsSuggestNextSeason"><div class="tool-tile-title">Suggest next season</div><div class="tool-tile-desc">Projected club strength one grade up, for early division planning.</div></div>
     </div>
     <div class="tools-section-label">Data &amp; admin</div>
     <div class="tools-grid tools-grid-muted">
@@ -631,6 +632,7 @@
       <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileAbsenceLeaderboard"><div class="tool-tile-title">Missing games</div><div class="tool-tile-desc">Which teams have the most roster absence this season.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileSuggestNextSeason"><div class="tool-tile-title">Suggest next season</div><div class="tool-tile-desc">Projected club strength one grade up, for early division planning.</div></div>
     </div>
     <div class="tools-section-label">Games &amp; fixtures</div>
     <div class="tools-grid">
@@ -670,6 +672,9 @@
   <!-- SUGGEST DIVISIONS -->
   <section class="panel" id="panel-suggest-divisions">
     <div id="suggestDivisionsWrap"></div>
+  </section>
+  <section class="panel" id="panel-suggest-next-season">
+    <div id="suggestNextSeasonWrap"></div>
   </section>
 
   <!-- LADDER -->
@@ -3418,6 +3423,124 @@ function renderPowerRankings(){
   wrap.querySelectorAll('[data-team-key]').forEach(el=>{
     el.onclick = ()=> openTeamDetail(el.dataset.teamKey);
   });
+}
+
+// ---------- Suggest next season's divisions (a club's likely U16 team next year, etc.) ----------
+// Deliberately CLUB-level, not per-player: the app only knows which age-group TEAM a player
+// appeared for, never their actual birthdate, and most junior grades here span two birth-years —
+// some of this year's U16 players will still be U16-eligible next year, others age out to U18,
+// and there's no way to tell which from a team name alone. So rather than guess who ages out, this
+// blends CLUB-level results: this year's team in the target grade (heavily weighted — it's the
+// more direct evidence of what that club fields at this level) with this year's team one grade
+// below (lightly weighted — most of that squad will move up, but it's a weaker signal since
+// they've never played at the target level yet). Assumes players stay at their current club.
+// Elo (computeEloRatings) is the natural shared scale here since it's already normalized across
+// divisions — a Div 3 team that's clearly stronger than most Div 2 teams already rates accordingly.
+const NEXT_SEASON_CURRENT_WEIGHT = 0.7, NEXT_SEASON_FEEDER_WEIGHT = 0.3;
+function feederGradeFor(grade){
+  const rank = GRADE_DISPLAY_ORDER[grade];
+  if(rank == null) return null;
+  return Object.keys(GRADE_DISPLAY_ORDER).find(g => GRADE_DISPLAY_ORDER[g] === rank + 1) || null;
+}
+function computeNextSeasonDivisionProjection(targetGrade){
+  return withAllDataFilters(()=>{
+    const feederGrade = feederGradeFor(targetGrade);
+    const latestYear = games.reduce((m,g)=>{ const y=getGameYear(g); return y && y>m ? y : m; }, 0);
+    const elo = computeEloRatings();
+    const { teamList } = computeAggregates();
+
+    // For a grade+year, the strongest-evidence team per club — if a club somehow has more than one
+    // team in the same grade the same year, the one with more games played is the better signal.
+    function bestTeamPerClub(grade){
+      const out = {};
+      teamList.forEach(t=>{
+        if(t.ageGroup !== grade || t.year !== latestYear) return;
+        const club = getClub(t.name);
+        if(!club) return;
+        const eloVal = elo[t.name + '__' + latestYear];
+        if(eloVal == null) return;
+        if(!out[club] || t.gamesPlayed > out[club].gamesPlayed){
+          out[club] = { teamName: t.name, elo: eloVal, gamesPlayed: t.gamesPlayed, wins: t.wins, losses: t.losses, draws: t.draws };
+        }
+      });
+      return out;
+    }
+
+    const currentByClub = bestTeamPerClub(targetGrade);
+    const feederByClub = feederGrade ? bestTeamPerClub(feederGrade) : {};
+    const clubs = new Set([...Object.keys(currentByClub), ...Object.keys(feederByClub)]);
+
+    const rows = [...clubs].map(club=>{
+      const cur = currentByClub[club] || null;
+      const feed = feederByClub[club] || null;
+      const curElo = cur ? cur.elo : 1500;
+      const feedElo = feed ? feed.elo : 1500;
+      let blended, basis;
+      if(cur && feed){ blended = curElo*NEXT_SEASON_CURRENT_WEIGHT + feedElo*NEXT_SEASON_FEEDER_WEIGHT; basis = 'both'; }
+      else if(cur){ blended = curElo; basis = 'current-only'; }
+      else if(feed){ blended = feedElo; basis = 'feeder-only'; }
+      else { blended = 1500; basis = 'neither'; }
+      return { club, current: cur, feeder: feed, blended: Math.round(blended), basis };
+    });
+    rows.sort((a,b)=> b.blended - a.blended);
+    return { targetGrade, feederGrade, latestYear, projectedYear: latestYear ? latestYear+1 : null, rows };
+  });
+}
+
+function doOpenSuggestNextSeason(){
+  showPanel('suggest-next-season');
+  renderSuggestNextSeason();
+}
+function openSuggestNextSeason(){
+  doOpenSuggestNextSeason();
+  navPush('suggest-next-season', 'Suggest Next Season', 'tools/suggest-next-season', doOpenSuggestNextSeason);
+}
+function backFromSuggestNextSeason(){ navBack(); }
+
+let nextSeasonTargetGrade = null;
+function renderSuggestNextSeason(){
+  const wrap = document.getElementById('suggestNextSeasonWrap');
+  const { teamList } = computeAggregates();
+  // Only grades with a real grade one rank below them make sense as a target — U9 has nothing
+  // feeding it, and Seniors/Reserves aren't age-restricted the same way U18-into-Seniors is (a club
+  // might field an 18-year-old straight into Seniors OR keep them in an U18 top-age year depending
+  // on the league's own rules, which this app has no way to know) — so those two are left out too.
+  const eligibleGrades = [...new Set(teamList.map(t=>t.ageGroup))]
+    .filter(g => feederGradeFor(g) && g !== 'Seniors' && g !== 'Reserves')
+    .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  if(nextSeasonTargetGrade == null || !eligibleGrades.includes(nextSeasonTargetGrade)){
+    nextSeasonTargetGrade = eligibleGrades.includes('U16') ? 'U16' : (eligibleGrades[0] || null);
+  }
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backFromSuggestNextSeason">&larr; Back to teams</span>
+    <h2 style="font-size:20px;">Suggest next season's divisions</h2>
+    <div class="warn-box" style="margin:0 0 14px;">This can't know anyone's actual age — only which team they played for. Most grades here cover two birth-years, so among this year's roster some players stay eligible next year and others age up; there's no way to tell which from a team name alone. So this works at the CLUB level instead: blending this club's team in the target grade this year (weighted more) with this club's team one grade below (weighted less, since that group hasn't played at this level yet) — assuming everyone stays at their current club. A starting point for planning, not a final answer.</div>
+    ${eligibleGrades.length===0 ? '<div class="empty">No age groups with a grade below them yet.</div>' : `
+    <div class="controls-row" style="margin-bottom:14px;">
+      <select id="nextSeasonGrade">${eligibleGrades.map(g=>`<option value="${g}" ${g===nextSeasonTargetGrade?'selected':''}>${g}</option>`).join('')}</select>
+    </div>
+    <div id="suggestNextSeasonResult"></div>`}
+  `;
+  document.getElementById('backFromSuggestNextSeason').onclick = backFromSuggestNextSeason;
+  const gradeSel = document.getElementById('nextSeasonGrade');
+  if(gradeSel) gradeSel.onchange = e=>{ nextSeasonTargetGrade = e.target.value; renderSuggestNextSeason(); };
+  const resultEl = document.getElementById('suggestNextSeasonResult');
+  if(!resultEl || !nextSeasonTargetGrade) return;
+
+  const { feederGrade, latestYear, projectedYear, rows } = computeNextSeasonDivisionProjection(nextSeasonTargetGrade);
+  if(!latestYear){
+    resultEl.innerHTML = `<div class="empty">No games on file yet.</div>`;
+    return;
+  }
+  const teamCell = (t, grade) => t
+    ? `${t.teamName} <span class="mono" style="color:var(--muted);">(${t.wins}-${t.losses}-${t.draws}, Elo ${Math.round(t.elo)})</span>`
+    : `<span class="hint" style="margin:0;">No ${grade} team in ${latestYear}</span>`;
+  resultEl.innerHTML = `
+    <p class="hint" style="margin:0 0 10px;">Projecting each club's likely ${nextSeasonTargetGrade} strength for ${projectedYear}, from their ${latestYear} ${nextSeasonTargetGrade} team${feederGrade ? ` and ${latestYear} ${feederGrade} team` : ''}. Ranked highest projected strength first — not an official division assignment.</p>
+    <table><thead><tr><th>Club</th><th>${latestYear} ${nextSeasonTargetGrade} (this year)</th>${feederGrade?`<th>${latestYear} ${feederGrade} (coming up)</th>`:''}<th class="num">Projected rating</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr><td>${r.club}</td><td>${teamCell(r.current, nextSeasonTargetGrade)}</td>${feederGrade?`<td>${teamCell(r.feeder, feederGrade)}</td>`:''}<td class="num mono">${r.blended}</td></tr>`).join('')}</tbody></table>
+  `;
 }
 
 function doOpenSuggestDivisions(){
@@ -7612,6 +7735,9 @@ function refreshCurrentDetailView(){
   // simply never added here.
   if(document.getElementById('panel-suggest-divisions').classList.contains('active')){
     renderSuggestDivisions();
+  }
+  if(document.getElementById('panel-suggest-next-season').classList.contains('active')){
+    renderSuggestNextSeason();
   }
   if(document.getElementById('panel-manage-clubs').classList.contains('active')){
     renderManageClubs();
@@ -15172,6 +15298,7 @@ function navResolveHash(){
         'home-grown': ()=>openHomeGrown(), 'player-movement': ()=>openPlayerMovement(),
         'merge-players': ()=>openMergePlayers(), 'manage-clubs': ()=>openManageClubs(),
         'suggest-divisions': ()=>openSuggestDivisions(), 'top-players': ()=>openTopPlayers(),
+        'suggest-next-season': ()=>openSuggestNextSeason(),
         'prediction-accuracy': ()=>openPredictionAccuracy()
       };
       if(openers[type]){ seedRoot('tools'); openers[type](); return; }
@@ -15259,7 +15386,7 @@ const PANEL_OWNER_TAB = {
   'add':'games', 'team-detail':'teams', 'player-detail':'players', 'game-detail':'games', 'fixture-preview':'games',
   'power-rankings':'tools', 'ladder':'tools', 'compare-players':'tools', 'compare-teams':'tools', 'squad-progressions':'tools',
   'home-grown':'tools', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools', 'find-players':'players',
-  'suggest-divisions':'tools', 'top-players':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'tools', 'quarter-comebacks':'tools'
+  'suggest-divisions':'tools', 'top-players': 'tools', 'suggest-next-season':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'tools', 'quarter-comebacks':'tools'
 };
 function showPanel(panelId){
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
@@ -15490,6 +15617,7 @@ document.getElementById('toolTilePlayersTop').onclick = openTopPlayers;
 document.getElementById('toolTilePlayersShowAll').onclick = openFindPlayers;
 document.getElementById('toolTileTeamsCompare').onclick = openCompareTeams;
 document.getElementById('toolTileTeamsSuggestDivisions').onclick = openSuggestDivisions;
+document.getElementById('toolTileTeamsSuggestNextSeason').onclick = openSuggestNextSeason;
 document.getElementById('toolTileTeamsPowerRankings').onclick = openPowerRankings;
 document.getElementById('toolTileTeamsLadder').onclick = ()=> openLadder();
 document.getElementById('toolTileGamesLadder').onclick = ()=> openLadder();
@@ -15523,6 +15651,7 @@ document.getElementById('toolTileJuniorPathway').onclick = ()=> openJuniorPathwa
 document.getElementById('toolTileQuarterComebacks').onclick = ()=> openQuarterComebacks();
 document.getElementById('toolTilePredictionAccuracy').onclick = ()=> openPredictionAccuracy();
 document.getElementById('toolTileSuggestDivisions').onclick = ()=> openSuggestDivisions();
+document.getElementById('toolTileSuggestNextSeason').onclick = ()=> openSuggestNextSeason();
 document.getElementById('toolTileManageClubs').onclick = ()=> openManageClubs();
 document.getElementById('toolTileRefreshPublishedData').onclick = ()=> refreshFromPublishedData();
 document.getElementById('toolTileResetPublishedData').onclick = ()=> resetFromPublishedData();
