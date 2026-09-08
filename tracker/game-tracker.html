@@ -629,6 +629,7 @@
       <div class="tool-tile tool-tile-blue" id="toolTileSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Season trends, most improved all-time, and a club-wide leaderboard.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileClubPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileStabilityImprovement"><div class="tool-tile-title">Stability vs improvement</div><div class="tool-tile-desc">Do squads that keep their roster together actually improve more?</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileCohortTrajectory"><div class="tool-tile-title">Cohort trajectory</div><div class="tool-tile-desc">A team's real split-and-reunite cycle as players age up, plotted by actual ladder rank.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileAbsenceLeaderboard"><div class="tool-tile-title">Missing games</div><div class="tool-tile-desc">Which teams have the most roster absence this season.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
@@ -690,6 +691,11 @@
   <!-- SQUAD PROGRESSIONS -->
   <section class="panel" id="panel-squad-progressions">
     <div id="squadProgressionsWrap"></div>
+  </section>
+
+  <!-- COHORT TRAJECTORY -->
+  <section class="panel" id="panel-cohort-trajectory">
+    <div id="cohortTrajectoryWrap"></div>
   </section>
 
   <!-- HOME GROWN -->
@@ -1188,6 +1194,17 @@ function isJunkTestFixture(g){
   const re = /^AFL\s+BARWON\s+TEST\b/i;
   return !!(g && g.teamA && g.teamB && (re.test(g.teamA.name||'') || re.test(g.teamB.name||'')));
 }
+// Finals-bracket placeholder rows: "Winner Game N" / "Loser Game N" team names, used by the
+// scraper's source before the actual qualifying team was determined. Confirmed on real data: 44
+// such rows, all with round/competition unset (never a genuine scheduled fixture) — one had
+// slipped into a real ladder ranking as if it were an actual team (rank 7 in a division that
+// should only have real clubs). These aren't a team at all, so they need to be excluded the same
+// way test fixtures and out-of-scope competitions are, not left for every downstream ranking
+// function to individually guard against.
+function isPlaceholderBracketSlot(g){
+  const re = /^(Winner|Loser)\s+Game\s+\d+$/i;
+  return !!(g && g.teamA && g.teamB && (re.test((g.teamA.name||'').trim()) || re.test((g.teamB.name||'').trim())));
+}
 // User's call (2026-08-25): All Abilities / Kardinia Park All-Abilities and Unders Transition
 // Comp games are out of scope for this tracker — don't want or need that data at all. Matches
 // every variant seen so far: "AFL Barwon All Abilities...", "Kardinia Park All-Abilities...",
@@ -1199,9 +1216,30 @@ function isJunkTestFixture(g){
 function isExcludedCompetition(g){
   return !!(g && g.competitionRaw && /all.?abilities|transition comp/i.test(g.competitionRaw));
 }
+// A merged team ("Club A / Club B ...") occasionally gets scraped under BOTH word orders across
+// different rounds of the same season — confirmed on real data as exactly one such pair across
+// the whole dataset (only 9 merge-style names exist in total, so this was checked by hand rather
+// than guessed): "Newcomb / Queenscliff Power Coutas U16" and "Queenscliff / Newcomb Power Coutas
+// U16" are the same real team, but the former only ever appears in incomplete Grading-round
+// fixtures while the latter carries the full graded season. Left unmerged, every roster-tracing
+// feature (Squad progressions, Suggest Next Season, cohort history) sees two different teams and
+// silently prefers whichever has more incidental player-key overlap — which is exactly backwards
+// when the smaller stub coincidentally overlaps more. Canonicalizing the name here, at the single
+// choke point every game passes through, means no downstream feature has to know this happened.
+const MERGE_TEAM_NAME_ALIASES = {
+  'Newcomb / Queenscliff Power Coutas U16': 'Queenscliff / Newcomb Power Coutas U16',
+};
+function canonicalizeMergeTeamName(g){
+  if(!g) return;
+  ['teamA','teamB'].forEach(side=>{
+    const s = g[side];
+    if(s && s.name && MERGE_TEAM_NAME_ALIASES[s.name]) s.name = MERGE_TEAM_NAME_ALIASES[s.name];
+  });
+}
 function stripJunkFixtures(list){
   if(!Array.isArray(list)) return list;
-  return list.filter(g=> !isJunkTestFixture(g) && !isExcludedCompetition(g));
+  list.forEach(canonicalizeMergeTeamName);
+  return list.filter(g=> !isJunkTestFixture(g) && !isExcludedCompetition(g) && !isPlaceholderBracketSlot(g));
 }
 
 // BUG (fixed): the PlayHQ scraper's export format changed at some point to write each side's
@@ -3442,49 +3480,834 @@ function feederGradeFor(grade){
   if(rank == null) return null;
   return Object.keys(GRADE_DISPLAY_ORDER).find(g => GRADE_DISPLAY_ORDER[g] === rank + 1) || null;
 }
+// PLAYER-KEY used throughout this whole section: playhqId where available, else a lowercased-name
+// fallback. Deliberately simpler than the app's full alias-resolution system (resolvePlayerKey) —
+// good enough for tracking one player's year-to-year grade history, which is all this needs.
+function ageRosterKey(playerRow){
+  const raw = (playerRow.name||'').trim();
+  return playerRow.playhqId || (raw ? 'name:' + raw.toLowerCase() : null);
+}
+
+// Per-player, per-year: which real (non-merged) club they played for, and how many games — used to
+// recover a merged team's roster back into its two real clubs. Only NON-merged appearances count
+// toward this history; a merged-team appearance can't tell you anything new about which of ITS OWN
+// two clubs a player belongs to, so it would just be circular to include one here.
+let _playerYearClubCache = null, _playerYearClubCacheVersion = -1;
+function getPlayerYearClubGames(){
+  if(_playerYearClubCacheVersion === _aggVersion) return _playerYearClubCache;
+  const out = {};
+  games.forEach(g => {
+    const year = getGameYear(g);
+    if(!year) return;
+    ['teamA','teamB'].forEach(side => {
+      const clubs = getAllClubsForTeam(g[side].name);
+      if(clubs.length !== 1 || !clubs[0]) return;
+      const club = clubs[0];
+      (g[side].players||[]).forEach(p => {
+        const key = ageRosterKey(p);
+        if(!key) return;
+        out[key] = out[key] || {};
+        out[key][year] = out[key][year] || {};
+        out[key][year][club] = (out[key][year][club]||0) + 1;
+      });
+    });
+  });
+  _playerYearClubCache = out;
+  _playerYearClubCacheVersion = _aggVersion;
+  return out;
+}
+// The most recent club a player is actually KNOWN to have played for (from a non-merged team),
+// searching backward from the year before `year` — most players on a merged team's roster played
+// for one of its two real clubs the year before, which is what lets most of a merge's roster be
+// correctly split back to its real club rather than left out entirely.
+function mostRecentKnownClub(key, year){
+  const byYear = getPlayerYearClubGames()[key];
+  if(!byYear) return null;
+  const years = Object.keys(byYear).map(Number).filter(y => y < year).sort((a,b) => b-a);
+  if(!years.length) return null;
+  return Object.entries(byYear[years[0]]).sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+// Per-player, per-year: which grade they played the most games in that year. A small number of
+// players appear in two grades the same year — mostly one grade plus a "plays up" game or two — so
+// majority-games decides their real grade for progression-tracking, not just whichever grade
+// happened to be seen first.
+let _playerYearGradeCache = null, _playerYearGradeCacheVersion = -1;
+function getPlayerYearGradeGames(){
+  if(_playerYearGradeCacheVersion === _aggVersion) return _playerYearGradeCache;
+  const out = {};
+  games.forEach(g => {
+    const year = getGameYear(g);
+    if(!year) return;
+    ['teamA','teamB'].forEach(side => {
+      const grade = getAgeGroupLabel(g[side].name);
+      if(!isJuniorGrade(grade)) return;
+      (g[side].players||[]).forEach(p => {
+        const key = ageRosterKey(p);
+        if(!key) return;
+        out[key] = out[key] || {};
+        out[key][year] = out[key][year] || {};
+        out[key][year][grade] = (out[key][year][grade]||0) + 1;
+      });
+    });
+  });
+  _playerYearGradeCache = out;
+  _playerYearGradeCacheVersion = _aggVersion;
+  return out;
+}
+function primaryGradeForPlayerYear(key, year){
+  const forYear = getPlayerYearGradeGames()[key] && getPlayerYearGradeGames()[key][year];
+  if(!forYear) return null;
+  return Object.entries(forYear).sort((a,b)=>b[1]-a[1])[0][0];
+}
+// How lopsided that majority was, as a fraction of the player's total games that year (1.0 = every
+// game was in the same grade; 0.5-ish = an almost even split between two grades). A close split is
+// a real weak point in "majority decides the year's grade" — confirmed on a real case where a
+// player's 58/42 split between two grades one year got treated as a clean, confident year in the
+// majority grade, when it was really closer to a coin flip.
+function primaryGradeConfidence(key, year){
+  const forYear = getPlayerYearGradeGames()[key] && getPlayerYearGradeGames()[key][year];
+  if(!forYear) return null;
+  const values = Object.values(forYear);
+  const total = values.reduce((a,b)=>a+b, 0);
+  return total > 0 ? Math.max(...values) / total : null;
+}
+// A close split (below this) isn't treated as a confident year in that grade for uncertainty
+// purposes — the classification still uses the plain majority (has to pick something), but gets
+// flagged as a guess rather than a known fact.
+const PRIMARY_GRADE_CONFIDENCE_THRESHOLD = 0.65;
+function consecutiveYearsInGrade(key, year, grade){
+  let count = 0, y = year;
+  while(primaryGradeForPlayerYear(key, y) === grade){ count++; y--; }
+  return count;
+}
+// true = TOP-age in `grade` during `year` (their 2nd/4th/... consecutive year there — ages UP next
+// year); false = BOTTOM-age (stays in the same grade next year, as top-age then); null if they
+// didn't primarily play this grade that year. A brand-new player with no prior history counts as 1
+// consecutive year (odd = bottom-age) — the same fallback rule used throughout this feature.
+function isTopAgeInGrade(key, year, grade){
+  if(primaryGradeForPlayerYear(key, year) !== grade) return null;
+  return consecutiveYearsInGrade(key, year, grade) % 2 === 0;
+}
+// True when this player's bottom/top-age classification for `year` is a genuine guess, not a known
+// fact — either because `year` is the very first season this player has ANY record in ANY grade
+// (a real first-ever registrant could actually be entering at either point of the two-year cycle,
+// and there's no way to tell from a blank history), or because any year counted toward their
+// current consecutive-years streak was itself a close, low-confidence split between two grades
+// (majority had to pick something, but a near-even split isn't a confident read on which grade that
+// season really was for them). A player with a clean, dominant-majority PREVIOUS year in a
+// different grade is NOT uncertain even though their consecutive-count in the current grade is
+// also 1 — that's a normal, known transition (we know exactly what grade they came from).
+function isAgeUncertain(key, year, grade){
+  if(primaryGradeForPlayerYear(key, year) !== grade) return true;
+  if(primaryGradeForPlayerYear(key, year - 1) == null) return true;
+  let y = year;
+  while(primaryGradeForPlayerYear(key, y) === grade){
+    const conf = primaryGradeConfidence(key, y);
+    if(conf != null && conf < PRIMARY_GRADE_CONFIDENCE_THRESHOLD) return true;
+    y--;
+  }
+  return false;
+}
+
+// ---------- Suggest next season's divisions (a club's likely U16 team next year, etc.) ----------
+// Originally a simple club-level blend of two teams' Elo — upgraded to track actual per-player
+// progression once real analysis of this competition's own history (see computeAgeCalibrationStats
+// below, and the calibration panel on the page itself for the live numbers) showed it was worth it:
+//   - A player's age within a grade (bottom vs top) is inferred from consecutive years in that same
+//     grade ending this year (see isTopAgeInGrade above).
+//   - Top-age players are real evidence of a stronger team, not just "been playing longer": this
+//     competition's own numbered divisions show Division 1 teams averaging roughly 2x the top-age
+//     share of the bottom divisions, holding independently in every calibration season — and the
+//     same pattern holds inside a single club across its own multiple teams. NEXT_SEASON_TOPAGE_
+//     WEIGHT below is calibrated to roughly reproduce that gap, not picked arbitrarily.
+//   - A promoted player's division only loosely carries over (roughly a third land in the exact
+//     same division, most within one, with real regression toward the middle either direction) — so
+//     the feeder grade is a real but noisier signal, which is why its players only count once they
+//     arrive (as new bottom-agers), never blended in at full team strength the way current-grade
+//     survivors are.
+// The very first year in the dataset is excluded from calibration everywhere in this file: with no
+// earlier season to check against, EVERY player that year looks like a first-season bottom-ager
+// purely from a lack of visibility, not a real reflection of that season's rosters.
+const NEXT_SEASON_TOPAGE_WEIGHT = 2;
+const AGE_GRADE_ORDER = ['U9','U10','U12','U14','U16','U18'];
+// U9/U10/U12 in this competition are ungraded ("Under 9's Mixed" etc, never a numbered division) —
+// confirmed on real data, no team in those grades has ever had a "Division N" label. The whole
+// premise of the top-age/strength calibration below is a genuine skill-based competitive
+// hierarchy to correlate against, which those three grades don't have — so calibration (and
+// choosing a target grade to suggest divisions FOR, since there are no divisions to suggest at
+// those ages either) is restricted to the grades that actually have one. Age-PROGRESSION tracking
+// (isTopAgeInGrade, feederGradeFor) still applies to every grade — aging from U12 into U14 is a
+// real transition regardless of whether U12 itself is graded.
+const GRADED_AGE_GROUPS = ['U14','U16','U18'];
+function feederGradeFor(grade){
+  const rank = GRADE_DISPLAY_ORDER[grade];
+  if(rank == null) return null;
+  return Object.keys(GRADE_DISPLAY_ORDER).find(g => GRADE_DISPLAY_ORDER[g] === rank + 1) || null;
+}
+
+// Every team for a club in a grade+year, strongest-first by Elo, each with its roster attached
+// (player key -> games played for that team) — needed to work out who's staying vs ageing out.
+// Every team is kept, not just the strongest one per club: many clubs field several teams per age
+// group, and collapsing them down to one row per club was silently discarding most squad depth.
+function allTeamsWithRostersRanked(grade, year){
+  const elo = computeEloRatings();
+  const { teamList } = computeAggregates();
+  const rosters = {};
+  games.forEach(g => {
+    if(getGameYear(g) !== year) return;
+    ['teamA','teamB'].forEach(side => {
+      if(getAgeGroupLabel(g[side].name) !== grade) return;
+      const teamName = g[side].name;
+      rosters[teamName] = rosters[teamName] || {};
+      (g[side].players||[]).forEach(p => {
+        const key = ageRosterKey(p);
+        if(!key) return;
+        rosters[teamName][key] = (rosters[teamName][key]||0) + 1;
+      });
+    });
+  });
+  const byClub = {};
+  teamList.forEach(t => {
+    if(t.ageGroup !== grade || t.year !== year) return;
+    const eloVal = elo[t.name + '__' + year];
+    if(eloVal == null) return;
+    const clubs = getAllClubsForTeam(t.name);
+    if(clubs.length === 1){
+      const club = clubs[0];
+      if(!club) return;
+      (byClub[club] = byClub[club] || []).push({ teamName: t.name, elo: eloVal, wins: t.wins, losses: t.losses, draws: t.draws, gamesPlayed: t.gamesPlayed, roster: rosters[t.name] || {}, clubUncertainKeys: new Set() });
+      return;
+    }
+    // A merged team's own match results (wins/losses/Elo) can't be split between the clubs it
+    // represents — there's only ever one scoreline for the combined side, so both clubs share that
+    // same team-level reference point. But the ROSTER can, for the most part, be recovered: most
+    // players on a merged team played for one of its two real clubs the year before, confirmed on
+    // real data as the actual source of some wrong club allocations here (a player really from
+    // Inverleigh was being credited entirely to Modewarre, since getClub() only ever returns the
+    // FIRST club named in a merge). Each player is attributed to whichever of the merge's clubs
+    // they're actually known to have played for previously; a player with no prior known club at
+    // all (or one that doesn't match either of THIS merge's clubs) is allocated to the first-named
+    // club rather than dropped — nobody gets silently left out of the roster count — but flagged
+    // via clubUncertainKeys, the same asterisk treatment already used for a first-season player's
+    // unknown age.
+    const perClubRoster = {};
+    const perClubUncertainKeys = {};
+    clubs.forEach(c => { perClubRoster[c] = {}; perClubUncertainKeys[c] = new Set(); });
+    Object.entries(rosters[t.name] || {}).forEach(([key, gc]) => {
+      const knownClub = mostRecentKnownClub(key, year);
+      if(knownClub && perClubRoster[knownClub]){
+        perClubRoster[knownClub][key] = gc;
+      } else {
+        const fallbackClub = clubs[0];
+        perClubRoster[fallbackClub][key] = gc;
+        perClubUncertainKeys[fallbackClub].add(key);
+      }
+    });
+    clubs.forEach(c => {
+      (byClub[c] = byClub[c] || []).push({ teamName: t.name, elo: eloVal, wins: t.wins, losses: t.losses, draws: t.draws, gamesPlayed: t.gamesPlayed, roster: perClubRoster[c], clubUncertainKeys: perClubUncertainKeys[c] });
+    });
+  });
+  Object.values(byClub).forEach(list => list.sort((a,b)=> b.elo - a.elo));
+  return byClub;
+}
+
+// MVP score per roster key — the per-player contribution proxy used to weight a projected roster,
+// since Elo itself is a team-level (not per-player) rating with no way to split it back out.
+// Deliberately SEASON-SCOPED (via computeSeasonScopedPlayerStats), not the raw career-wide
+// mvpScore on the aggregate player object — confirmed on real data as a genuine, meaningful bug:
+// the raw mvpScore accumulates goals/best-votes/games across EVERY season and team a player has
+// ever appeared under, so a player with a long tracked history scores higher regardless of their
+// CURRENT season's form, systematically overvaluing longer-tenured players and undervaluing a
+// breakout current season from someone newer to the dataset. This is the exact same class of bug
+// computeSeasonScopedPlayerStats was already built to fix for the Top Players page — reused here
+// rather than re-solved, since it already does exactly this correctly.
+let _mvpByKeyCache = {}, _mvpByKeyCacheVersion = -1;
+function getMvpScoreByRosterKey(year){
+  if(_mvpByKeyCacheVersion !== _aggVersion){ _mvpByKeyCache = {}; _mvpByKeyCacheVersion = _aggVersion; }
+  if(_mvpByKeyCache[year]) return _mvpByKeyCache[year];
+  const { playerList } = computeAggregates();
+  const scoped = computeSeasonScopedPlayerStats(playerList, year ? [year] : null);
+  // computeSeasonScopedPlayerStats returns the app's own internal player key (from
+  // resolvePlayerKey), not the playhqId-or-name key this whole feature keys everything by — map
+  // back through the original playerList (by that internal key) to get each player's playhqId.
+  const playhqIdByInternalKey = {};
+  playerList.forEach(p => { if(p.key) playhqIdByInternalKey[p.key] = p.playhqId; });
+  const best = {};
+  scoped.forEach(p => {
+    const playhqId = playhqIdByInternalKey[p.key];
+    const key = playhqId || (p.name ? 'name:' + p.name.trim().toLowerCase() : null);
+    if(!key) return;
+    if(!best[key] || (p.gamesPlayed||0) > best[key].gamesPlayed) best[key] = { mvpScore: p.mvpScore||0, gamesPlayed: p.gamesPlayed||0 };
+  });
+  const out = {};
+  Object.entries(best).forEach(([k,v]) => { out[k] = v.mvpScore; });
+  _mvpByKeyCache[year] = out;
+  return out;
+}
+// Same keying/dedup as getMvpScoreByRosterKey, but returning the display name instead of the MVP
+// score — kept as a separate small cache rather than folding the name into that one, so nothing
+// that already reads getMvpScoreByRosterKey's shape needs to change.
+let _nameByKeyCache = null, _nameByKeyCacheVersion = -1;
+function getNameByRosterKey(){
+  if(_nameByKeyCacheVersion === _aggVersion) return _nameByKeyCache;
+  const { playerList } = computeAggregates();
+  const best = {};
+  playerList.forEach(p => {
+    const key = p.playhqId || (p.name ? 'name:' + p.name.trim().toLowerCase() : null);
+    if(!key) return;
+    if(!best[key] || (p.gamesPlayed||0) > best[key].gamesPlayed) best[key] = { name: p.name, gamesPlayed: p.gamesPlayed||0 };
+  });
+  const out = {};
+  Object.entries(best).forEach(([k,v]) => { out[k] = v.name; });
+  _nameByKeyCache = out;
+  _nameByKeyCacheVersion = _aggVersion;
+  return out;
+}
+
+// The actual projection: compares a team's roster THIS year (weighted by each player's real
+// current age) against the roster it'll likely HAVE next year (bottom-agers here who'll be top-age
+// then, plus the paired feeder team's top-agers who'll arrive as bottom-agers) — scaling this
+// year's Elo by the ratio between the two, rather than a flat unweighted club-level blend.
+// The projected roster's own top-age % — games-weighted, same methodology as the calibration
+// charts, so it's directly comparable to them. Works the same way regardless of which of the two
+// teams (current-grade, feeder) are actually present: retained current-grade players will be
+// top-age next year, incoming feeder movers will be bottom-age next year, so a club with no
+// current-grade team at all (basis='feeder-only') correctly comes out at 0% — its whole projected
+// roster is first-year arrivals — and a club with no feeder team (basis='current-only') comes out
+// at 100%, since every projected player is a returning survivor.
+// Given a club's teams in the target grade AND its teams one grade below, works out what that
+// club's teams will likely look like NEXT year — properly this time, not by assuming a player
+// stays tied to whichever specific team they're on now. Real clubs reshuffle: the calibration data
+// itself proved this (1st teams consistently carry far more top-age players than 2nd/3rd — only
+// explainable by clubs promoting their strongest top-agers into the top team each year, not by
+// players staying loyal to one team as they age). So every retained player (bottom-age now,
+// top-age next year) and every incoming player (top-age now in the feeder grade, bottom-age next
+// year) is pooled together across ALL of the club's teams, then RE-SPLIT by individual quality
+// (MVP score) into next year's teams — strongest players fill the 1st team slot, and so on —
+// rather than each specific team's roster just aging in place.
+// One additional swap-based repair pass, run AFTER suggestDivisions() has already produced a
+// same-club-clash-free bucketing — nudges teams that got assigned a big jump back toward within
+// one division of where they are NOW, since real competitions rarely reshuffle a team by more than
+// one division in a single season even when the strength ranking alone would suggest a bigger move.
+// Only teams with a KNOWN current division are adjusted (new/promoted clubs keep the pure
+// strength-based placement, having no "current" to measure against). Works by SWAPPING two teams'
+// divisions rather than just reassigning one — a swap can never introduce a new same-club clash
+// unless one already existed, and never makes the OTHER team's own distance from its current
+// division any worse than before the swap.
+function nudgeTowardCurrentDivision(rankedTeams, divisionOf, currentDivisionOf){
+  let changed = true, iterations = 0;
+  while(changed && iterations < 200){
+    changed = false; iterations++;
+    for(const row of rankedTeams){
+      const current = currentDivisionOf.get(row);
+      if(current == null) continue;
+      const suggested = divisionOf.get(row);
+      if(Math.abs(suggested - current) <= 1) continue;
+      const target = suggested < current ? suggested + 1 : suggested - 1; // one step closer per pass
+      const rowsAtTarget = rankedTeams.filter(o => divisionOf.get(o) === target);
+      const candidate = rowsAtTarget.find(cand => {
+        if(cand.club === row.club) return false;
+        // Never swap a thin squad (see MIN_PLAYERS_FOR_HIGHER_DIVISION) out of its position to
+        // satisfy another team's movement preference — confirmed on real data this was pulling a
+        // thin squad up into a better division than teams with a full roster, defeating the whole
+        // point of pinning them to the bottom in the first place.
+        if(cand.expectedPlayerCount < MIN_PLAYERS_FOR_HIGHER_DIVISION) return false;
+        const rowsAtTargetWithoutCand = rowsAtTarget.filter(o => o !== cand);
+        const rowsAtSuggestedWithoutRow = rankedTeams.filter(o => divisionOf.get(o) === suggested && o !== row);
+        if(rowsAtTargetWithoutCand.some(o => o.club === row.club)) return false;
+        if(rowsAtSuggestedWithoutRow.some(o => o.club === cand.club)) return false;
+        const candCurrent = currentDivisionOf.get(cand);
+        if(candCurrent != null && Math.abs(suggested - candCurrent) > Math.abs(target - candCurrent)) return false; // don't fix one team by making another's situation worse
+        return true;
+      });
+      if(candidate){
+        divisionOf.set(row, target);
+        divisionOf.set(candidate, suggested);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return divisionOf;
+}
+
+// However strong a team's few players look on paper, a squad that can barely field a side can't
+// actually compete against a full one — so any team below this threshold is sorted to the very
+// bottom before divisions are even assigned (see the bucketingOrder sort in renderSuggestNextSeason
+// for why sorting-first was used instead of swapping teams down after the fact).
+const MIN_PLAYERS_FOR_HIGHER_DIVISION = 15;
+
+// A final, targeted correction pass — suggestDivisions()'s own same-club-clash repair (shared with
+// the current-season Suggest divisions tool, so not something to change here) has no concept of
+// thin squads, and confirmed on real data it can still swap one into a better division than a
+// full-strength team while resolving an unrelated clash. This runs last and simply looks for any
+// remaining (thin squad, better division) vs (full squad, worse division) pair and swaps them
+// directly — the only rule this function's job is to guarantee, checked and fixed regardless of
+// what any earlier pass did.
+function enforceThinSquadBottom(rankedTeams, divisionOf){
+  let changed = true, iterations = 0;
+  while(changed && iterations < 200){
+    changed = false; iterations++;
+    for(const row of rankedTeams){
+      if(row.expectedPlayerCount >= MIN_PLAYERS_FOR_HIGHER_DIVISION) continue;
+      const rowDiv = divisionOf.get(row);
+      const worseOff = rankedTeams.find(o => o.club !== row.club && o.expectedPlayerCount >= MIN_PLAYERS_FOR_HIGHER_DIVISION && divisionOf.get(o) > rowDiv);
+      if(!worseOff) continue;
+      const target = divisionOf.get(worseOff);
+      const rowsAtTargetWithoutWorseOff = rankedTeams.filter(o => divisionOf.get(o) === target && o !== worseOff);
+      const rowsAtRowDivWithoutRow = rankedTeams.filter(o => divisionOf.get(o) === rowDiv && o !== row);
+      if(rowsAtTargetWithoutWorseOff.some(o => o.club === row.club)) continue;
+      if(rowsAtRowDivWithoutRow.some(o => o.club === worseOff.club)) continue;
+      divisionOf.set(row, target);
+      divisionOf.set(worseOff, rowDiv);
+      changed = true;
+    }
+  }
+  return divisionOf;
+}
+
+// Looks up each team's ACTUAL division this year, parsed to a plain number — used to constrain the
+// projection above so suggested moves rarely jump more than one division in a season.
+// Cached by year + _aggVersion — this does a full pass over every game, and was confirmed on
+// real data to be called repeatedly with the SAME year from several different call sites
+// (rankAndTotalForTeam alone calls it several times per trajectory point). Uncached, tracing one
+// club's cohort trajectory took up to 9 seconds; every other caller in the app benefits from this
+// fix too, not just the new Cohort Trajectory page.
+let _teamDivisionMapCache = new Map();
+function getTeamDivisionMap(year){
+  const cacheKey = year+'|'+_aggVersion;
+  if(_teamDivisionMapCache.has(cacheKey)) return _teamDivisionMapCache.get(cacheKey);
+  const map = {};
+  games.forEach(g => {
+    if(getGameYear(g) !== year) return;
+    ['teamA','teamB'].forEach(side => {
+      const teamName = g[side].name;
+      if(map[teamName]) return; // already found a real numbered division for this team — keep it
+      const div = getDivision(g);
+      const m = div && /^Division (\d+)$/.exec(div);
+      // Deliberately does NOT lock in null on the first game seen — a team's FIRST game of the
+      // season is often a Grading-round game (labelled "Grading", not a numbered division), and
+      // stopping there was permanently hiding a real division that showed up on their later
+      // regular-season games. Confirmed on real data as the actual cause of the ±1-division
+      // movement constraint silently failing to apply to some clubs (their division came back null
+      // even though they clearly had one), letting the projection swing by 3-5 divisions in a
+      // single season where it should have been capped at 1.
+      if(m) map[teamName] = parseInt(m[1], 10);
+    });
+  });
+  _teamDivisionMapCache.set(cacheKey, map);
+  return map;
+}
+
+// Regression: given a U12 team's Elo, what real U14 division do that team's movers-up typically
+// land in the following year? Validated on real data — correlation between U12 Elo and real U14
+// landing division ranged -0.18 to -0.45 across three separate year-pairs, consistently in the
+// right direction: real, if moderate, signal. This is the ONLY feeder-grade relationship checked
+// this way and found to hold — U10 Elo predicting U14 landing division two years out came back at
+// essentially zero correlation (kids that young change too much over two years for early form to
+// mean much), so this calibration deliberately only ever applies to U12->U14, not chained further
+// back to U10 or U9.
+let _u12SilentGradeCache = null, _u12SilentGradeCacheVersion = -1;
+function computeU12SilentGradeCalibration(){
+  if(_u12SilentGradeCacheVersion === _aggVersion) return _u12SilentGradeCache;
+  const allYears = [...new Set(games.map(getGameYear))].filter(Boolean).sort((a,b)=>a-b);
+  const points = [];
+  const elo = computeEloRatings();
+  const { teamList } = computeAggregates();
+  allYears.forEach(year => {
+    const rosters = {};
+    games.forEach(g => {
+      if(getGameYear(g) !== year) return;
+      ['teamA','teamB'].forEach(side => {
+        if(getAgeGroupLabel(g[side].name) !== 'U12') return;
+        const teamName = g[side].name;
+        rosters[teamName] = rosters[teamName] || {};
+        (g[side].players||[]).forEach(p => {
+          const key = ageRosterKey(p);
+          if(key) rosters[teamName][key] = (rosters[teamName][key]||0) + 1;
+        });
+      });
+    });
+    const u12TeamElo = {};
+    teamList.forEach(t => {
+      if(t.ageGroup !== 'U12' || t.year !== year) return;
+      const eloVal = elo[t.name+'__'+year];
+      if(eloVal != null) u12TeamElo[t.name] = eloVal;
+    });
+    const nextYearGames = games.filter(g => getGameYear(g) === year+1);
+    const playerNextTeam = {};
+    nextYearGames.forEach(g => {
+      ['teamA','teamB'].forEach(side => {
+        if(getAgeGroupLabel(g[side].name) !== 'U14') return;
+        (g[side].players||[]).forEach(p => {
+          const key = ageRosterKey(p);
+          if(!key) return;
+          playerNextTeam[key] = playerNextTeam[key] || {};
+          playerNextTeam[key][g[side].name] = (playerNextTeam[key][g[side].name]||0) + 1;
+        });
+      });
+    });
+    const nextTeamDiv = getTeamDivisionMap(year+1);
+    Object.keys(u12TeamElo).forEach(teamName => {
+      const roster = rosters[teamName] || {};
+      const landingDivs = [];
+      Object.keys(roster).forEach(key => {
+        if(isTopAgeInGrade(key, year, 'U12') !== true) return; // only players who actually moved up
+        const nextTeams = playerNextTeam[key];
+        if(!nextTeams) return;
+        const bestTeam = Object.entries(nextTeams).sort((a,b)=>b[1]-a[1])[0][0];
+        const div = nextTeamDiv[bestTeam];
+        if(div != null) landingDivs.push(div);
+      });
+      if(landingDivs.length < 3) return;
+      const avgDiv = landingDivs.reduce((a,b)=>a+b,0)/landingDivs.length;
+      points.push({ elo: u12TeamElo[teamName], div: avgDiv });
+    });
+  });
+  let result = null;
+  if(points.length >= 10){
+    const n = points.length;
+    const meanElo = points.reduce((s,p)=>s+p.elo,0)/n;
+    const meanDiv = points.reduce((s,p)=>s+p.div,0)/n;
+    let num = 0, den = 0;
+    points.forEach(p => { num += (p.elo-meanElo)*(p.div-meanDiv); den += (p.elo-meanElo)**2; });
+    const slope = den > 0 ? num/den : 0;
+    result = { slope, intercept: meanDiv - slope*meanElo, n };
+  }
+  _u12SilentGradeCache = result;
+  _u12SilentGradeCacheVersion = _aggVersion;
+  return result;
+}
+// Average REAL Elo of a grade's teams THIS year, per division — used to convert a U12 team's
+// silently-graded implied division number back into a comparable Elo value for the projection.
+function computeDivisionEloBaseline(grade, year){
+  const elo = computeEloRatings();
+  const { teamList } = computeAggregates();
+  const teamDivMap = getTeamDivisionMap(year);
+  const byDiv = {};
+  teamList.forEach(t => {
+    if(t.ageGroup !== grade || t.year !== year) return;
+    const div = teamDivMap[t.name];
+    if(div == null) return;
+    const eloVal = elo[t.name+'__'+year];
+    if(eloVal == null) return;
+    (byDiv[div] = byDiv[div]||[]).push(eloVal);
+  });
+  const avgByDiv = {};
+  Object.entries(byDiv).forEach(([div, vals]) => { avgByDiv[div] = vals.reduce((a,b)=>a+b,0)/vals.length; });
+  return avgByDiv;
+}
+function interpolateEloForDivision(divEloBaseline, impliedDiv){
+  const divs = Object.keys(divEloBaseline).map(Number).sort((a,b)=>a-b);
+  if(!divs.length) return null;
+  if(impliedDiv <= divs[0]) return divEloBaseline[divs[0]];
+  if(impliedDiv >= divs[divs.length-1]) return divEloBaseline[divs[divs.length-1]];
+  for(let i=0; i<divs.length-1; i++){
+    if(impliedDiv >= divs[i] && impliedDiv <= divs[i+1]){
+      const frac = (impliedDiv - divs[i]) / (divs[i+1]-divs[i]);
+      return divEloBaseline[divs[i]] + frac*(divEloBaseline[divs[i+1]]-divEloBaseline[divs[i]]);
+    }
+  }
+  return null;
+}
+
+function computeClubProjection(currentTeams, feederTeams, year, gradeBaseline, targetGrade){
+  const mvp = getMvpScoreByRosterKey(year);
+  const pool = [];
+  // Dedupe by player key ACROSS a club's own teams in the same grade — confirmed on real data that
+  // a player can genuinely appear on more than one of a club's own teams (e.g. filling in across
+  // two age-group sides), which without this was double-counting that one real person's
+  // contribution into the pool once per team they showed up on.
+  const seenCurrent = new Set(), seenFeeder = new Set();
+  currentTeams.forEach(t => {
+    const grade = getAgeGroupLabel(t.teamName);
+    Object.entries(t.roster).forEach(([key, gc]) => {
+      if(seenCurrent.has(key)) return;
+      seenCurrent.add(key);
+      // Only include players whose PRIMARY grade this year genuinely IS this current grade (a
+      // confirmed "false" from isTopAgeInGrade, meaning bottom-age and staying). Excluding null too
+      // (not true, but not confirmed bottom-age either) matters: null means this player's primary
+      // grade this year was actually something else — most often the feeder grade, for a player who
+      // had a cameo game up in this grade. Treating null as "safe to keep as staying" was double-
+      // counting that real person once here AND again via the feeder-grade path below, which already
+      // correctly represents them — confirmed on real data (a player counted twice with an identical
+      // score, once at each weight).
+      if(isTopAgeInGrade(key, year, grade) !== false) return;
+      const clubUncertain = t.clubUncertainKeys && t.clubUncertainKeys.has(key);
+      pool.push({ key, score: mvp[key]||0, games: gc, weight: NEXT_SEASON_TOPAGE_WEIGHT, willBeTopAge: true, uncertain: isAgeUncertain(key, year, grade) || clubUncertain });
+    });
+  });
+  feederTeams.forEach(t => {
+    const grade = getAgeGroupLabel(t.teamName);
+    Object.entries(t.roster).forEach(([key, gc]) => {
+      if(seenFeeder.has(key)) return;
+      seenFeeder.add(key);
+      if(isTopAgeInGrade(key, year, grade) !== true) return; // only players actually moving up
+      const clubUncertain = t.clubUncertainKeys && t.clubUncertainKeys.has(key);
+      pool.push({ key, score: mvp[key]||0, games: gc, weight: 1, willBeTopAge: false, uncertain: isAgeUncertain(key, year, grade) || clubUncertain });
+    });
+  });
+  // Sorted by score WEIGHTED by projected age, not raw score alone — confirmed on real data that
+  // sorting by raw score was violating the very pattern your own calibration data proved real (a
+  // club's stronger team consistently has a higher top-age share than its weaker teams): 11 of 19
+  // multi-team clubs had a LOWER team ranked with more top-age players than the team above it. Since
+  // the weighting already reflects that real bias for the rating calculation, using the same
+  // weighted value for slotting fixes both at once instead of only rewarding it after the fact.
+  pool.sort((a,b) => (b.score*b.weight) - (a.score*a.weight)); // strongest (age-weighted) players first — fills the 1st team slot first, etc.
+
+  // Next year's team count defaults to this year's own team-in-the-target-grade shape, but if the
+  // feeder grade actually has MORE teams (a club growing its junior intake), that many teams get
+  // produced instead. Each team is capped at TEAM_MAX_ROSTER and filled from the pool strongest-
+  // first, 1st team's slot filled before the 2nd team gets anyone — the same real-world behaviour
+  // a club actually follows, and it also directly gives an honest "how many players will this team
+  // actually have" estimate: `idx` only ever advances by however many players a team actually got
+  // (never the full cap), so a shortfall shows up exactly where the pool runs out, not smeared
+  // evenly across every team.
+  const TEAM_MAX_ROSTER = 23;
+  const numTeams = Math.max(currentTeams.length, feederTeams.length);
+
+  const results = [];
+  let idx = 0;
+  for(let i=0; i<numTeams; i++){
+    const group = pool.slice(idx, idx + TEAM_MAX_ROSTER);
+    idx += group.length;
+    const expectedPlayerCount = group.length;
+    const hasUncertainAge = group.some(p => p.uncertain);
+    const weightedTotal = group.reduce((s,p) => s + p.score*p.weight, 0);
+    const topAgeGames = group.filter(p=>p.willBeTopAge).reduce((s,p)=>s+p.games, 0);
+    const totalGames = group.reduce((s,p)=>s+p.games, 0);
+    const expectedTopAgePct = totalGames > 0 ? Math.round(100*topAgeGames/totalGames) : null;
+
+    const baseline = currentTeams[i] || null; // this year's rank-i team is still the reference point for how strong "rank i" was
+    let projectedElo, basis;
+    if(baseline){
+      let baselineWeightedTotal = 0;
+      const baseGrade = getAgeGroupLabel(baseline.teamName);
+      Object.keys(baseline.roster).forEach(key => {
+        baselineWeightedTotal += (mvp[key]||0) * (isTopAgeInGrade(key, year, baseGrade) ? NEXT_SEASON_TOPAGE_WEIGHT : 1);
+      });
+      // Same log-odds conversion as before — Elo is not a linear scale, so a strength RATIO has to
+      // move through it logarithmically or the projection blows up (see the comment this replaced).
+      const ratio = baselineWeightedTotal > 0 ? Math.max(0.15, Math.min(6, weightedTotal / baselineWeightedTotal)) : 1;
+      projectedElo = Math.round(baseline.elo + 400 * Math.log10(ratio));
+      basis = feederTeams.length ? 'both' : 'current-only';
+    } else {
+      // No current-grade team at all to use as a reference point. For U12->U14 specifically, use
+      // the validated "silent grading" calibration instead of the cruder grade-wide-average
+      // fallback below: real data showed a U12 team's Elo genuinely correlates with the actual U14
+      // division its movers-up land in the following year (moderate but real — checked and
+      // confirmed, not assumed). Converts the feeder team's Elo into an implied division via that
+      // regression, then back into an Elo using THIS year's real U14 division-to-Elo scale, so the
+      // result lands on the same footing as every other row here. Only applies to U12->U14 — the
+      // same check done for U10->U14 (two years out) came back with essentially no signal, so
+      // nothing here tries to chain this further back to U10 or U9.
+      const feed = feederTeams[i];
+      const feedGrade = feed ? getAgeGroupLabel(feed.teamName) : null;
+      const calib = (feedGrade === 'U12' && targetGrade === 'U14') ? computeU12SilentGradeCalibration() : null;
+      if(feed && calib){
+        const impliedDiv = calib.intercept + calib.slope * feed.elo;
+        const divEloBaseline = computeDivisionEloBaseline(targetGrade, year);
+        const impliedElo = interpolateEloForDivision(divEloBaseline, impliedDiv);
+        if(impliedElo != null){
+          projectedElo = Math.round(impliedElo);
+        } else if(gradeBaseline && gradeBaseline.weightedTotal > 0){
+          const ratio = Math.max(0.15, Math.min(6, weightedTotal / gradeBaseline.weightedTotal));
+          projectedElo = Math.round(gradeBaseline.elo + 400 * Math.log10(ratio));
+        } else {
+          projectedElo = Math.round(feed.elo);
+        }
+      } else if(gradeBaseline && gradeBaseline.weightedTotal > 0){
+        const ratio = Math.max(0.15, Math.min(6, weightedTotal / gradeBaseline.weightedTotal));
+        projectedElo = Math.round(gradeBaseline.elo + 400 * Math.log10(ratio));
+      } else {
+        projectedElo = feederTeams[i] ? Math.round(feederTeams[i].elo) : 1500;
+      }
+      basis = 'feeder-only';
+    }
+    results.push({ current: currentTeams[i] || null, feeder: feederTeams[i] || null, projectedElo, expectedTopAgePct, expectedPlayerCount, hasUncertainAge, basis, group });
+  }
+  return results;
+}
+
 function computeNextSeasonDivisionProjection(targetGrade){
   return withAllDataFilters(()=>{
     const feederGrade = feederGradeFor(targetGrade);
     const latestYear = games.reduce((m,g)=>{ const y=getGameYear(g); return y && y>m ? y : m; }, 0);
-    const elo = computeEloRatings();
-    const { teamList } = computeAggregates();
 
-    // For a grade+year, the strongest-evidence team per club — if a club somehow has more than one
-    // team in the same grade the same year, the one with more games played is the better signal.
-    function bestTeamPerClub(grade){
-      const out = {};
-      teamList.forEach(t=>{
-        if(t.ageGroup !== grade || t.year !== latestYear) return;
-        const club = getClub(t.name);
-        if(!club) return;
-        const eloVal = elo[t.name + '__' + latestYear];
-        if(eloVal == null) return;
-        if(!out[club] || t.gamesPlayed > out[club].gamesPlayed){
-          out[club] = { teamName: t.name, elo: eloVal, gamesPlayed: t.gamesPlayed, wins: t.wins, losses: t.losses, draws: t.draws };
-        }
-      });
-      return out;
-    }
-
-    const currentByClub = bestTeamPerClub(targetGrade);
-    const feederByClub = feederGrade ? bestTeamPerClub(feederGrade) : {};
+    const currentByClub = allTeamsWithRostersRanked(targetGrade, latestYear);
+    const feederByClub = feederGrade ? allTeamsWithRostersRanked(feederGrade, latestYear) : {};
     const clubs = new Set([...Object.keys(currentByClub), ...Object.keys(feederByClub)]);
 
-    const rows = [...clubs].map(club=>{
-      const cur = currentByClub[club] || null;
-      const feed = feederByClub[club] || null;
-      const curElo = cur ? cur.elo : 1500;
-      const feedElo = feed ? feed.elo : 1500;
-      let blended, basis;
-      if(cur && feed){ blended = curElo*NEXT_SEASON_CURRENT_WEIGHT + feedElo*NEXT_SEASON_FEEDER_WEIGHT; basis = 'both'; }
-      else if(cur){ blended = curElo; basis = 'current-only'; }
-      else if(feed){ blended = feedElo; basis = 'feeder-only'; }
-      else { blended = 1500; basis = 'neither'; }
-      return { club, current: cur, feeder: feed, blended: Math.round(blended), basis };
+    // The average target-grade team this year — the reference point a club with NO current-grade
+    // team of its own (only a feeder team) gets scaled against, instead of inheriting its feeder
+    // team's own unrelated Elo unchanged. See the comment inside computeClubProjection's
+    // feeder-only branch for what bug this fixes.
+    const mvp = getMvpScoreByRosterKey(latestYear);
+    let totalWeighted = 0, totalElo = 0, baselineTeamCount = 0;
+    Object.values(currentByClub).flat().forEach(t => {
+      const grade = getAgeGroupLabel(t.teamName);
+      let w = 0;
+      Object.keys(t.roster).forEach(key => {
+        w += (mvp[key]||0) * (isTopAgeInGrade(key, latestYear, grade) ? NEXT_SEASON_TOPAGE_WEIGHT : 1);
+      });
+      totalWeighted += w; totalElo += t.elo; baselineTeamCount++;
+    });
+    const gradeBaseline = baselineTeamCount > 0
+      ? { weightedTotal: totalWeighted/baselineTeamCount, elo: totalElo/baselineTeamCount }
+      : null;
+
+    const rows = [];
+    clubs.forEach(club=>{
+      const curTeams = currentByClub[club] || [];
+      const feedTeams = feederByClub[club] || [];
+      const projections = computeClubProjection(curTeams, feedTeams, latestYear, gradeBaseline, targetGrade);
+      projections.forEach((p, i) => {
+        rows.push({ club, current: p.current, feeder: p.feeder, blended: p.projectedElo, basis: p.basis, expectedTopAgePct: p.expectedTopAgePct, expectedPlayerCount: p.expectedPlayerCount, hasUncertainAge: p.hasUncertainAge, group: p.group, clubTeamIndex: i, clubTeamCount: projections.length });
+      });
     });
     rows.sort((a,b)=> b.blended - a.blended);
     return { targetGrade, feederGrade, latestYear, projectedYear: latestYear ? latestYear+1 : null, rows };
   });
+}
+
+// The calibration evidence behind NEXT_SEASON_TOPAGE_WEIGHT and the whole age-inference approach —
+// recomputed live from whatever data is currently loaded (not a one-off study baked in as fixed
+// numbers), and shown on the Suggest Next Season page itself so the reasoning stays checkable as
+// the competition's data grows. See the big comment above computeNextSeasonDivisionProjection for
+// what each piece means and why the first year on file is excluded throughout.
+let _ageCalibrationCache = null, _ageCalibrationCacheVersion = -1;
+function computeAgeCalibrationStats(){
+  if(_ageCalibrationCacheVersion === _aggVersion) return _ageCalibrationCache;
+  const result = withAllDataFilters(()=>{
+    const allYears = [...new Set(games.map(getGameYear))].filter(Boolean).sort((a,b)=>a-b);
+    if(allYears.length < 2) return null; // not enough seasons to say anything useful
+    const excludedYear = allYears[0];
+    const calibrationYears = allYears.slice(1);
+    const divPattern = /^Division \d+$/;
+
+    const teamRosterByYear = {}, teamDivisionByYear = {};
+    games.forEach(g => {
+      const year = getGameYear(g);
+      if(!year) return;
+      ['teamA','teamB'].forEach(side => {
+        const grade = getAgeGroupLabel(g[side].name);
+        if(!isJuniorGrade(grade)) return;
+        const tKey = g[side].name + '__' + year;
+        teamRosterByYear[tKey] = teamRosterByYear[tKey] || {};
+        (g[side].players||[]).forEach(p => {
+          const key = ageRosterKey(p);
+          if(key) teamRosterByYear[tKey][key] = (teamRosterByYear[tKey][key]||0) + 1;
+        });
+        if(teamDivisionByYear[tKey] === undefined){
+          const div = getDivision(g);
+          if(div) teamDivisionByYear[tKey] = div;
+        }
+      });
+    });
+    function topAgePctForTeam(tKey, grade, year){
+      const roster = teamRosterByYear[tKey];
+      if(!roster) return null;
+      let total = 0, topAge = 0;
+      Object.entries(roster).forEach(([key, gc]) => {
+        total += gc;
+        if(isTopAgeInGrade(key, year, grade)) topAge += gc;
+      });
+      return total >= 15 ? 100*topAge/total : null;
+    }
+
+    const byDivision = {};
+    Object.keys(teamRosterByYear).forEach(tKey => {
+      const idx = tKey.lastIndexOf('__');
+      const teamName = tKey.slice(0, idx), year = parseInt(tKey.slice(idx+2), 10);
+      if(!calibrationYears.includes(year)) return;
+      const grade = getAgeGroupLabel(teamName);
+      if(!isJuniorGrade(grade)) return;
+      const div = teamDivisionByYear[tKey];
+      if(!div || !divPattern.test(div)) return;
+      const pct = topAgePctForTeam(tKey, grade, year);
+      if(pct != null) (byDivision[div] = byDivision[div]||[]).push(pct);
+    });
+
+    const { teamList } = computeAggregates();
+    const elo = computeEloRatings();
+    const byClubRank = {};
+    calibrationYears.forEach(year => {
+      GRADED_AGE_GROUPS.forEach(grade => {
+        const byClub = {};
+        teamList.forEach(t => {
+          if(t.ageGroup !== grade || t.year !== year) return;
+          const club = getClub(t.name);
+          if(!club) return;
+          const eloVal = elo[t.name+'__'+year];
+          if(eloVal == null) return;
+          (byClub[club] = byClub[club]||[]).push(t.name);
+        });
+        Object.values(byClub).forEach(teamNames => {
+          if(teamNames.length < 2) return;
+          teamNames.sort((a,b) => (elo[b+'__'+year]||0) - (elo[a+'__'+year]||0));
+          teamNames.forEach((teamName, rank) => {
+            const pct = topAgePctForTeam(teamName+'__'+year, grade, year);
+            if(pct != null) (byClubRank[rank] = byClubRank[rank]||[]).push(pct);
+          });
+        });
+      });
+    });
+
+    function nextGrade(g){ const i = AGE_GRADE_ORDER.indexOf(g); return i>=0 && i<AGE_GRADE_ORDER.length-1 ? AGE_GRADE_ORDER[i+1] : null; }
+    const playerYearTeam = {};
+    games.forEach(g => {
+      const year = getGameYear(g);
+      if(!year) return;
+      ['teamA','teamB'].forEach(side => {
+        (g[side].players||[]).forEach(p => {
+          const key = ageRosterKey(p);
+          if(!key) return;
+          playerYearTeam[key] = playerYearTeam[key] || {};
+          playerYearTeam[key][year] = playerYearTeam[key][year] || {};
+          playerYearTeam[key][year][g[side].name] = (playerYearTeam[key][year][g[side].name]||0) + 1;
+        });
+      });
+    });
+    function primaryTeamForYear(key, year){
+      const t = playerYearTeam[key] && playerYearTeam[key][year];
+      return t ? Object.entries(t).sort((a,b)=>b[1]-a[1])[0][0] : null;
+    }
+    const transitions = [];
+    calibrationYears.forEach(year => {
+      const prevYear = year - 1;
+      Object.keys(getPlayerYearGradeGames()).forEach(key => {
+        const gradeThis = primaryGradeForPlayerYear(key, year);
+        const gradePrev = primaryGradeForPlayerYear(key, prevYear);
+        if(!gradeThis || !gradePrev || nextGrade(gradePrev) !== gradeThis) return;
+        if(isTopAgeInGrade(key, prevYear, gradePrev) !== true) return; // only real promotions
+        const teamPrev = primaryTeamForYear(key, prevYear), teamThis = primaryTeamForYear(key, year);
+        if(!teamPrev || !teamThis) return;
+        const divPrev = teamDivisionByYear[teamPrev+'__'+prevYear], divThis = teamDivisionByYear[teamThis+'__'+year];
+        if(!divPrev || !divThis || !divPattern.test(divPrev) || !divPattern.test(divThis)) return;
+        transitions.push({ fromDiv: parseInt(divPrev.replace('Division ','')), toDiv: parseInt(divThis.replace('Division ','')) });
+      });
+    });
+
+    const divisionStats = Object.entries(byDivision)
+      .map(([division, vals]) => ({ division, avg: Math.round(vals.reduce((a,b)=>a+b,0)/vals.length), n: vals.length }))
+      .filter(d => d.n >= 3)
+      .sort((a,b) => parseInt(a.division.replace('Division ','')) - parseInt(b.division.replace('Division ','')));
+    const rankStats = Object.entries(byClubRank)
+      .map(([rank, vals]) => ({ rank: parseInt(rank)+1, avg: Math.round(vals.reduce((a,b)=>a+b,0)/vals.length), n: vals.length }))
+      .filter(r => r.n >= 10)
+      .sort((a,b) => a.rank-b.rank);
+    const sameDiv = transitions.filter(t=>t.fromDiv===t.toDiv).length;
+    const within1 = transitions.filter(t=>Math.abs(t.fromDiv-t.toDiv)<=1).length;
+
+    return {
+      excludedYear, calibrationYears, divisionStats, rankStats,
+      movement: { n: transitions.length, samePct: transitions.length ? Math.round(100*sameDiv/transitions.length) : null, within1Pct: transitions.length ? Math.round(100*within1/transitions.length) : null }
+    };
+  });
+  _ageCalibrationCache = result;
+  _ageCalibrationCacheVersion = _aggVersion;
+  return result;
 }
 
 function doOpenSuggestNextSeason(){
@@ -3498,15 +4321,17 @@ function openSuggestNextSeason(){
 function backFromSuggestNextSeason(){ navBack(); }
 
 let nextSeasonTargetGrade = null;
+let nextSeasonMinSize = 6, nextSeasonMaxSize = 12; // same defaults as the current-season Suggest divisions tool
+let nextSeasonSort = { key: 'blended', dir: 'desc' };
+let nextSeasonExpandedRows = new Set(); // keys of "club__teamIndex" currently showing their player list
 function renderSuggestNextSeason(){
   const wrap = document.getElementById('suggestNextSeasonWrap');
   const { teamList } = computeAggregates();
-  // Only grades with a real grade one rank below them make sense as a target — U9 has nothing
-  // feeding it, and Seniors/Reserves aren't age-restricted the same way U18-into-Seniors is (a club
-  // might field an 18-year-old straight into Seniors OR keep them in an U18 top-age year depending
-  // on the league's own rules, which this app has no way to know) — so those two are left out too.
-  const eligibleGrades = [...new Set(teamList.map(t=>t.ageGroup))]
-    .filter(g => feederGradeFor(g) && g !== 'Seniors' && g !== 'Reserves')
+  // Only grades that actually have real divisions make sense as a target — U9/U10/U12 in this
+  // competition are ungraded (confirmed on real data: never a numbered division), so there's
+  // nothing to suggest a division INTO even though age-progression tracking still works for them.
+  const eligibleGrades = GRADED_AGE_GROUPS
+    .filter(g => teamList.some(t => t.ageGroup === g))
     .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   if(nextSeasonTargetGrade == null || !eligibleGrades.includes(nextSeasonTargetGrade)){
     nextSeasonTargetGrade = eligibleGrades.includes('U16') ? 'U16' : (eligibleGrades[0] || null);
@@ -3515,16 +4340,28 @@ function renderSuggestNextSeason(){
   wrap.innerHTML = `
     <span class="back-link" id="backFromSuggestNextSeason">&larr; Back to teams</span>
     <h2 style="font-size:20px;">Suggest next season's divisions</h2>
-    <div class="warn-box" style="margin:0 0 14px;">This can't know anyone's actual age — only which team they played for. Most grades here cover two birth-years, so among this year's roster some players stay eligible next year and others age up; there's no way to tell which from a team name alone. So this works at the CLUB level instead: blending this club's team in the target grade this year (weighted more) with this club's team one grade below (weighted less, since that group hasn't played at this level yet) — assuming everyone stays at their current club. A starting point for planning, not a final answer.</div>
+    <div class="warn-box" style="margin:0 0 14px;">This can't know anyone's actual age — only which team they played for. What it CAN do: work out how many consecutive years someone's played their current grade (a new player, or an odd number of years, means they're bottom-age and stay another year; an even number means they age up next year) — see "How this is calibrated" below for the evidence this is built on. Still assumes everyone stays at their current club, and pairs a club's teams with the club's own team of matching strength-rank one grade below (strongest with strongest, and so on) rather than tracking specific rosters across the age jump. A starting point for planning, not a final answer.</div>
     ${eligibleGrades.length===0 ? '<div class="empty">No age groups with a grade below them yet.</div>' : `
     <div class="controls-row" style="margin-bottom:14px;">
       <select id="nextSeasonGrade">${eligibleGrades.map(g=>`<option value="${g}" ${g===nextSeasonTargetGrade?'selected':''}>${g}</option>`).join('')}</select>
+      <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px;">Min per division <input type="number" id="nextSeasonMinSize" value="${nextSeasonMinSize}" min="2" max="30" style="width:56px;"></label>
+      <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px;">Max per division <input type="number" id="nextSeasonMaxSize" value="${nextSeasonMaxSize}" min="2" max="30" style="width:56px;"></label>
     </div>
-    <div id="suggestNextSeasonResult"></div>`}
+    <div id="suggestNextSeasonResult"></div>
+    <h3 style="font-size:16px;margin:32px 0 4px;">How this is calibrated</h3>
+    <div id="ageCalibrationPanel"></div>`}
   `;
   document.getElementById('backFromSuggestNextSeason').onclick = backFromSuggestNextSeason;
   const gradeSel = document.getElementById('nextSeasonGrade');
   if(gradeSel) gradeSel.onchange = e=>{ nextSeasonTargetGrade = e.target.value; renderSuggestNextSeason(); };
+  ['nextSeasonMinSize','nextSeasonMaxSize'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.onchange = ()=>{
+      nextSeasonMinSize = parseInt(document.getElementById('nextSeasonMinSize').value,10) || 6;
+      nextSeasonMaxSize = parseInt(document.getElementById('nextSeasonMaxSize').value,10) || 12;
+      renderSuggestNextSeason();
+    };
+  });
   const resultEl = document.getElementById('suggestNextSeasonResult');
   if(!resultEl || !nextSeasonTargetGrade) return;
 
@@ -3533,14 +4370,162 @@ function renderSuggestNextSeason(){
     resultEl.innerHTML = `<div class="empty">No games on file yet.</div>`;
     return;
   }
-  const teamCell = (t, grade) => t
-    ? `${t.teamName} <span class="mono" style="color:var(--muted);">(${t.wins}-${t.losses}-${t.draws}, Elo ${Math.round(t.elo)})</span>`
-    : `<span class="hint" style="margin:0;">No ${grade} team in ${latestYear}</span>`;
+  // Rows are already ranked strongest-first by blended rating — feeding that straight into the same
+  // bucketing function the current-season Suggest divisions tool uses turns the raw number into
+  // something everyone already knows how to read: an actual Division 1/2/3... label, not "1703".
+  // Division assignment always uses THIS strength-ranked order, regardless of how the table is
+  // currently sorted for display — sorting the table doesn't change which division anyone's in.
+  // Thin squads (see MIN_PLAYERS_FOR_HIGHER_DIVISION) are sorted to the very bottom BEFORE bucketing
+  // rather than swapped down afterward — a swap-based approach got stuck once the bottom division
+  // filled up entirely with other thin squads, with no normal-sized team left there to trade places
+  // with, confirmed on real data leaving some thin squads stranded above the bottom. Sorting first
+  // means there's no fixed-size division to get stuck against — thin squads simply fill however
+  // many bottom slots they need, always ending up below every normal-sized squad.
+  const bucketingOrder = [...rows].sort((a,b) => {
+    const aThin = a.expectedPlayerCount < MIN_PLAYERS_FOR_HIGHER_DIVISION;
+    const bThin = b.expectedPlayerCount < MIN_PLAYERS_FOR_HIGHER_DIVISION;
+    if(aThin !== bThin) return aThin ? 1 : -1;
+    return b.blended - a.blended;
+  });
+  const { divisions } = suggestDivisions(bucketingOrder, nextSeasonMinSize, nextSeasonMaxSize);
+  const divisionOf = new Map();
+  divisions.forEach((div, i) => div.forEach(r => divisionOf.set(r, i+1)));
+
+  // Constrain toward this year's actual divisions — most real teams don't move more than one
+  // division in a season even when the pure strength ranking suggests a bigger jump. The same-club-
+  // clash-free guarantee from suggestDivisions() above is preserved (nudgeTowardCurrentDivision only
+  // ever swaps two teams, never creates a new clash). Thin squads are excluded here entirely — they
+  // stay pinned to the bottom regardless of whatever division they were in before, since fielding
+  // enough players matters more than a smooth transition.
+  const teamDivisionThisYear = getTeamDivisionMap(latestYear);
+  const currentDivisionOf = new Map();
+  rows.forEach(r => {
+    if(r.expectedPlayerCount < MIN_PLAYERS_FOR_HIGHER_DIVISION) return;
+    if(r.current){
+      const d = teamDivisionThisYear[r.current.teamName];
+      if(d != null) currentDivisionOf.set(r, d);
+    }
+  });
+  nudgeTowardCurrentDivision(rows, divisionOf, currentDivisionOf);
+  enforceThinSquadBottom(rows, divisionOf);
+
+  const sortValue = (r, key) => {
+    if(key === 'division') return divisionOf.get(r);
+    if(key === 'currentDivision') return currentDivisionOf.get(r) ?? -Infinity;
+    if(key === 'club') return r.club.toLowerCase();
+    if(key === 'expectedTopAgePct') return r.expectedTopAgePct == null ? -Infinity : r.expectedTopAgePct;
+    if(key === 'expectedPlayerCount') return r.expectedPlayerCount;
+    return r.blended;
+  };
+  const sortedRows = [...rows].sort((a,b) => {
+    const av = sortValue(a, nextSeasonSort.key), bv = sortValue(b, nextSeasonSort.key);
+    if(av < bv) return nextSeasonSort.dir === 'asc' ? -1 : 1;
+    if(av > bv) return nextSeasonSort.dir === 'asc' ? 1 : -1;
+    return b.blended - a.blended; // stable tie-break by strength
+  });
+
+  const sortArrow = key => nextSeasonSort.key === key ? (nextSeasonSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const sortableTh = (key, label) => `<th data-sort-key="${key}" style="cursor:pointer;user-select:none;">${label}${sortArrow(key)}</th>`;
+  const moveCell = r => {
+    const cur = currentDivisionOf.get(r);
+    if(cur == null) return '<span class="hint" style="margin:0;">new</span>';
+    const suggested = divisionOf.get(r);
+    if(suggested === cur) return '— same';
+    return suggested < cur ? `▲ from Div ${cur}` : `▼ from Div ${cur}`;
+  };
+  const rowKey = r => r.club + '__' + r.clubTeamIndex;
+  const names = getNameByRosterKey();
+  const playerListHtml = r => {
+    const returning = r.group.filter(p => p.willBeTopAge);
+    const incoming = r.group.filter(p => !p.willBeTopAge);
+    const playerRow = p => `<li>${names[p.key] || '(unknown)'}${p.uncertain ? ' <span title="This player involves an assumption — either a first-recorded-season age guess, or (for a merged team) which of the two clubs they actually belong to" style="color:var(--gold);">*</span>' : ''}</li>`;
+    return `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:12px 0 12px 32px;">
+        <div>
+          <div class="hint" style="margin:0 0 6px;font-weight:600;">Returning (top-age next year) — ${returning.length}</div>
+          <ul style="margin:0;padding-left:18px;columns:2;column-gap:16px;">${returning.map(playerRow).join('') || '<li class="hint">none</li>'}</ul>
+        </div>
+        <div>
+          <div class="hint" style="margin:0 0 6px;font-weight:600;">Moving up from ${r.feeder ? getAgeGroupLabel(r.feeder.teamName) : 'the grade below'} — ${incoming.length}</div>
+          <ul style="margin:0;padding-left:18px;columns:2;column-gap:16px;">${incoming.map(playerRow).join('') || '<li class="hint">none</li>'}</ul>
+        </div>
+      </div>`;
+  };
   resultEl.innerHTML = `
-    <p class="hint" style="margin:0 0 10px;">Projecting each club's likely ${nextSeasonTargetGrade} strength for ${projectedYear}, from their ${latestYear} ${nextSeasonTargetGrade} team${feederGrade ? ` and ${latestYear} ${feederGrade} team` : ''}. Ranked highest projected strength first — not an official division assignment.</p>
-    <table><thead><tr><th>Club</th><th>${latestYear} ${nextSeasonTargetGrade} (this year)</th>${feederGrade?`<th>${latestYear} ${feederGrade} (coming up)</th>`:''}<th class="num">Projected rating</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr><td>${r.club}</td><td>${teamCell(r.current, nextSeasonTargetGrade)}</td>${feederGrade?`<td>${teamCell(r.feeder, feederGrade)}</td>`:''}<td class="num mono">${r.blended}</td></tr>`).join('')}</tbody></table>
+    <p class="hint" style="margin:0 0 10px;">Projecting each club's likely ${nextSeasonTargetGrade} strength for ${projectedYear}, from their ${latestYear} ${nextSeasonTargetGrade} team${feederGrade ? ` and ${latestYear} ${feederGrade} team` : ''}. No club can end up with two teams in the same division, and moves are kept to at most one division from where a team is now wherever that's possible without breaking that rule — except a team projected under ${MIN_PLAYERS_FOR_HIGHER_DIVISION} players, which is always dropped to the bottom division regardless of how strong its few players look on paper, since a squad that can barely field a side can't compete against a full one. "Expected top age %" is how much of the PROJECTED roster will be in their 2nd (top-age) year of ${nextSeasonTargetGrade} — high means mostly a settled, experienced squad; low means mostly first-year arrivals. "Expected players" assumes everyone stays at their current club and returns, capped at 23 per team and filled 1st team first — a number in gold means that team's projected to be short on numbers. A gold <span style="color:var(--gold);">*</span> means the team includes at least one player whose status is a real assumption, not a known fact — either a first-recorded-season age guess, or (for a merged team) a player defaulted to the first-named club there because no prior club history was found. Click a row to see which players make up that number. Click a column header to sort.</p>
+    <table><thead><tr><th></th>${sortableTh('division','Suggested division')}${sortableTh('club','Club')}${sortableTh('currentDivision','Moving from')}${sortableTh('expectedTopAgePct','Expected top age %')}${sortableTh('expectedPlayerCount','Expected players')}${sortableTh('blended','Projected rating')}</tr></thead>
+    <tbody>${sortedRows.map(r=>{
+      const expanded = nextSeasonExpandedRows.has(rowKey(r));
+      return `<tr class="expandable-row" data-row-key="${rowKey(r)}" style="cursor:pointer;">
+        <td class="mono" style="color:var(--muted);">${expanded?'▾':'▸'}</td>
+        <td class="mono">Div ${divisionOf.get(r)}</td>
+        <td>${r.club}${r.clubTeamCount>1?` <span class="hint" style="margin:0;">(${['1st','2nd','3rd','4th','5th'][r.clubTeamIndex] || (r.clubTeamIndex+1)+'th'} team)</span>`:''}</td>
+        <td class="mono">${moveCell(r)}</td>
+        <td class="num mono">${r.expectedTopAgePct == null ? '—' : r.expectedTopAgePct+'%'}</td>
+        <td class="num mono"${r.expectedPlayerCount < 16 ? ' style="color:var(--gold);"' : ''}>${r.expectedPlayerCount}/23${r.hasUncertainAge ? ' <span title="Includes at least one player with an assumed age or club — see the expanded list for which" style="color:var(--gold);">*</span>' : ''}</td>
+        <td class="num mono">${r.blended}</td>
+      </tr>${expanded ? `<tr><td colspan="7" style="background:var(--surface-2);">${playerListHtml(r)}</td></tr>` : ''}`;
+    }).join('')}</tbody></table>
   `;
+  resultEl.querySelectorAll('tr.expandable-row').forEach(tr => {
+    tr.onclick = (e) => {
+      if(e.target.closest('th')) return;
+      const key = tr.dataset.rowKey;
+      if(nextSeasonExpandedRows.has(key)) nextSeasonExpandedRows.delete(key); else nextSeasonExpandedRows.add(key);
+      renderSuggestNextSeason();
+    };
+  });
+  resultEl.querySelectorAll('th[data-sort-key]').forEach(th => {
+    th.onclick = () => {
+      const key = th.dataset.sortKey;
+      if(nextSeasonSort.key === key){ nextSeasonSort.dir = nextSeasonSort.dir === 'asc' ? 'desc' : 'asc'; }
+      else { nextSeasonSort = { key, dir: key === 'club' ? 'asc' : 'desc' }; }
+      renderSuggestNextSeason();
+    };
+  });
+  renderAgeCalibrationPanel();
+}
+
+// The evidence behind the age-inference approach above, shown right on the page (not just in code
+// comments) so it stays checkable as the competition's own data grows — every number here is
+// recomputed live from whatever's currently loaded, not a fixed one-off study.
+function renderAgeCalibrationPanel(){
+  const panel = document.getElementById('ageCalibrationPanel');
+  if(!panel) return;
+  const calib = computeAgeCalibrationStats();
+  if(!calib){
+    panel.innerHTML = `<p class="hint">Not enough seasons on file yet to check this against real results.</p>`;
+    return;
+  }
+  panel.innerHTML = `
+    <p class="hint" style="margin:0 0 14px;">${calib.excludedYear} is left out of every number below — it's the first year on file, so every player that year looks like a first-season bottom-ager purely from having no earlier season to check against, not a real reflection of that year's rosters. Everything here uses ${calib.calibrationYears.join(', ')}.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:16px;">
+      <div><canvas id="ageCalibDivisionChart" height="220"></canvas></div>
+      <div><canvas id="ageCalibRankChart" height="220"></canvas></div>
+    </div>
+    <p class="hint" style="margin:0;">When a player is promoted a grade, their new division only loosely matches their old one: ${calib.movement.samePct==null ? 'not enough promotions on file yet to check.' : `${calib.movement.samePct}% land in the exact same division number, ${calib.movement.within1Pct}% within one division either way (n=${calib.movement.n} promotions checked) — real, but noisy enough that the grade coming up is deliberately weighted less than the grade already being played.`}</p>
+  `;
+
+  if(window._ageCalibDivisionChartInstance) window._ageCalibDivisionChartInstance.destroy();
+  if(calib.divisionStats.length){
+    window._ageCalibDivisionChartInstance = new Chart(document.getElementById('ageCalibDivisionChart').getContext('2d'), {
+      type:'bar',
+      data:{ labels: calib.divisionStats.map(d=>d.division.replace('Division ','Div ')), datasets:[{ label:'Avg top-age % of roster', data: calib.divisionStats.map(d=>d.avg), backgroundColor:'#4B7BA8' }] },
+      options:{ responsive:true, maintainAspectRatio:false,
+        scales:{ x:{ ticks:{ color:'#8FA0A3' }, grid:{ display:false } }, y:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' }, title:{ display:true, text:'% top-age', color:'#8FA0A3' } } },
+        plugins:{ legend:{ display:false }, title:{ display:true, text:'Top-age % by division', color:'#EDF1F0' } } }
+    });
+  }
+  if(window._ageCalibRankChartInstance) window._ageCalibRankChartInstance.destroy();
+  if(calib.rankStats.length){
+    window._ageCalibRankChartInstance = new Chart(document.getElementById('ageCalibRankChart').getContext('2d'), {
+      type:'bar',
+      data:{ labels: calib.rankStats.map(r=>r.rank===1?'1st team':r.rank===2?'2nd team':r.rank===3?'3rd team':r.rank+'th team'), datasets:[{ label:'Avg top-age % of roster', data: calib.rankStats.map(r=>r.avg), backgroundColor:'#8B6DB8' }] },
+      options:{ responsive:true, maintainAspectRatio:false,
+        scales:{ x:{ ticks:{ color:'#8FA0A3' }, grid:{ display:false } }, y:{ ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' }, title:{ display:true, text:'% top-age', color:'#8FA0A3' } } },
+        plugins:{ legend:{ display:false }, title:{ display:true, text:'Top-age % by team rank within a club', color:'#EDF1F0' } } }
+    });
+  }
 }
 
 function doOpenSuggestDivisions(){
@@ -10798,6 +11783,7 @@ function renderTeamDetail(teamKey){
       <div><h2 style="${teamColor ? `color:${lightenHex(teamColor.primary,0.55)};` : ''}">${t.name}</h2><div class="team-tag">${t.gamesPlayed} games played &middot; ${roster.length} players used</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="ghost" id="squadProgressionsBtn" title="See which squads across the whole competition improved, held steady, or dropped back — filterable by year, age group and division">Squad progressions</button>
+        <button class="ghost" id="cohortTrajectoryBtn" title="See this team's real split-and-reunite cycle — the bottom-age half that stays, the top-age half that moves up, and where each lands">Cohort trajectory</button>
         <button class="compare-btn" id="compareThisTeamBtn">Compare this team</button>
       </div>
     </div>
@@ -10944,6 +11930,8 @@ function renderTeamDetail(teamKey){
   if(progBtn) progBtn.onclick = openProgFromHere;
   const progLink = document.getElementById('squadProgressionsLink');
   if(progLink) progLink.onclick = openProgFromHere;
+  const cohortTrajBtn = document.getElementById('cohortTrajectoryBtn');
+  if(cohortTrajBtn) cohortTrajBtn.onclick = ()=> openCohortTrajectory({ club: getClub(t.name), teamName: t.name, year: t.year });
   wrap.querySelectorAll('[data-open-game]').forEach(el=>{
     el.onclick = ()=> openGameDetail(el.dataset.openGame);
   });
@@ -12847,6 +13835,27 @@ function getSquadTeammateOverlap(playerList, teamObjA, teamObjB){
 }
 
 
+// Combined division + ladder-position score: divisionNumber + (ladderRank-1)/teamsInDivision.
+// Lower is always better, and — critically — no amount of ladder position can cross a division
+// boundary (1st in Div 2 is always >= 2.0, worse than even last in Div 1, which is < 2.0). This
+// fixes a real, confirmed gap in the plain division-number trend below: a team that drops from
+// 2nd to 4th in the SAME division showed as "Steady" (division number never changed), hiding a
+// genuine slide the person tracking their own club's ladder position every week would obviously
+// see. Falls back to plain divisionRank (whole-number, no ladder detail) when the team's games
+// that year don't resolve to a single real division (e.g. mid-season regrading, or a Grading-only
+// team) — a coarser number is preferable to a wrong or fabricated one.
+function divisionAndLadderScore(teamName, year){
+  const div = getTeamDivisionMap(year)[teamName];
+  if(div == null) return null;
+  const ageGroup = getAgeGroupLabel(teamName);
+  if(!ageGroup) return divisionRank('Division ' + div);
+  const ladder = computeLadder({ year, ageGroup, division: 'Division ' + div });
+  if(!ladder.length) return divisionRank('Division ' + div);
+  const row = ladder.find(r=> r.name===teamName);
+  if(!row) return divisionRank('Division ' + div);
+  return div + (row.rank - 1) / ladder.length;
+}
+
 // Progression of ONE squad through the seasons, rather than every team a club fields.
 // Club-wide aggregation pulled in reserves/senior sides and unrelated age groups, which made
 // the records meaningless; scoping to the cohort keeps it to this group of players.
@@ -12874,18 +13883,24 @@ function getCohortProgression(cohort){
     ...r, teams:[...r.teams], divisions:[...r.divisions]
   })).sort((a,b)=> a.year-b.year);
 
-  // Trend compares average division rank year to year (lower number = stronger division). Grades
-  // that never run a numbered division (Seniors/Reserves, or any grade in a season with no graded
-  // field) fall back to a win% percentile against everyone else who fielded that grade+year —
-  // tracked on its own separate chain, since a division-rank trend and a win%-based trend aren't
-  // on the same scale and shouldn't be compared to each other.
+  // Trend compares average division+ladder score year to year (lower is always stronger, and a
+  // division boundary always wins over any in-division ladder movement — see
+  // divisionAndLadderScore above). Grades that never run a numbered division (Seniors/Reserves, or
+  // any grade in a season with no graded field) fall back to a win% percentile against everyone
+  // else who fielded that grade+year — tracked on its own separate chain, since a division-based
+  // trend and a win%-based trend aren't on the same scale and shouldn't be compared to each other.
   const { teamList } = computeAggregates();
   let prevRank = null, prevWinLevel = null;
   rows.forEach(r=>{
-    const ranks = r.divisions.map(divisionRank).filter(x=>x!=null);
-    const avgRank = ranks.length ? ranks.reduce((s,x)=>s+x,0)/ranks.length : null;
+    const scores = r.teams.map(t=> divisionAndLadderScore(t, r.year)).filter(x=>x!=null);
+    const avgRank = scores.length ? scores.reduce((s,x)=>s+x,0)/scores.length : null;
     if(avgRank!=null){
-      r.trend = prevRank!=null ? (avgRank < prevRank ? 'Improved' : (avgRank > prevRank ? 'Dropped back' : 'Steady')) : null;
+      // A small tolerance band around "no change" — the score is now continuous (division +
+      // fractional ladder position), so exact equality almost never happens even for a
+      // genuinely unchanged standing. 0.08 is roughly one ladder spot in a ~12-team division;
+      // anything smaller reads as normal week-to-week noise rather than a real move.
+      const STEADY_BAND = 0.08;
+      r.trend = prevRank!=null ? (avgRank < prevRank - STEADY_BAND ? 'Improved' : (avgRank > prevRank + STEADY_BAND ? 'Dropped back' : 'Steady')) : null;
       r.trendBasis = 'division';
     } else {
       const grade = getAgeGroupLabel(r.teams[0]||'');
@@ -12905,6 +13920,578 @@ function getCohortProgression(cohort){
   return rows.reverse();
 }
 
+// ─── Cohort split-and-reunite trajectory ────────────────────────────────────────────────────
+// A team is really a rolling cycle: a whole grade-cohort plays together, splits into a bottom-age
+// half (stays in the same grade one more year) and a top-age half (moves up early) the next
+// season, then those two halves reunite two years later as the next grade's whole team. This
+// traces that full cycle — one grade back, the seed year itself, and one grade forward — for any
+// team the user picks, using real ladder ranks throughout (not Elo, so a lower division can never
+// outrank a higher one — see the corrected Squad Progressions trend above for why that matters).
+const GRADE_SEQUENCE = ['U9','U10','U12','U14','U16','U18'];
+// The earliest grade treated as genuinely competitive for multi-year improvement/stability
+// measurement — U9/U10/U12 run no real division ladder in this competition (confirmed across
+// this whole investigation), so a squad's improvement shouldn't be measured starting from an
+// ungraded age even where the win%-percentile fallback COULD produce a number for one. A single
+// named constant, not a scattered 'U14' literal, so this is a one-line change if the competition
+// ever introduces real grading at a younger age.
+const EARLIEST_COMPETITIVE_GRADE = 'U14';
+function isCompetitiveGrade(grade){
+  const i = GRADE_SEQUENCE.indexOf(grade);
+  if(i === -1) return true; // not a listed junior grade (Seniors/Reserves) — always competitive, unaffected by this junior-grading rule
+  const floor = GRADE_SEQUENCE.indexOf(EARLIEST_COMPETITIVE_GRADE);
+  return floor===-1 || i>=floor;
+}
+function nextGradeInSequence(grade){
+  const i = GRADE_SEQUENCE.indexOf(grade);
+  return (i>=0 && i<GRADE_SEQUENCE.length-1) ? GRADE_SEQUENCE[i+1] : null;
+}
+function prevGradeInSequence(grade){
+  const i = GRADE_SEQUENCE.indexOf(grade);
+  return i>0 ? GRADE_SEQUENCE[i-1] : null;
+}
+
+// Finds the best real successor/predecessor for a group of players moving into a given
+// grade+year, preferring a candidate with a genuine graded season (a real division/ladder
+// result) over one with merely higher incidental roster overlap. Confirmed necessary on real
+// data: an incomplete, Grading-only stub team can coincidentally share more player-key overlap
+// than the real full-season team, especially for small groups (see the Newcomb/Queenscliff
+// investigation this was built from) — a name-match against the origin club is checked first
+// since that's stronger direct evidence than overlap count alone when it's available.
+function findCohortLinkRobust(playerSet, grade, year, originClub, minOverlap){
+  if(!playerSet.size) return null;
+  const { teamList } = computeAggregates();
+  const candidates = teamList.filter(t=> t.ageGroup===grade && t.year===year);
+  const divMap = getTeamDivisionMap(year);
+  const scored = candidates.map(t=>{
+    const roster = getTeamRosterKeys(t.name, year);
+    let overlap = 0;
+    playerSet.forEach(k=>{ if(roster.has(k)) overlap++; });
+    const hasRealSeason = divMap[t.name] != null;
+    const nameMatch = originClub && t.name.toLowerCase().includes(originClub.toLowerCase());
+    return { name:t.name, overlap, hasRealSeason, nameMatch };
+  }).filter(c=> c.nameMatch ? c.overlap>=1 : c.overlap >= (minOverlap||3));
+  if(!scored.length) return null;
+  scored.sort((a,b)=>{
+    if(a.nameMatch !== b.nameMatch) return a.nameMatch ? -1 : 1;
+    if(a.hasRealSeason !== b.hasRealSeason) return a.hasRealSeason ? -1 : 1;
+    return b.overlap - a.overlap;
+  });
+  return scored[0];
+}
+
+// Small roster-key cache, separate from buildTeamSeasonRosters (which keys by team__year and is
+// tuned for the cohort-threshold scan above) — this one's called per-team inside tight loops here.
+// One-time index of every "TeamName__Year" -> roster of ageRosterKey-style player keys, built in
+// a single pass over games and cached by _aggVersion. Confirmed necessary on real data: the
+// per-call version of this (re-scanning the whole games array every time a team+year hadn't been
+// looked up yet) took over 16 seconds to build the "show every other team" comparison for one
+// grade+year — computeAllTeamsWholeSeries calls this dozens of times per club, so a full games-
+// array scan on every miss compounds badly. Keyed with ageRosterKey specifically (playhqId or
+// 'name:'+lowercased), NOT buildTeamSeasonRosters' player-list keys — those are the app's own
+// internal resolved player identity, a different key space entirely (the same mismatch that
+// caused the earlier MVP-score bug), and would silently break every isTopAgeInGrade lookup here.
+let _allTeamRostersIndex = null, _allTeamRostersIndexVersion = -1;
+function getAllTeamRostersIndex(){
+  if(_allTeamRostersIndexVersion === _aggVersion) return _allTeamRostersIndex;
+  const index = new Map();
+  games.forEach(g=>{
+    const year = getGameYear(g);
+    if(!year) return;
+    ['teamA','teamB'].forEach(side=>{
+      const teamName = g[side].name;
+      const cacheKey = teamName+'__'+year;
+      let roster = index.get(cacheKey);
+      if(!roster){ roster = new Set(); index.set(cacheKey, roster); }
+      (g[side].players||[]).forEach(p=>{
+        const key = ageRosterKey(p);
+        if(key) roster.add(key);
+      });
+    });
+  });
+  _allTeamRostersIndex = index;
+  _allTeamRostersIndexVersion = _aggVersion;
+  return index;
+}
+function getTeamRosterKeys(teamName, year){
+  return getAllTeamRostersIndex().get(teamName+'__'+year) || new Set();
+}
+
+// Overall rank across EVERY division in a grade+year — every Division 1 team ranks above every
+// Division 2 team regardless of ladder position, then ladder position (points, then percentage)
+// breaks ties within a division. Built by stacking each division's own computeLadder result in
+// division order, which is the same "division first, then ladder position" methodology validated
+// against real user-tracked figures earlier — a WITHIN-division rank (e.g. "2nd of 11 in Division
+// 5") is a genuinely different, much narrower number and was confirmed as the wrong thing to show
+// here on real data (a squad's actual competition-wide standing, not just its division standing).
+// Cached per (ageGroup|year|_aggVersion) since it's called repeatedly while building one trajectory.
+const _overallGradeRankCache = new Map();
+function computeOverallGradeRank(ageGroup, year){
+  const cacheKey = `${ageGroup}|${year}|${_aggVersion}`;
+  if(_overallGradeRankCache.has(cacheKey)) return _overallGradeRankCache.get(cacheKey);
+  const { teamList } = computeAggregates();
+  const divMap = getTeamDivisionMap(year);
+  const divisions = [...new Set(teamList
+    .filter(t=> t.ageGroup===ageGroup && t.year===year && divMap[t.name]!=null)
+    .map(t=> divMap[t.name])
+  )].sort((a,b)=>a-b);
+  const rankOf = {};
+  let offset = 0;
+  divisions.forEach(div=>{
+    const ladder = computeLadder({ year, ageGroup, division:'Division '+div });
+    ladder.forEach(row=>{ rankOf[row.name] = offset + row.rank; });
+    offset += ladder.length;
+  });
+  const result = { rankOf, total: offset };
+  _overallGradeRankCache.set(cacheKey, result);
+  return result;
+}
+function rankAndTotalForTeam(teamName, year){
+  const div = getTeamDivisionMap(year)[teamName];
+  if(div==null) return null;
+  const ageGroup = getAgeGroupLabel(teamName);
+  const overall = computeOverallGradeRank(ageGroup, year);
+  const rank = overall.rankOf[teamName];
+  return rank!=null ? { rank, total: overall.total, division: div } : null;
+}
+
+// Builds the fork-and-reunite trajectory around one seed team. Returns an array of "columns"
+// (one per calendar year in range), each holding 1 or 2 points (2 exactly at the split years).
+// seedTeamName/seedYear anchor the middle (reunited) column; grade is inferred from the name.
+// Forward/backward each reach a full "whole team, split, whole team" diamond (2 hops either
+// side) when the data allows it — mirrored symmetrically, and never reaching into a year beyond
+// the latest one actually on file (a genuine future season has no data to show at all, which is a
+// different thing from a past season's data being messy or incomplete).
+// anchorClub is which club's perspective this trace is being run from — matters specifically for
+// a merged-team seed. Confirmed as a real bug on real data: getClub() resolves a merged team
+// ("Queenscliff / Newcomb Power Coutas U16") to whichever club the app treats as "primary" for
+// that name, which is not necessarily the club the user is actually browsing. Left to default,
+// every subsequent hop's name-match bias would pull toward THAT club's other teams instead of
+// staying anchored to the one actually being explored — e.g. browsing Newcomb's own cohort
+// history would silently wander into Queenscliff's unrelated teams once it passed through their
+// shared merge year. Defaults to the old getClub() behaviour only for callers that have no single
+// "correct" club to anchor on anyway (comparing across many different clubs at once).
+function computeCohortForkTrajectory(seedTeamName, seedYear, anchorClub){
+  const seedGrade = getAgeGroupLabel(seedTeamName);
+  const club = anchorClub || getClub(seedTeamName);
+  const prevGrade = prevGradeInSequence(seedGrade);
+  const nextGrade = nextGradeInSequence(seedGrade);
+  const maxYear = Math.max(...computeAggregates().teamList.map(t=>t.year).filter(Boolean));
+  const columns = [];
+
+  function wholeTeamPoint(teamName, year, label){
+    const rt = rankAndTotalForTeam(teamName, year);
+    return { year, label, teamName, rank: rt?rt.rank:null, total: rt?rt.total:null };
+  }
+  function splitPoints(teamName, year, grade){
+    const roster = getTeamRosterKeys(teamName, year);
+    const bottomAgers = new Set(), topAgers = new Set();
+    roster.forEach(k=>{
+      const status = isTopAgeInGrade(k, year, grade);
+      if(status===false) bottomAgers.add(k); else if(status===true) topAgers.add(k);
+    });
+    const points = [];
+    if(bottomAgers.size>=3){
+      const link = findCohortLinkRobust(bottomAgers, grade, year+1, club, 3);
+      const rt = link ? rankAndTotalForTeam(link.name, year+1) : null;
+      points.push({ year:year+1, label:'Stayed (bottom-age)', teamName: link?link.name:null, rank: rt?rt.rank:null, total: rt?rt.total:null, branch:'stay' });
+    }
+    if(topAgers.size>=3 && nextGrade){
+      const link = findCohortLinkRobust(topAgers, nextGrade, year+1, club, 3);
+      const rt = link ? rankAndTotalForTeam(link.name, year+1) : null;
+      points.push({ year:year+1, label:'Moved up (top-age)', teamName: link?link.name:null, rank: rt?rt.rank:null, total: rt?rt.total:null, branch:'move' });
+    }
+    return points;
+  }
+
+  // Seed column (reunited, whole)
+  const seedPoint = wholeTeamPoint(seedTeamName, seedYear, seedGrade+' (whole team)');
+  columns.push({ year: seedYear, points: [seedPoint] });
+
+  // Forward: split next year, reunite the year after — only as far as real seasons actually exist.
+  if(nextGrade && seedYear+1<=maxYear){
+    const fwdSplit = splitPoints(seedTeamName, seedYear, seedGrade);
+    columns.push({ year: seedYear+1, points: fwdSplit });
+    const stayLink = fwdSplit.find(p=>p.branch==='stay' && p.teamName);
+    if(stayLink && seedYear+2<=maxYear){
+      const stayRoster = getTeamRosterKeys(stayLink.teamName, seedYear+1);
+      const reuniteLink = findCohortLinkRobust(stayRoster, nextGrade, seedYear+2, club, 3);
+      const rt = reuniteLink ? rankAndTotalForTeam(reuniteLink.name, seedYear+2) : null;
+      columns.push({ year: seedYear+2, points: [{ year:seedYear+2, label:nextGrade+' (reunited)', teamName: reuniteLink?reuniteLink.name:null, rank: rt?rt.rank:null, total: rt?rt.total:null }] });
+    }
+  }
+
+  // Backward: the seed year is itself a reunion of TWO branches the year before — its top-age
+  // half was already in the SAME grade (as bottom-agers, their first year); its bottom-age half
+  // was in the PREVIOUS grade (as top-agers, about to move up). Mirrors the forward split exactly,
+  // just run in reverse — confirmed necessary on real data: an earlier version of this traced the
+  // top-age half to prevGrade instead of the same grade, which is backwards (a top-ager doesn't
+  // change grade between one year and the next; a bottom-ager does).
+  if(prevGrade){
+    const seedRoster = getTeamRosterKeys(seedTeamName, seedYear);
+    const topAgers = new Set(), bottomAgers = new Set();
+    seedRoster.forEach(k=>{
+      const status = isTopAgeInGrade(k, seedYear, seedGrade);
+      if(status===true) topAgers.add(k); else if(status===false) bottomAgers.add(k);
+    });
+    const backPoints = [];
+    let stayBackLink = null;
+    if(topAgers.size>=3){
+      const link = findCohortLinkRobust(topAgers, seedGrade, seedYear-1, club, 3);
+      if(link) stayBackLink = link;
+      const rt = link ? rankAndTotalForTeam(link.name, seedYear-1) : null;
+      backPoints.push({ year:seedYear-1, label:seedGrade+' (already here, bottom-age)', teamName: link?link.name:null, rank: rt?rt.rank:null, total: rt?rt.total:null, branch:'stay' });
+    }
+    if(bottomAgers.size>=3){
+      const link = findCohortLinkRobust(bottomAgers, prevGrade, seedYear-1, club, 3);
+      const rt = link ? rankAndTotalForTeam(link.name, seedYear-1) : null;
+      backPoints.push({ year:seedYear-1, label:prevGrade+' (about to move up, top-age)', teamName: link?link.name:null, rank: rt?rt.rank:null, total: rt?rt.total:null, branch:'move' });
+    }
+    if(backPoints.length) columns.unshift({ year: seedYear-1, points: backPoints });
+
+    // One more hop back: the "already here" branch (seedGrade, seedYear-1) itself arrived from a
+    // WHOLE team in prevGrade two years before the seed — the direct mirror of the forward
+    // reunite step, just run backward. This is the piece that was missing before: without it the
+    // backward side stopped one hop short of the forward side's depth, so the diamond only ever
+    // showed half of itself.
+    if(stayBackLink && prevGradeInSequence(seedGrade)){
+      const stayBackRoster = getTeamRosterKeys(stayBackLink.name, seedYear-1);
+      const wholeLink = findCohortLinkRobust(stayBackRoster, prevGrade, seedYear-2, club, 3);
+      const rt = wholeLink ? rankAndTotalForTeam(wholeLink.name, seedYear-2) : null;
+      columns.unshift({ year: seedYear-2, points: [{ year:seedYear-2, label:prevGrade+' (whole team)', teamName: wholeLink?wholeLink.name:null, rank: rt?rt.rank:null, total: rt?rt.total:null }] });
+    }
+  }
+
+  return columns;
+}
+
+// ─── Cohort trajectory page ──────────────────────────────────────────────────────────────────
+// The visual front-end for computeCohortForkTrajectory above: pick a club, pick which of its
+// graded teams to anchor on, see that cohort's real split-and-reunite cycle plotted as raw rank
+// (not percentage — a pool-size-distorted percentage was a real, confirmed problem earlier in
+// this app's own history; see the Squad Progressions ladder-score fix for the same lesson).
+let cohortTrajFilters = { club:null, teamKey:null, showAll:false, showAllCohorts:false };
+
+// For every club that fielded a team in this grade+year, a lightweight "whole team only" series
+// across the same window — reuses computeCohortForkTrajectory per club (same tracing rules as the
+// highlighted cohort, so the comparison is apples-to-apples) but keeps only the reunited/whole
+// points, dropping each club's own split detail to keep an all-teams overlay readable.
+const _allTeamsWholeSeriesCache = new Map();
+function computeAllTeamsWholeSeries(grade, year){
+  const cacheKey = `${grade}|${year}|${_aggVersion}`;
+  if(_allTeamsWholeSeriesCache.has(cacheKey)) return _allTeamsWholeSeriesCache.get(cacheKey);
+  const { teamList } = computeAggregates();
+  const seeds = teamList.filter(t=> t.ageGroup===grade && t.year===year);
+  const byClub = new Map();
+  seeds.forEach(t=>{
+    const club = getClub(t.name);
+    if(!club || byClub.has(club)) return; // one seed per club — same convention as the dropdown list
+    byClub.set(club, t.name);
+  });
+  const result = [];
+  byClub.forEach((teamName, club)=>{
+    const traj = computeCohortForkTrajectory(teamName, year, club);
+    const points = traj.filter(c=>c.points.length===1).map(c=>c.points[0]).filter(p=>p.rank!=null);
+    if(points.length>=2) result.push({ club, points });
+  });
+  _allTeamsWholeSeriesCache.set(cacheKey, result);
+  return result;
+}
+
+function openCohortTrajectory(preset){
+  doOpenCohortTrajectory(preset);
+  navPush('cohort-trajectory', 'Cohort Trajectory', 'tools/cohort-trajectory', ()=>doOpenCohortTrajectory(preset));
+}
+function doOpenCohortTrajectory(preset){
+  if(preset){
+    if(preset.club) cohortTrajFilters.club = preset.club;
+    if(preset.teamName && preset.year) cohortTrajFilters.teamKey = preset.teamName + '__' + preset.year;
+  }
+  showPanel('cohort-trajectory');
+  renderCohortTrajectory();
+}
+
+function renderCohortTrajectory(){
+  const wrap = document.getElementById('cohortTrajectoryWrap');
+  const header = `<span class="back-link" id="backFromCohortTraj">&larr; Back</span><h2 style="font-size:20px;">Cohort trajectory</h2>`;
+  // Tracing even one cohort touches computeLadder for several distinct years, and each NEW year
+  // seen this session pays a real, one-time cost the first time anything needs it (confirmed on
+  // real data at up to several seconds per year) — a loading indicator here means that cost reads
+  // as "working", not as a frozen page, on whichever click happens to be first to need it.
+  renderWithLoadingIndicator(wrap, header, ()=> renderCohortTrajectoryInner(wrap, header));
+}
+// For every distinct grade+year the given club has fielded a graded team in, that cohort's own
+// whole-team-only series (reuses computeCohortForkTrajectory per seed, same tracing rules as
+// everywhere else on this page). Different starting points can legitimately land on the same real
+// team at a shared year — e.g. a club's 2024 U14 cohort and its 2026 U16 cohort both pass through
+// the same real 2026 U16 team — that's not a bug, it's the same rolling cycle seen from two
+// different anchors, and the chart will just show two lines meeting at that point.
+const _clubAllCohortsCache = new Map();
+function computeClubAllCohortsSeries(club){
+  const cacheKey = `${club}|${_aggVersion}`;
+  if(_clubAllCohortsCache.has(cacheKey)) return _clubAllCohortsCache.get(cacheKey);
+  const { teamList } = computeAggregates();
+  const seeds = teamList.filter(t=> GRADED_AGE_GROUPS.includes(t.ageGroup) && t.year && getAllClubsForTeam(t.name).includes(club));
+  const byGradeYear = new Map();
+  seeds.forEach(t=>{
+    const key = t.ageGroup+'|'+t.year;
+    if(!byGradeYear.has(key)) byGradeYear.set(key, t.name); // one seed per grade+year, same convention as the main dropdown
+  });
+  const result = [];
+  byGradeYear.forEach((teamName, key)=>{
+    const [grade, yearStr] = key.split('|');
+    const year = parseInt(yearStr, 10);
+    const traj = computeCohortForkTrajectory(teamName, year, club);
+    const points = traj.filter(c=>c.points.length===1).map(c=>c.points[0]).filter(p=>p.rank!=null);
+    if(points.length>=2) result.push({ label: `${grade} ${year}`, points });
+  });
+  result.sort((a,b)=> a.points[0].year-b.points[0].year || gradeDisplayRank(a.label.split(' ')[0])-gradeDisplayRank(b.label.split(' ')[0]));
+  _clubAllCohortsCache.set(cacheKey, result);
+  return result;
+}
+
+function renderCohortTrajectoryInner(wrap, header){
+  const { teamList } = computeAggregates();
+  const gradedTeams = teamList.filter(t=> GRADED_AGE_GROUPS.includes(t.ageGroup) && t.year);
+
+  // getAllClubsForTeam, not getClub — a merged team ("Inverleigh / Modewarre U16") needs to show
+  // up when browsing EITHER constituent club, not just whichever one getClub happens to resolve
+  // to as "the" club. Confirmed on real data: Inverleigh's own U16 2025 team was a Modewarre
+  // merge, but it was only appearing under Inverleigh's dropdown, not Modewarre's.
+  const clubs = [...new Set(gradedTeams.flatMap(t=>getAllClubsForTeam(t.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if(!cohortTrajFilters.club || !clubs.includes(cohortTrajFilters.club)) cohortTrajFilters.club = clubs[0] || null;
+
+  const clubTeams = gradedTeams.filter(t=> getAllClubsForTeam(t.name).includes(cohortTrajFilters.club));
+  clubTeams.sort((a,b)=> b.year-a.year || gradeDisplayRank(a.ageGroup)-gradeDisplayRank(b.ageGroup) || a.name.localeCompare(b.name));
+  const teamKeys = clubTeams.map(t=> t.name+'__'+t.year);
+  if(!cohortTrajFilters.teamKey || !teamKeys.includes(cohortTrajFilters.teamKey)){
+    cohortTrajFilters.teamKey = teamKeys[0] || null;
+  }
+
+  let trajectory = [], seedName = null, seedYear = null, seedGrade = null;
+  if(cohortTrajFilters.teamKey){
+    const idx = cohortTrajFilters.teamKey.lastIndexOf('__');
+    seedName = cohortTrajFilters.teamKey.slice(0, idx);
+    seedYear = parseInt(cohortTrajFilters.teamKey.slice(idx+2), 10);
+    seedGrade = getAgeGroupLabel(seedName);
+    trajectory = computeCohortForkTrajectory(seedName, seedYear, cohortTrajFilters.club);
+  }
+
+  // Whole-team-only points (skips the split branches) — the "overall cohort trend" independent
+  // of the two mid-cycle detours, and what "all other teams" get plotted with too, so the
+  // comparison lines mean the same thing as the highlighted one.
+  const wholePoints = trajectory.filter(c=>c.points.length===1).map(c=>c.points[0]).filter(p=>p.rank!=null);
+  let insightsHtml = '';
+  if(wholePoints.length>=2){
+    const first = wholePoints[0], last = wholePoints[wholePoints.length-1];
+    // Raw rank change is the headline — confirmed necessary on real data: a shrinking pool (fewer
+    // teams fielded in a later grade/year than an earlier one, common as clubs consolidate squads
+    // approaching Seniors) can make percentage look flat or even worse while the team's actual
+    // rank position climbed, exactly the same pool-size distortion the Squad Progressions ladder
+    // fix addressed. Percentage is still shown, but only as secondary context, with an explicit
+    // note when the two disagree so it's never mistaken for a second, independent confirmation.
+    const rankChange = last.rank - first.rank; // negative = moved up (better)
+    const dirWord = rankChange < -1 ? 'improved' : (rankChange > 1 ? 'declined' : 'held roughly steady');
+    const dirColor = rankChange < -1 ? 'var(--green)' : (rankChange > 1 ? 'var(--red)' : 'var(--muted)');
+    const firstPct = Math.round(100*first.rank/first.total), lastPct = Math.round(100*last.rank/last.total);
+    const pctChange = lastPct - firstPct;
+    const poolChanged = first.total !== last.total;
+    const disagree = poolChanged && Math.sign(rankChange) !== Math.sign(pctChange) && rankChange!==0 && pctChange!==0;
+    const splitCols = trajectory.filter(c=>c.points.length===2);
+    let splitNote = '';
+    if(splitCols.length){
+      const gaps = splitCols.map(c=>{
+        const [a,b] = c.points;
+        if(a.rank==null || b.rank==null) return null;
+        return Math.abs(Math.round(100*a.rank/a.total) - Math.round(100*b.rank/b.total));
+      }).filter(g=>g!=null);
+      if(gaps.length){
+        const maxGap = Math.max(...gaps);
+        splitNote = maxGap>25
+          ? ` The two halves weren't close in strength at the split (about ${maxGap} percentile points apart) — one branch was carrying most of the group's overall standing.`
+          : ` The two halves were fairly evenly matched at the split (within ${maxGap} percentile points of each other).`;
+      }
+    }
+    insightsHtml = `
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:2px;">Overall, ${first.year} \u2192 ${last.year}</div>
+        <div style="font-size:19px;font-weight:700;color:${dirColor};">Rank ${first.rank} of ${first.total} \u2192 ${last.rank} of ${last.total} (${dirWord}${rankChange!==0?', '+(rankChange<0?'':'+')+(-rankChange)+' place'+(Math.abs(rankChange)===1?'':'s'):''})</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">As a percentage of each year's pool: ${firstPct}% \u2192 ${lastPct}%${poolChanged?` (pool size changed, ${first.total} \u2192 ${last.total} teams)`:''}.${disagree ? ` <b style="color:var(--gold);">Rank and percentage point different directions here</b> — that happens when the pool size itself shrinks or grows a lot between the two years; treat the RANK figure above as the more reliable one, the same lesson from the Squad Progressions fix.` : ''}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:4px;">This end-to-end read skips the mid-cycle split/reunite detour shown in the chart below — use it as the headline number, and the chart for the shape of how it got there.${splitNote}</div>
+      </div>`;
+  }
+
+  const showAll = cohortTrajFilters.showAll;
+  let allTeamsData = [];
+  if(showAll && seedGrade && seedYear){
+    allTeamsData = computeAllTeamsWholeSeries(seedGrade, seedYear).filter(s=> s.club !== cohortTrajFilters.club);
+  }
+  const showAllCohorts = cohortTrajFilters.showAllCohorts;
+  let allCohortsData = [];
+  if(showAllCohorts && cohortTrajFilters.club){
+    allCohortsData = computeClubAllCohortsSeries(cohortTrajFilters.club);
+  }
+
+  wrap.innerHTML = `
+    ${header}
+    <p class="hint" style="margin:0 0 12px;">A team is really a rolling cycle: a whole grade-cohort plays together, splits into a bottom-age half (stays another year in the same grade) and a top-age half (moves up early) the next season, then those two halves reunite two years later as the next grade's whole team. This traces that real cycle — one grade back, the season you pick, and one grade forward — using actual ladder ranks throughout, not a percentage (a shrinking or growing pool of teams year to year can distort a percentage in a way raw rank doesn't).</p>
+    <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center;">
+      <select id="cohortTrajClubSel">${clubs.map(c=>`<option value="${c}" ${cohortTrajFilters.club===c?'selected':''}>${c}</option>`).join('')}</select>
+      <select id="cohortTrajTeamSel" ${teamKeys.length?'':'disabled'}>
+        ${clubTeams.map(t=>`<option value="${t.name}__${t.year}" ${cohortTrajFilters.teamKey===(t.name+'__'+t.year)?'selected':''}>${t.ageGroup} ${t.year} — ${t.name}</option>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="cohortTrajShowAll" ${showAll?'checked':''} ${showAllCohorts?'disabled':''}> Show every other ${seedGrade||''} ${seedYear||''} team
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="cohortTrajShowAllCohorts" ${showAllCohorts?'checked':''} ${showAll?'disabled':''}> Show every ${cohortTrajFilters.club||'this club'} cohort
+      </label>
+    </div>
+    ${!trajectory.length ? '<div class="empty">No graded teams found for this club.</div>' : `
+    ${insightsHtml}
+    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+      <div style="position:relative;height:${(showAll||showAllCohorts)?440:360}px;"><canvas id="cohortTrajChart"></canvas></div>
+      ${showAllCohorts ? `<div id="cohortTrajLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11.5px;"></div>` : ''}
+    </div>
+    <table><thead><tr><th>Year</th><th>Stage</th><th>Team</th><th class="num">Rank</th></tr></thead><tbody>
+    ${trajectory.flatMap(col=>col.points.map(p=>`<tr>
+      <td>${p.year}</td>
+      <td>${p.label}</td>
+      <td style="font-size:12.5px;color:var(--muted);">${p.teamName || '<span style="color:var(--red);">No real season found</span>'}</td>
+      <td class="num">${p.rank!=null?`${p.rank} of ${p.total}`:'—'}</td>
+    </tr>`)).join('')}
+    </tbody></table>`}
+  `;
+
+  document.getElementById('backFromCohortTraj').onclick = ()=> navBack();
+  const clubSel = document.getElementById('cohortTrajClubSel');
+  if(clubSel) clubSel.onchange = e=>{ cohortTrajFilters.club = e.target.value; cohortTrajFilters.teamKey = null; renderCohortTrajectory(); };
+  const teamSel = document.getElementById('cohortTrajTeamSel');
+  if(teamSel) teamSel.onchange = e=>{ cohortTrajFilters.teamKey = e.target.value; renderCohortTrajectory(); };
+  const showAllChk = document.getElementById('cohortTrajShowAll');
+  if(showAllChk) showAllChk.onchange = e=>{ cohortTrajFilters.showAll = e.target.checked; renderCohortTrajectory(); };
+  const showAllCohortsChk = document.getElementById('cohortTrajShowAllCohorts');
+  if(showAllCohortsChk) showAllCohortsChk.onchange = e=>{ cohortTrajFilters.showAllCohorts = e.target.checked; renderCohortTrajectory(); };
+
+  if(window._cohortTrajChartInstance){ window._cohortTrajChartInstance.destroy(); window._cohortTrajChartInstance = null; }
+  const canvas = document.getElementById('cohortTrajChart');
+  if(!canvas || !trajectory.length) return;
+
+  // One line-segment dataset per edge between adjacent columns — a 1-point column fans out/in to
+  // every point in the next/previous column, which naturally draws both the split and the reunite
+  // without needing to track explicit parent/child links in the data itself.
+  const datasets = [];
+  const COLORS = { stay:'#4a9b6e', move:'#c99a3a', whole:'#3E6FA8' };
+  for(let i=0;i<trajectory.length-1;i++){
+    const colA = trajectory[i], colB = trajectory[i+1];
+    colA.points.forEach(pa=>{
+      colB.points.forEach(pb=>{
+        if(pa.rank==null || pb.rank==null) return; // don't draw a line to/from a point with no real data
+        const color = COLORS[pb.branch] || COLORS[pa.branch] || COLORS.whole;
+        datasets.push({
+          data: [{ x:colA.year, y:pa.rank, total:pa.total, label:pa.label, teamName:pa.teamName },
+                  { x:colB.year, y:pb.rank, total:pb.total, label:pb.label, teamName:pb.teamName }],
+          borderColor: color, backgroundColor: color, borderWidth: 2.5,
+          pointRadius: 5, pointHoverRadius: 8, showLine: true,
+        });
+      });
+    });
+  }
+  // Any column whose points are ALL missing real data still gets a marker so the gap is visible
+  // rather than silently disappearing — plotted at a fixed off-scale "no data" band.
+  const maxRankSeen = Math.max(1, ...trajectory.flatMap(c=>c.points.map(p=>p.total||0)));
+  const noDataY = maxRankSeen + 3;
+  trajectory.forEach(col=>{
+    col.points.filter(p=>p.rank==null).forEach(p=>{
+      datasets.push({
+        data: [{ x:col.year, y:noDataY, total:null, label:p.label, teamName:p.teamName }],
+        borderColor:'#9AA5AD', backgroundColor:'#9AA5AD', borderWidth:0,
+        pointRadius:6, pointStyle:'crossRot', showLine:false,
+      });
+    });
+  });
+
+  // Average trend: a straight dashed line from the first whole-team point to the last, using
+  // the overall percentile change already summarised in the insight box above the chart — the
+  // shortest honest way to show "net direction" alongside the fuller split/reunite shape.
+  if(wholePoints.length>=2){
+    const first = wholePoints[0], last = wholePoints[wholePoints.length-1];
+    datasets.push({
+      data: [{ x:first.year, y:first.rank, total:first.total, label:'Overall trend', teamName:first.teamName },
+              { x:last.year, y:last.rank, total:last.total, label:'Overall trend', teamName:last.teamName }],
+      borderColor:'rgba(255,255,255,0.5)', backgroundColor:'rgba(255,255,255,0.5)',
+      borderWidth:1.5, borderDash:[6,4], pointRadius:0, showLine:true, order:10,
+    });
+  }
+
+  // Every other team in the same grade+year, as light background lines — same tracing rules as
+  // the highlighted cohort (computeAllTeamsWholeSeries reuses computeCohortForkTrajectory per
+  // club), just stripped down to whole-team points only so 20+ of these stay readable at once.
+  if(allTeamsData.length){
+    allTeamsData.forEach(series=>{
+      datasets.push({
+        data: series.points.map(p=>({ x:p.year, y:p.rank, total:p.total, label:series.club, teamName:p.teamName })),
+        borderColor:'rgba(255,255,255,0.14)', backgroundColor:'rgba(255,255,255,0.14)',
+        borderWidth:1, pointRadius:2, pointHoverRadius:5, showLine:true, order:20,
+      });
+    });
+  }
+
+  // Every one of this club's own cohorts (different starting age/year), each a distinct colour —
+  // a small enough palette that it stays legible even with 8-10 cohorts on screen at once; the
+  // main highlighted diamond still draws on top in its usual colours so it's never lost among them.
+  const COHORT_PALETTE = ['#e07a5f','#81b29a','#f2cc8f','#3d5a80','#9d8189','#98c1d9','#c1666b','#6a994e','#bc6c25','#5f0f40'];
+  const cohortLegendItems = [];
+  if(allCohortsData.length){
+    allCohortsData.forEach((series, i)=>{
+      const color = COHORT_PALETTE[i % COHORT_PALETTE.length];
+      cohortLegendItems.push({ label: series.label, color });
+      datasets.push({
+        data: series.points.map(p=>({ x:p.year, y:p.rank, total:p.total, label:series.label, teamName:p.teamName })),
+        borderColor: color, backgroundColor: color,
+        borderWidth: 2, pointRadius: 3, pointHoverRadius: 6, showLine: true, order: 15,
+      });
+    });
+  }
+
+  const years = trajectory.map(c=>c.year)
+    .concat(allTeamsData.flatMap(s=>s.points.map(p=>p.year)))
+    .concat(allCohortsData.flatMap(s=>s.points.map(p=>p.year)));
+  window._cohortTrajChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        // Integer min/max (not the previous fractional +/-0.3 padding, which was letting Chart.js
+        // generate ugly boundary ticks like "2,024.7") — a full year of padding on each side reads
+        // cleanly, and the tick callback both blocks any non-whole-year tick and formats plainly
+        // (no locale thousands-separator, which was turning "2024" into "2,024").
+        x: { type:'linear', min: Math.min(...years)-1, max: Math.max(...years)+1,
+             ticks: { stepSize:1, color:'#8FA0A3', callback:v=> Number.isInteger(v) ? String(v) : '' },
+             grid:{ display:false } },
+        y: { reverse:true, min:0, max:noDataY+2,
+             title:{ display:true, text:'Rank position (1 = best)', color:'#8FA0A3' },
+             ticks: { color:'#8FA0A3', callback:v=> v===noDataY?'No data':v },
+             grid:{ color:'rgba(255,255,255,0.06)' } },
+      },
+      plugins: {
+        legend: { display:false },
+        tooltip: { callbacks: {
+          title: items=> items[0].raw.label,
+          label: ctx=> ctx.raw.total!=null ? `${ctx.raw.teamName} — rank ${ctx.raw.y} of ${ctx.raw.total}` : `${ctx.raw.teamName||'No real season found'}`
+        }}
+      }
+    }
+  });
+
+  const legendEl = document.getElementById('cohortTrajLegend');
+  if(legendEl && cohortLegendItems.length){
+    legendEl.innerHTML = cohortLegendItems.map(item=>
+      `<span style="display:flex;align-items:center;gap:5px;color:var(--muted);"><span style="width:12px;height:3px;background:${item.color};display:inline-block;"></span>${item.label}</span>`
+    ).join('');
+  }
+}
+
 // ─── Squad progressions (league-wide) ──────────────────────────────────────────────────────
 // The browsable, whole-competition version of the per-team "Squad history" trend. For a chosen
 // season it walks every distinct squad (cohort of players tracked as they age up — the same
@@ -12913,7 +14500,13 @@ function getCohortProgression(cohort){
 // Cohorts are de-duplicated so one squad aging up through several team names is a single row.
 let squadProgFilters = { mode:'season', tileGroup:'trend', year:null, ageGroup:'ALL', division:'ALL', trend:'ALL', sortKey:'trend', sortDir:'asc', impAge:'ALL', impClub:'ALL', impClubScope:'ONLY', direction:'ALL', impSortKey:'score', impSortDir:'desc', cohortThreshold:0.35,
   clubSortKey:'avgScore', clubSortDir:'desc', pathwayClub:null, pathwayYear:null,
-  stabSortKey:'score', stabSortDir:'desc', stabAge:'ALL', stabSeason:'ALL', churnSortKey:'retentionPct', churnSortDir:'desc', churnAge:'ALL' };
+  stabSortKey:'score', stabSortDir:'desc', stabAge:'ALL', stabSeason:'ALL', churnSortKey:'retentionPct', churnSortDir:'desc', churnAge:'ALL',
+  // Stability vs improvement: multi-year (whole tracked span, per squad) is the default view —
+  // stabSinceYear:null means "as far back as practical", which already means "from each squad's
+  // first COMPETITIVE (graded) season" via isCompetitiveGrade inside computeSquadImprovement, not
+  // literally every year on file. 'single' switches to the original one-hop-per-row view.
+  stabView:'multi', stabSinceYear:null, stabMultiSortKey:'score', stabMultiSortDir:'desc' };
+let expandedStabKeys = new Set();
 
 // Which Squad Improvement rows currently have their "who's in this squad" roster breakdown
 // expanded — keyed by teamKey, same convention as other expand-in-place tables in the app.
@@ -13056,14 +14649,14 @@ function winPctLevelFrac(grade, year, teamNames, teamList){
 // (5x more team-seasons than the old current-year-only default), this was one of the heaviest
 // uncached functions in the app.
 const _squadImprovementCache = new Map();
-function computeSquadImprovement(){
-  const cacheKey = `${squadProgFilters.cohortThreshold ?? 0.35}|${_aggVersion}`;
+function computeSquadImprovement(sinceYear){
+  const cacheKey = `${squadProgFilters.cohortThreshold ?? 0.35}|${sinceYear ?? 'ALL'}|${_aggVersion}`;
   if(_squadImprovementCache.has(cacheKey)) return _squadImprovementCache.get(cacheKey);
-  const result = computeSquadImprovementUncached();
+  const result = computeSquadImprovementUncached(sinceYear);
   _squadImprovementCache.set(cacheKey, result);
   return result;
 }
-function computeSquadImprovementUncached(){
+function computeSquadImprovementUncached(sinceYear){
   const { playerList, teamList } = computeAggregates();
   const rosters = buildTeamSeasonRosters(playerList);
   const threshold = squadProgFilters.cohortThreshold ?? 0.35;
@@ -13083,10 +14676,14 @@ function computeSquadImprovementUncached(){
     // division (Seniors/Reserves in this competition, or any grade in a season with no graded
     // field) fall back to a win% percentile against everyone else who fielded that grade+year —
     // still on the same 0-1 scale, just a different yardstick. Only truly skipped when NEITHER
-    // basis can place the season (e.g. only one team fielded that grade that year).
+    // basis can place the season (e.g. only one team fielded that grade that year), the season
+    // is an ungraded junior age (see isCompetitiveGrade), or it's before the optional sinceYear
+    // floor (the "Since" picker on the Multi-year Stability vs improvement view).
     const seasons = [];
     prog.forEach(row=>{
       const grade = getAgeGroupLabel(row.teams[0]||'');
+      if(!isCompetitiveGrade(grade)) return;
+      if(sinceYear!=null && row.year < sinceYear) return;
       const divNums = row.divisions.map(divisionRank).filter(x=>x!=null);
       const md = maxDiv[grade+'||'+row.year];
       let levelFrac, basis;
@@ -14406,7 +16003,21 @@ function correlationReadout(r){
   return { label: `${strength}${dir?' '+dir:''} (r = ${r.toFixed(2)})`, desc, color };
 }
 
+// Router between the two Stability vs improvement views — single-hop (one row per squad per
+// season-to-season transition) and multi-year (one row per squad, spanning its whole tracked
+// competitive history, or a chosen "Since" floor). Kept as a thin dispatcher so the call site
+// above never needed to change when multi-year was added.
 function renderClubStability(wrap, header){
+  const modeToggle = `
+    <div class="controls-row" style="margin-bottom:10px;gap:6px;">
+      <button class="prog-mode stab-view-btn" data-view="multi" style="${squadProgFilters.stabView==='multi'?'background:var(--gold);color:#1a1a1a;':''}">Multi-year</button>
+      <button class="prog-mode stab-view-btn" data-view="single" style="${squadProgFilters.stabView==='single'?'background:var(--gold);color:#1a1a1a;':''}">Single season</button>
+    </div>`;
+  if(squadProgFilters.stabView==='single') renderClubStabilitySingle(wrap, header, modeToggle);
+  else renderClubStabilityMulti(wrap, header, modeToggle);
+}
+
+function renderClubStabilitySingle(wrap, header, modeToggle){
   const f = squadProgFilters;
   let rows = computeSquadTransitions();
 
@@ -14456,7 +16067,8 @@ function renderClubStability(wrap, header){
 
   wrap.innerHTML = `
     ${header}
-    <p class="hint" style="margin:0 0 12px;">Tests a real question: do squads that keep more of the same roster together actually improve more, or is turnover (recruiting) doing the work? Each row is ONE season-to-season hop for a squad (not its whole career), so filtering to a single season shows whether the pattern holds for that specific transition rather than being averaged across however many years a squad has on file. Roster stability is one blended percentage; Retained/Arrivals/Departures give the actual head-counts behind it — Retained is the core group that stuck around, Arrivals/Departures show which direction the rest of the change came from. A squad can end up at the same stability % by recruiting hard, by losing players without replacing them, or both at once, and those are different situations. Sort by any column, narrow to one age group / juniors / seniors, or loosen/tighten the roster-overlap threshold below to see how "similar" a squad has to stay to count as the same group.</p>
+    ${modeToggle}
+    <p class="hint" style="margin:0 0 12px;">Tests a real question: do squads that keep more of the same roster together actually improve more, or is turnover (recruiting) doing the work? Each row is ONE season-to-season hop for a squad (not its whole career) — see the Multi-year view above for a squad's whole tracked span instead. Roster stability is one blended percentage; Retained/Arrivals/Departures give the actual head-counts behind it — Retained is the core group that stuck around, Arrivals/Departures show which direction the rest of the change came from. A squad can end up at the same stability % by recruiting hard, by losing players without replacing them, or both at once, and those are different situations. Sort by any column, narrow to one age group / juniors / seniors, or loosen/tighten the roster-overlap threshold below to see how "similar" a squad has to stay to count as the same group.</p>
     <div class="warn-box" style="margin:0 0 14px;">Only squad-transitions with a measurable roster overlap are shown. Age group here is the LATER season's age group in each transition. The roster-overlap threshold on the right controls squad IDENTITY (how much carryover counts as "still the same squad") — it's a different thing from the Roster stability COLUMN, which measures the actual overlap for that specific hop once a squad has been identified. Retained/Arrivals/Departures are raw head-counts, so smaller squads will naturally show bigger swings than larger ones for the same number of changes.</div>
     <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <select id="stabSeasonSel">
@@ -14496,6 +16108,7 @@ function renderClubStability(wrap, header){
 
   document.getElementById('backToTeamsFromProg').onclick = backToTeamsFromRankings;
   wrap.querySelectorAll('.prog-mode').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.mode = btn.dataset.mode; renderSquadProgressions(); }; });
+  wrap.querySelectorAll('.stab-view-btn').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.stabView = btn.dataset.view; renderSquadProgressions(); }; });
   wrap.querySelectorAll('.team-link').forEach(el=>{ el.onclick = ()=> openTeamDetail(el.dataset.key); });
   const stabSeasonSel = document.getElementById('stabSeasonSel');
   if(stabSeasonSel) stabSeasonSel.onchange = e=>{ squadProgFilters.stabSeason = e.target.value; renderSquadProgressions(); };
@@ -14533,6 +16146,165 @@ function renderClubStability(wrap, header){
         },
         scales: {
           x: { title:{ display:true, text:'Roster stability %' }, min:0, max:100, grid:{ color:'rgba(255,255,255,0.06)' } },
+          y: { title:{ display:true, text:'Improvement score' }, grid:{ color:'rgba(255,255,255,0.06)' } }
+        }
+      }
+    });
+  }
+}
+
+// Multi-year Stability vs improvement: one row per squad, spanning its whole tracked competitive
+// history (or a chosen "Since" floor) rather than one row per single-year hop. Defaults to as far
+// back as practical — computeSquadImprovement already excludes ungraded junior ages internally
+// (isCompetitiveGrade), so "Since: as far back as possible" here genuinely means "since this
+// squad's first graded season", not literally its first season on file. Each row expands in place
+// to show the individual hops behind that squad's overall number, reusing the exact same
+// score/stability formula computeSquadTransitions uses for a single hop — so the two views can
+// never silently disagree about what one hop is worth, only about how many hops are being summed.
+function renderClubStabilityMulti(wrap, header, modeToggle){
+  const f = squadProgFilters;
+  const allYears = [...new Set(computeAggregates().teamList.map(t=>t.year).filter(Boolean))].sort((a,b)=>a-b);
+
+  let rows = computeSquadImprovement(f.stabSinceYear ? Number(f.stabSinceYear) : null);
+
+  const ageGroups = [...new Set(rows.map(r=>r.latestAge).filter(a=>a && a!=='Other'))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  if(f.stabAge!=='ALL' && f.stabAge!=='JUNIOR' && f.stabAge!=='SENIOR' && !ageGroups.includes(f.stabAge)) f.stabAge = 'ALL';
+  if(f.stabAge==='JUNIOR') rows = rows.filter(r=> isJuniorGrade(r.latestAge));
+  else if(f.stabAge==='SENIOR') rows = rows.filter(r=> r.latestAge==='Seniors' || r.latestAge==='Reserves');
+  else if(f.stabAge!=='ALL') rows = rows.filter(r=> r.latestAge===f.stabAge);
+
+  const corr = pearsonCorrelation(rows.filter(r=>r.stability!=null).map(r=>r.stability), rows.filter(r=>r.stability!=null).map(r=>r.score));
+  const readout = correlationReadout(corr);
+
+  const COLUMNS = [
+    { key:'squad',    label:'Squad',              defaultDir:'asc',  val:r=>(r.latestName||'').toLowerCase() },
+    { key:'span',     label:'Span',               defaultDir:'desc', val:r=>r.span },
+    { key:'age',      label:'Now at',             defaultDir:'asc',  val:r=>gradeDisplayRank(r.latestAge) },
+    { key:'club',     label:'Club',               defaultDir:'asc',  val:r=>(r.club||'').toLowerCase() },
+    { key:'stability',label:'Roster stability',   defaultDir:'desc', val:r=>r.stability ?? -1 },
+    { key:'score',    label:'Improvement score',  defaultDir:'desc', val:r=>r.score }
+  ];
+  const sortCol = COLUMNS.find(c=>c.key===f.stabMultiSortKey) || COLUMNS[5];
+  const dirMul = f.stabMultiSortDir==='asc' ? 1 : -1;
+  rows.sort((a,b)=>{
+    const av=sortCol.val(a), bv=sortCol.val(b);
+    const base = typeof av==='string' ? av.localeCompare(bv) : (av-bv);
+    return base*dirMul;
+  });
+  const thHtml = COLUMNS.map(c=>{
+    const active = f.stabMultiSortKey===c.key;
+    const arrow = active ? (f.stabMultiSortDir==='asc'?' ▲':' ▼') : '';
+    const numCls = (c.key==='stability'||c.key==='score'||c.key==='span') ? ' num' : '';
+    return `<th class="sortable-th stab-multi-sort-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+  }).join('');
+  const netColor = n => n>0.02?'var(--green)':(n<-0.02?'var(--red)':'var(--muted)');
+  const levelColorFrac = f => f>=0.66?'var(--green)':(f>=0.33?'var(--gold)':'var(--red)');
+
+  wrap.innerHTML = `
+    ${header}
+    ${modeToggle}
+    <p class="hint" style="margin:0 0 12px;">Each row is ONE squad's whole tracked competitive span — from its earliest graded season (U9/U10/U12 don't run a real division ladder here, so they're never the starting point) through to its latest — rather than a single season-to-season hop. This is the better view for "does staying together over YEARS predict climbing over those same years", since a single hop can be noisy in a way a multi-year trend usually isn't. Click any row to see the individual seasons behind its numbers.</p>
+    <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
+      <select id="stabSinceSel" title="Narrow every squad's span to start no earlier than this year. Leave on 'as far back as possible' to use each squad's own earliest graded season.">
+        <option value="" ${!f.stabSinceYear?'selected':''}>Since: as far back as possible</option>
+        ${allYears.map(y=>`<option value="${y}" ${String(f.stabSinceYear)===String(y)?'selected':''}>Since ${y}</option>`).join('')}
+      </select>
+      <select id="stabAgeSel">
+        <option value="ALL" ${f.stabAge==='ALL'?'selected':''}>All age groups</option>
+        <option value="JUNIOR" ${f.stabAge==='JUNIOR'?'selected':''}>All junior ages (no seniors/reserves)</option>
+        <option value="SENIOR" ${f.stabAge==='SENIOR'?'selected':''}>Seniors/Reserves only</option>
+        ${ageGroups.map(a=>`<option value="${a}" ${f.stabAge===a?'selected':''}>${a} only</option>`).join('')}
+      </select>
+      ${cohortThresholdSelectHtml()}
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:2px;">Overall trend${f.stabAge==='ALL'?'':' · '+f.stabAge}${f.stabSinceYear?' · since '+f.stabSinceYear:''}</div>
+      <div style="font-size:19px;font-weight:700;color:${readout.color};">${readout.label}</div>
+      ${readout.desc ? `<div style="font-size:12.5px;color:var(--muted);margin-top:4px;">${readout.desc}.</div>` : ''}
+      <div style="margin-top:12px;position:relative;height:260px;"><canvas id="stabilityMultiScatterChart"></canvas></div>
+    </div>
+    <p class="hint" style="margin:0 0 10px;">${rows.length} squad${rows.length===1?'':'s'} with a measurable multi-year span.</p>
+    ${rows.length===0 ? '<div class="empty">No squads match these filters.</div>' : `
+    <table><thead><tr><th></th>${thHtml}</tr></thead><tbody>
+    ${rows.map(r=>{
+      const expanded = expandedStabKeys.has(r.teamKey);
+      const hopsHtml = expanded ? `<tr class="stab-hops-row" data-key="${r.teamKey.replace(/"/g,'&quot;')}"><td colspan="${COLUMNS.length+1}" style="padding:0 0 12px 28px;">
+        <table style="width:auto;min-width:340px;"><thead><tr><th>Season</th><th>Grade</th><th>Level</th></tr></thead><tbody>
+        ${r.seasons.map(s=>`<tr>
+          <td>${s.year}</td>
+          <td>${s.grade}${s.clubs.length && !s.clubs.includes(r.club) ? ` <span style="color:var(--muted);font-size:11px;">(${s.clubs.join('/')})</span>` : ''}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:8px;width:100px;overflow:hidden;">
+                <div style="background:${levelColorFrac(s.levelFrac)};height:100%;width:${Math.round(s.levelFrac*100)}%;"></div>
+              </div>
+              <span style="font-size:11px;color:var(--muted);">${s.basis==='winpct'?'by win%':(s.divNums.length?'Div '+s.divNums.join('/'):'')}</span>
+            </div>
+          </td>
+        </tr>`).join('')}
+        </tbody></table>
+      </td></tr>` : '';
+      return `<tr class="stab-multi-row" data-key="${r.teamKey.replace(/"/g,'&quot;')}" style="cursor:pointer;">
+        <td style="color:var(--muted);width:20px;">${expanded?'▾':'▸'}</td>
+        <td><span class="team-link" data-key="${r.teamKey.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.latestName}</span></td>
+        <td style="font-size:12.5px;color:var(--muted);">${r.seasons[0].year}\u2013${r.seasons[r.seasons.length-1].year} (${r.span}y)</td>
+        <td>${r.latestAge}</td>
+        <td style="font-size:12.5px;color:var(--muted);">${r.club||'—'}</td>
+        <td class="num">${r.stability!=null?Math.round(r.stability*100)+'%':'—'}</td>
+        <td class="num" style="color:${netColor(r.net)};font-weight:600;">${r.score>0?'+':''}${r.score}</td>
+      </tr>${hopsHtml}`;
+    }).join('')}
+    </tbody></table>`}
+  `;
+
+  document.getElementById('backToTeamsFromProg').onclick = backToTeamsFromRankings;
+  wrap.querySelectorAll('.prog-mode').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.mode = btn.dataset.mode; renderSquadProgressions(); }; });
+  wrap.querySelectorAll('.stab-view-btn').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.stabView = btn.dataset.view; renderSquadProgressions(); }; });
+  const sinceSel = document.getElementById('stabSinceSel');
+  if(sinceSel) sinceSel.onchange = e=>{ squadProgFilters.stabSinceYear = e.target.value || null; renderSquadProgressions(); };
+  const stabAgeSel = document.getElementById('stabAgeSel');
+  if(stabAgeSel) stabAgeSel.onchange = e=>{ squadProgFilters.stabAge = e.target.value; renderSquadProgressions(); };
+  const stabThreshSel = document.getElementById('progCohortThresh');
+  if(stabThreshSel) stabThreshSel.onchange = e=>{ squadProgFilters.cohortThreshold = parseFloat(e.target.value); renderSquadProgressions(); };
+  wrap.querySelectorAll('.stab-multi-sort-th').forEach(th=>{
+    th.onclick = ()=>{
+      const key = th.dataset.sortKey;
+      if(squadProgFilters.stabMultiSortKey===key) squadProgFilters.stabMultiSortDir = squadProgFilters.stabMultiSortDir==='asc'?'desc':'asc';
+      else { squadProgFilters.stabMultiSortKey=key; squadProgFilters.stabMultiSortDir=th.dataset.defaultDir; }
+      renderSquadProgressions();
+    };
+  });
+  // Row click toggles the expand-in-place hop breakdown — clicking the team-name link itself
+  // still opens the team page instead, same convention as elsewhere (event stops propagation).
+  wrap.querySelectorAll('.team-link').forEach(el=>{ el.onclick = (e)=>{ e.stopPropagation(); openTeamDetail(el.dataset.key); }; });
+  wrap.querySelectorAll('.stab-multi-row').forEach(tr=>{
+    tr.onclick = ()=>{
+      const key = tr.dataset.key;
+      if(expandedStabKeys.has(key)) expandedStabKeys.delete(key); else expandedStabKeys.add(key);
+      renderSquadProgressions();
+    };
+  });
+
+  if(window._stabilityMultiScatterInstance){ window._stabilityMultiScatterInstance.destroy(); window._stabilityMultiScatterInstance = null; }
+  const canvas = document.getElementById('stabilityMultiScatterChart');
+  const plottable = rows.filter(r=>r.stability!=null);
+  if(canvas && plottable.length){
+    const points = plottable.map(r=>({ x: Math.round(r.stability*100), y: r.score, label: r.latestName, age: r.latestAge, span: `${r.seasons[0].year}–${r.seasons[r.seasons.length-1].year}` }));
+    window._stabilityMultiScatterInstance = new Chart(canvas.getContext('2d'), {
+      type: 'scatter',
+      data: { datasets: [{
+        data: points,
+        backgroundColor: points.map(p=> p.y>2?'rgba(120,200,140,0.75)':p.y<-2?'rgba(220,110,110,0.75)':'rgba(160,160,170,0.6)'),
+        pointRadius: 5, pointHoverRadius: 7
+      }]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display:false },
+          tooltip: { callbacks: { label: ctx => `${ctx.raw.label} (${ctx.raw.age}, ${ctx.raw.span}) — ${ctx.raw.x}% stable, score ${ctx.raw.y>0?'+':''}${ctx.raw.y}` } }
+        },
+        scales: {
+          x: { title:{ display:true, text:'Roster stability % (avg per hop)' }, min:0, max:100, grid:{ color:'rgba(255,255,255,0.06)' } },
           y: { title:{ display:true, text:'Improvement score' }, grid:{ color:'rgba(255,255,255,0.06)' } }
         }
       }
@@ -15645,6 +17417,7 @@ document.getElementById('toolTileCompareTeams').onclick = ()=> openCompareTeams(
 document.getElementById('toolTileSquadProgressions').onclick = ()=> openSquadProgressions(null,'trend');
 document.getElementById('toolTileClubPathwayRetention').onclick = ()=> openSquadProgressions(null,'pathway');
 document.getElementById('toolTileStabilityImprovement').onclick = ()=> openSquadProgressions(null,'stability');
+document.getElementById('toolTileCohortTrajectory').onclick = ()=> openCohortTrajectory();
 document.getElementById('toolTileHomeGrown').onclick = ()=> openHomeGrown();
 document.getElementById('toolTileAbsenceLeaderboard').onclick = ()=> openAbsenceLeaderboard();
 document.getElementById('toolTileJuniorPathway').onclick = ()=> openJuniorPathway();
