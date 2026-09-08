@@ -14169,7 +14169,7 @@ function computeCohortForkTrajectory(seedTeamName, seedYear, anchorClub){
 // graded teams to anchor on, see that cohort's real split-and-reunite cycle plotted as raw rank
 // (not percentage — a pool-size-distorted percentage was a real, confirmed problem earlier in
 // this app's own history; see the Squad Progressions ladder-score fix for the same lesson).
-let cohortTrajFilters = { club:null, teamKey:null, showAll:false, showAllCohorts:false };
+let cohortTrajFilters = { club:null, teamKey:null, showAll:false, showAllFull:false, showAllCohorts:false, lbSortKey:'rankChange', lbSortDir:'asc' };
 
 // For every club that fielded a team in this grade+year, a lightweight "whole team only" series
 // across the same window — reuses computeCohortForkTrajectory per club (same tracing rules as the
@@ -14197,6 +14197,33 @@ function computeAllTeamsWholeSeries(grade, year){
   return result;
 }
 
+// The full-detail counterpart to computeAllTeamsWholeSeries — every other club's ENTIRE
+// trajectory including its own split/reunite branches, not just the whole-team points. This is
+// visually denser (up to 5 line segments per club instead of 1), so it's kept as a separate
+// opt-in rather than replacing the simplified overlay, which stays the better default for a quick
+// side-by-side comparison.
+const _allTeamsFullSeriesCache = new Map();
+function computeAllTeamsFullSeries(grade, year){
+  const cacheKey = `${grade}|${year}|${_aggVersion}`;
+  if(_allTeamsFullSeriesCache.has(cacheKey)) return _allTeamsFullSeriesCache.get(cacheKey);
+  const { teamList } = computeAggregates();
+  const seeds = teamList.filter(t=> t.ageGroup===grade && t.year===year);
+  const byClub = new Map();
+  seeds.forEach(t=>{
+    const club = getClub(t.name);
+    if(!club || byClub.has(club)) return;
+    byClub.set(club, t.name);
+  });
+  const result = [];
+  byClub.forEach((teamName, club)=>{
+    const traj = computeCohortForkTrajectory(teamName, year, club);
+    const hasAnyRealData = traj.some(c=>c.points.some(p=>p.rank!=null));
+    if(hasAnyRealData) result.push({ club, trajectory: traj });
+  });
+  _allTeamsFullSeriesCache.set(cacheKey, result);
+  return result;
+}
+
 function openCohortTrajectory(preset){
   doOpenCohortTrajectory(preset);
   navPush('cohort-trajectory', 'Cohort Trajectory', 'tools/cohort-trajectory', ()=>doOpenCohortTrajectory(preset));
@@ -14219,6 +14246,41 @@ function renderCohortTrajectory(){
   // as "working", not as a frozen page, on whichever click happens to be first to need it.
   renderWithLoadingIndicator(wrap, header, ()=> renderCohortTrajectoryInner(wrap, header));
 }
+
+// Every club in the same comparison group as the currently-loaded trajectory (same grade+year
+// anchor), ranked by overall raw-rank change from their own first traceable point to their own
+// last — same first-vs-last logic as the single-cohort insight box above the chart, just run for
+// everyone in the group instead of one. Deliberately tied to whatever's currently selected rather
+// than a fixed year range, so it stays consistent with the chart instead of being a second,
+// independent view that doesn't move when the selection changes.
+function computeCohortLeaderboard(grade, year){
+  const allSeries = computeAllTeamsWholeSeries(grade, year); // unfiltered — includes the current club too
+  return allSeries.map(({ club, points })=>{
+    const first = points[0], last = points[points.length-1];
+    const rankChange = last.rank - first.rank; // negative = moved up (better)
+    const firstPct = Math.round(100*first.rank/first.total), lastPct = Math.round(100*last.rank/last.total);
+    return { club, first, last, rankChange, firstPct, lastPct, pctChange: lastPct-firstPct };
+  });
+}
+
+// ─── Next-step trend continuation ───────────────────────────────────────────────────────────
+// Deliberately simple, on request, after the more "statistically corrected" bucketed-quantile
+// version was tried and scrapped: this just takes the cohort's own average change per hop across
+// its OWN whole-team points, and continues it forward one more hop. It does NOT correct for
+// regression to the mean the way the earlier model did — that's the honest trade-off of choosing
+// simplicity here, not an oversight. Read it as "if this exact trend keeps going, unmodified" —
+// not a statistically validated forecast the way the bucketed model was backtested to be.
+function predictByOwnTrend(wholePoints){
+  if(wholePoints.length < 2) return null;
+  const first = wholePoints[0], last = wholePoints[wholePoints.length-1];
+  const hops = wholePoints.length - 1;
+  const firstPct = first.rank/first.total, lastPct = last.rank/last.total;
+  const avgPctChangePerHop = (lastPct - firstPct) / hops;
+  const projectedPct = Math.max(0, Math.min(1, lastPct + avgPctChangePerHop));
+  const yearStep = (last.year - first.year) / hops;
+  return { projectedPct, nextYear: Math.round(last.year + yearStep), hops, avgPctChangePerHop };
+}
+
 // For every distinct grade+year the given club has fielded a graded team in, that cohort's own
 // whole-team-only series (reuses computeCohortForkTrajectory per seed, same tracing rules as
 // everywhere else on this page). Different starting points can legitimately land on the same real
@@ -14281,6 +14343,7 @@ function renderCohortTrajectoryInner(wrap, header){
   // comparison lines mean the same thing as the highlighted one.
   const wholePoints = trajectory.filter(c=>c.points.length===1).map(c=>c.points[0]).filter(p=>p.rank!=null);
   let insightsHtml = '';
+  let predictionHtml = '';
   if(wholePoints.length>=2){
     const first = wholePoints[0], last = wholePoints[wholePoints.length-1];
     // Raw rank change is the headline — confirmed necessary on real data: a shrinking pool (fewer
@@ -14318,17 +14381,81 @@ function renderCohortTrajectoryInner(wrap, header){
         <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">As a percentage of each year's pool: ${firstPct}% \u2192 ${lastPct}%${poolChanged?` (pool size changed, ${first.total} \u2192 ${last.total} teams)`:''}.${disagree ? ` <b style="color:var(--gold);">Rank and percentage point different directions here</b> — that happens when the pool size itself shrinks or grows a lot between the two years; treat the RANK figure above as the more reliable one, the same lesson from the Squad Progressions fix.` : ''}</div>
         <div style="font-size:12.5px;color:var(--muted);margin-top:4px;">This end-to-end read skips the mid-cycle split/reunite detour shown in the chart below — use it as the headline number, and the chart for the shape of how it got there.${splitNote}</div>
       </div>`;
+
+    // Next-step trend continuation — deliberately simple: this cohort's own average change per
+    // hop across its own whole-team points, continued one more hop. No population data, no
+    // correction for regression to the mean — just "if this exact trend keeps going".
+    const trend = predictByOwnTrend(wholePoints);
+    if(trend){
+      const projectedRank = Math.max(1, Math.round(trend.projectedPct*last.total));
+      const trendWord = trend.avgPctChangePerHop < -0.02 ? 'continuing to improve' : (trend.avgPctChangePerHop > 0.02 ? 'continuing to slide' : 'staying about the same');
+      predictionHtml = `
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:2px;">If this trend continues, ${trend.nextYear} (not yet played)</div>
+        <div style="font-size:17px;font-weight:700;color:var(--gold);">Roughly rank ${projectedRank} of ~${last.total} (${trendWord})</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">A simple continuation of this cohort's OWN average change per hop (${first.year}\u2192${last.year}, ${trend.hops} hop${trend.hops===1?'':'s'}) — nothing more. It does not account for teams typically drifting back toward the middle of the competition regardless of their recent trend, which is a real, common pattern in this data — so treat this as "what happens if nothing changes," not a statistically weighted forecast.</div>
+      </div>`;
+    }
   }
 
   const showAll = cohortTrajFilters.showAll;
-  let allTeamsData = [];
+  const showAllFull = cohortTrajFilters.showAllFull;
+  let allTeamsData = [], allTeamsFullData = [];
   if(showAll && seedGrade && seedYear){
-    allTeamsData = computeAllTeamsWholeSeries(seedGrade, seedYear).filter(s=> s.club !== cohortTrajFilters.club);
+    if(showAllFull){
+      allTeamsFullData = computeAllTeamsFullSeries(seedGrade, seedYear).filter(s=> s.club !== cohortTrajFilters.club);
+    } else {
+      allTeamsData = computeAllTeamsWholeSeries(seedGrade, seedYear).filter(s=> s.club !== cohortTrajFilters.club);
+    }
   }
   const showAllCohorts = cohortTrajFilters.showAllCohorts;
   let allCohortsData = [];
   if(showAllCohorts && cohortTrajFilters.club){
     allCohortsData = computeClubAllCohortsSeries(cohortTrajFilters.club);
+  }
+
+  // Leaderboard: always shown whenever a trajectory is loaded, tied to the SAME comparison group
+  // (same grade+year anchor) rather than a fixed year range — so it stays consistent with
+  // whatever's currently selected instead of being a second, independent view.
+  let leaderboardHtml = '';
+  if(seedGrade && seedYear){
+    const lbRows = computeCohortLeaderboard(seedGrade, seedYear);
+    const LB_COLUMNS = [
+      { key:'club', label:'Club', defaultDir:'asc', val:r=>r.club.toLowerCase() },
+      { key:'first', label:'Earliest', defaultDir:'asc', val:r=>r.first.rank },
+      { key:'last', label:'Latest', defaultDir:'asc', val:r=>r.last.rank },
+      { key:'rankChange', label:'Rank change', defaultDir:'asc', val:r=>r.rankChange },
+      { key:'pctChange', label:'% change', defaultDir:'asc', val:r=>r.pctChange },
+    ];
+    const lbSortCol = LB_COLUMNS.find(c=>c.key===cohortTrajFilters.lbSortKey) || LB_COLUMNS[3];
+    const lbDirMul = cohortTrajFilters.lbSortDir==='asc' ? 1 : -1;
+    lbRows.sort((a,b)=>{
+      const av=lbSortCol.val(a), bv=lbSortCol.val(b);
+      const base = typeof av==='string' ? av.localeCompare(bv) : (av-bv);
+      return base*lbDirMul;
+    });
+    const lbThHtml = LB_COLUMNS.map(c=>{
+      const active = cohortTrajFilters.lbSortKey===c.key;
+      const arrow = active ? (cohortTrajFilters.lbSortDir==='asc'?' ▲':' ▼') : '';
+      const numCls = c.key==='club' ? '' : ' num';
+      return `<th class="sortable-th cohort-lb-sort-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    }).join('');
+    const changeColor = c => c<-1?'var(--green)':(c>1?'var(--red)':'var(--muted)');
+    leaderboardHtml = `
+    <h3 style="font-size:15px;margin:22px 0 6px;">How every ${seedGrade} ${seedYear} club has moved, ${lbRows[0]?lbRows[0].first.year:''}\u2192${lbRows[0]?lbRows[0].last.year:''}</h3>
+    <p class="hint" style="margin:0 0 10px;">Same comparison group as the chart above — each club's own earliest traceable point to its latest, by raw rank (lower change = bigger climb). ${cohortTrajFilters.club} is highlighted.</p>
+    <table><thead><tr>${lbThHtml}</tr></thead><tbody>
+    ${lbRows.map(r=>{
+      const isCurrent = r.club === cohortTrajFilters.club;
+      return `<tr style="${isCurrent?'background:rgba(74,155,110,0.12);':''}">
+        <td><span class="cohort-lb-club-link" data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;font-weight:${isCurrent?'700':'400'};">${r.club}</span></td>
+        <td class="num">${r.first.rank} of ${r.first.total} (${r.firstPct}%)</td>
+        <td class="num">${r.last.rank} of ${r.last.total} (${r.lastPct}%)</td>
+        <td class="num" style="color:${changeColor(r.rankChange)};font-weight:600;">${r.rankChange>0?'+':''}${r.rankChange}</td>
+        <td class="num" style="color:var(--muted);">${r.pctChange>0?'+':''}${r.pctChange}pp</td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
   }
 
   wrap.innerHTML = `
@@ -14342,15 +14469,20 @@ function renderCohortTrajectoryInner(wrap, header){
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;">
         <input type="checkbox" id="cohortTrajShowAll" ${showAll?'checked':''} ${showAllCohorts?'disabled':''}> Show every other ${seedGrade||''} ${seedYear||''} team
       </label>
+      ${showAll ? `<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="cohortTrajShowAllFull" ${showAllFull?'checked':''}> Show their splits too (not just overall)
+      </label>` : ''}
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;">
         <input type="checkbox" id="cohortTrajShowAllCohorts" ${showAllCohorts?'checked':''} ${showAll?'disabled':''}> Show every ${cohortTrajFilters.club||'this club'} cohort
       </label>
     </div>
     ${!trajectory.length ? '<div class="empty">No graded teams found for this club.</div>' : `
     ${insightsHtml}
+    ${predictionHtml}
     <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="position:relative;height:${(showAll||showAllCohorts)?440:360}px;"><canvas id="cohortTrajChart"></canvas></div>
       ${showAllCohorts ? `<div id="cohortTrajLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11.5px;"></div>` : ''}
+      ${showAllFull ? `<p class="hint" style="margin:10px 0 0;font-size:11.5px;">Every other club's own split shown too — 2023 shows only each club's traceable half (the group already in the older grade that year); the rest of that year's team was in an ungraded age with no real division or ladder rank to show.</p>` : ''}
     </div>
     <table><thead><tr><th>Year</th><th>Stage</th><th>Team</th><th class="num">Rank</th></tr></thead><tbody>
     ${trajectory.flatMap(col=>col.points.map(p=>`<tr>
@@ -14359,7 +14491,8 @@ function renderCohortTrajectoryInner(wrap, header){
       <td style="font-size:12.5px;color:var(--muted);">${p.teamName || '<span style="color:var(--red);">No real season found</span>'}</td>
       <td class="num">${p.rank!=null?`${p.rank} of ${p.total}`:'—'}</td>
     </tr>`)).join('')}
-    </tbody></table>`}
+    </tbody></table>
+    ${leaderboardHtml}`}
   `;
 
   document.getElementById('backFromCohortTraj').onclick = ()=> navBack();
@@ -14369,8 +14502,21 @@ function renderCohortTrajectoryInner(wrap, header){
   if(teamSel) teamSel.onchange = e=>{ cohortTrajFilters.teamKey = e.target.value; renderCohortTrajectory(); };
   const showAllChk = document.getElementById('cohortTrajShowAll');
   if(showAllChk) showAllChk.onchange = e=>{ cohortTrajFilters.showAll = e.target.checked; renderCohortTrajectory(); };
+  const showAllFullChk = document.getElementById('cohortTrajShowAllFull');
+  if(showAllFullChk) showAllFullChk.onchange = e=>{ cohortTrajFilters.showAllFull = e.target.checked; renderCohortTrajectory(); };
   const showAllCohortsChk = document.getElementById('cohortTrajShowAllCohorts');
   if(showAllCohortsChk) showAllCohortsChk.onchange = e=>{ cohortTrajFilters.showAllCohorts = e.target.checked; renderCohortTrajectory(); };
+  wrap.querySelectorAll('.cohort-lb-sort-th').forEach(th=>{
+    th.onclick = ()=>{
+      const key = th.dataset.sortKey;
+      if(cohortTrajFilters.lbSortKey===key) cohortTrajFilters.lbSortDir = cohortTrajFilters.lbSortDir==='asc'?'desc':'asc';
+      else { cohortTrajFilters.lbSortKey=key; cohortTrajFilters.lbSortDir=th.dataset.defaultDir; }
+      renderCohortTrajectory();
+    };
+  });
+  wrap.querySelectorAll('.cohort-lb-club-link').forEach(el=>{
+    el.onclick = ()=>{ cohortTrajFilters.club = el.dataset.club; cohortTrajFilters.teamKey = null; renderCohortTrajectory(); };
+  });
 
   if(window._cohortTrajChartInstance){ window._cohortTrajChartInstance.destroy(); window._cohortTrajChartInstance = null; }
   const canvas = document.getElementById('cohortTrajChart');
@@ -14436,6 +14582,29 @@ function renderCohortTrajectoryInner(wrap, header){
     });
   }
 
+  // Full-detail version — every other club's own split/reunite branches shown too, not just
+  // their whole-team points. Same edge-drawing approach as the highlighted cohort's own diamond
+  // (fan out/in between adjacent columns), just uniformly faint so 23 clubs' worth of forks stay
+  // in the background rather than competing with the highlighted one.
+  if(allTeamsFullData.length){
+    allTeamsFullData.forEach(({ club, trajectory: otherTraj })=>{
+      for(let i=0;i<otherTraj.length-1;i++){
+        const colA = otherTraj[i], colB = otherTraj[i+1];
+        colA.points.forEach(pa=>{
+          colB.points.forEach(pb=>{
+            if(pa.rank==null || pb.rank==null) return;
+            datasets.push({
+              data: [{ x:colA.year, y:pa.rank, total:pa.total, label:club, teamName:pa.teamName },
+                      { x:colB.year, y:pb.rank, total:pb.total, label:club, teamName:pb.teamName }],
+              borderColor:'rgba(255,255,255,0.14)', backgroundColor:'rgba(255,255,255,0.14)',
+              borderWidth:1, pointRadius:2, pointHoverRadius:5, showLine:true, order:20,
+            });
+          });
+        });
+      }
+    });
+  }
+
   // Every one of this club's own cohorts (different starting age/year), each a distinct colour —
   // a small enough palette that it stays legible even with 8-10 cohorts on screen at once; the
   // main highlighted diamond still draws on top in its usual colours so it's never lost among them.
@@ -14455,6 +14624,7 @@ function renderCohortTrajectoryInner(wrap, header){
 
   const years = trajectory.map(c=>c.year)
     .concat(allTeamsData.flatMap(s=>s.points.map(p=>p.year)))
+    .concat(allTeamsFullData.flatMap(s=>s.trajectory.flatMap(c=>c.points.map(p=>p.year))))
     .concat(allCohortsData.flatMap(s=>s.points.map(p=>p.year)));
   window._cohortTrajChartInstance = new Chart(canvas.getContext('2d'), {
     type: 'line',
