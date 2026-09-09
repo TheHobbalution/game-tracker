@@ -626,10 +626,11 @@
       <div class="tool-tile tool-tile-blue" id="toolTileLadder"><div class="tool-tile-title">Ladders</div><div class="tool-tile-desc">Standings for one year, age group and division — U14 and older only.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileFinalsChances"><div class="tool-tile-title">Finals chances</div><div class="tool-tile-desc">Simulated % chance to make finals, plus what's still up for grabs on the cusp.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileCompareTeams"><div class="tool-tile-title">Compare teams</div><div class="tool-tile-desc">Head-to-head record and squad overlap for two teams.</div></div>
-      <div class="tool-tile tool-tile-blue" id="toolTileSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Season trends, most improved all-time, and a club-wide leaderboard.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Compare every squad in the league at once — trends, most improved, leaderboards.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileClubPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileStabilityImprovement"><div class="tool-tile-title">Stability vs improvement</div><div class="tool-tile-desc">Do squads that keep their roster together actually improve more?</div></div>
-      <div class="tool-tile tool-tile-blue" id="toolTileCohortTrajectory"><div class="tool-tile-title">Cohort trajectory</div><div class="tool-tile-desc">A team's real split-and-reunite cycle as players age up, plotted by actual ladder rank.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileCohortTrajectory"><div class="tool-tile-title">Cohort trajectory</div><div class="tool-tile-desc">One team's own story — the real split-and-reunite cycle as players age up, not a league comparison.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileStandoutStats"><div class="tool-tile-title">Standout stats</div><div class="tool-tile-desc">Every division's leader in goals, defence, percentage, win rate and more.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileAbsenceLeaderboard"><div class="tool-tile-title">Missing games</div><div class="tool-tile-desc">Which teams have the most roster absence this season.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
@@ -696,6 +697,11 @@
   <!-- COHORT TRAJECTORY -->
   <section class="panel" id="panel-cohort-trajectory">
     <div id="cohortTrajectoryWrap"></div>
+  </section>
+
+  <!-- STANDOUT STATS -->
+  <section class="panel" id="panel-standout-stats">
+    <div id="standoutStatsWrap"></div>
   </section>
 
   <!-- HOME GROWN -->
@@ -2616,6 +2622,13 @@ let _ladderRenderId = 0;
 function isFinalsGame(g){
   return g.phase==='Finals' || isFinalsLabel(g.roundLabel);
 }
+// Grand Final specifically, not just "some final" — reads the round label the same reliable way
+// isFinalsGame does (PlayHQ's GF code, or a fuller "Grand Final" label some imports use), since a
+// game's phase field alone can't distinguish which round of the finals series this was.
+function isGrandFinalGame(g){
+  const label = (g.roundLabel||'').trim();
+  return /^GF$/i.test(label) || /grand\s*final/i.test(label);
+}
 
 // Caches the (expensive — full-dataset) regular-season-only aggregation per year, since
 // computeAggregates() with a games OVERRIDE deliberately never uses the normal cache (that cache
@@ -3384,7 +3397,7 @@ function renderPowerRankings(){
   wrap.innerHTML = `
     <span class="back-link" id="backToTeamsFromRankings">&larr; Back to teams</span>
     <h2 style="font-size:20px;">Team rankings</h2>
-    <p class="hint">Every team ranked on strength of results — each game counts with its margin, so a narrow win over a strong side rates better than a thrashing of a weak one. Divisions are anchored relative to each other, so higher divisions sit above lower ones by default — a lower-division team only ranks above a higher one when the evidence clearly supports it, with grading-phase results (the actual cross-division games) weighted heaviest. Where two teams are close, a head-to-head win puts that team above the other — and beating a team twice or more in the same season puts them above regardless of how far apart the ratings are.</p>
+    <p class="hint">Every team ranked on strength of results — margin counts, and higher divisions sit above lower ones by default. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(how are close calls decided?)</summary> A lower-division team only ranks above a higher one when the evidence clearly supports it, with grading-phase (cross-division) results weighted heaviest. Where two teams are close, a head-to-head win puts that team above the other — and beating them twice or more in a season puts them above regardless of the rating gap.</details></p>
     <div class="controls-row">
       <select id="rankYear">${years.map(y=>`<option value="${y}" ${String(curYear)===String(y)?'selected':''}>${y}</option>`).join('') || '<option>No years yet</option>'}</select>
       <select id="rankAgeGroup">
@@ -4452,7 +4465,7 @@ function renderSuggestNextSeason(){
       </div>`;
   };
   resultEl.innerHTML = `
-    <p class="hint" style="margin:0 0 10px;">Projecting each club's likely ${nextSeasonTargetGrade} strength for ${projectedYear}, from their ${latestYear} ${nextSeasonTargetGrade} team${feederGrade ? ` and ${latestYear} ${feederGrade} team` : ''}. No club can end up with two teams in the same division, and moves are kept to at most one division from where a team is now wherever that's possible without breaking that rule — except a team projected under ${MIN_PLAYERS_FOR_HIGHER_DIVISION} players, which is always dropped to the bottom division regardless of how strong its few players look on paper, since a squad that can barely field a side can't compete against a full one. "Expected top age %" is how much of the PROJECTED roster will be in their 2nd (top-age) year of ${nextSeasonTargetGrade} — high means mostly a settled, experienced squad; low means mostly first-year arrivals. "Expected players" assumes everyone stays at their current club and returns, capped at 23 per team and filled 1st team first — a number in gold means that team's projected to be short on numbers. A gold <span style="color:var(--gold);">*</span> means the team includes at least one player whose status is a real assumption, not a known fact — either a first-recorded-season age guess, or (for a merged team) a player defaulted to the first-named club there because no prior club history was found. Click a row to see which players make up that number. Click a column header to sort.</p>
+    <p class="hint" style="margin:0 0 10px;">Projecting each club's likely ${nextSeasonTargetGrade} strength for ${projectedYear}, from their current teams. Click a row to see the players behind it, or a column header to sort. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(what do the columns mean?)</summary> No club gets two teams in the same division, and moves are capped at one division where possible — except a team projected under ${MIN_PLAYERS_FOR_HIGHER_DIVISION} players, which always drops to the bottom division regardless of how strong its few players look. "Expected top age %" is how much of the projected roster is in their 2nd year of ${nextSeasonTargetGrade} (high = settled squad, low = mostly new arrivals). "Expected players" assumes everyone returns, capped at 23 per team, 1st team filled first — gold means short on numbers. A gold <span style="color:var(--gold);">*</span> means at least one player's status is an assumption (an age guess, or a merged-team default), not a known fact.</details></p>
     <table><thead><tr><th></th>${sortableTh('division','Suggested division')}${sortableTh('club','Club')}${sortableTh('currentDivision','Moving from')}${sortableTh('expectedTopAgePct','Expected top age %')}${sortableTh('expectedPlayerCount','Expected players')}${sortableTh('blended','Projected rating')}</tr></thead>
     <tbody>${sortedRows.map(r=>{
       const expanded = nextSeasonExpandedRows.has(rowKey(r));
@@ -6928,12 +6941,18 @@ function resolvePlayerIdentityKeyWithId(team, name, tag, playhqId, idToKey){
 // Top-level (not just inside computeAggregates) so a season-scoped recomputation elsewhere — see
 // computeSeasonScopedPlayerStats — can reuse the exact same formula against a filtered slice of
 // a player's timeline, instead of only ever being available as a career-wide total.
-function contextGoalWeight(goals, margin, res){
+function contextGoalWeight(goals, margin, res, isFinals, isGrandFinal){
   if(!goals) return 0;
   const eff = goals <= 1 ? goals : Math.pow(goals, 0.85);          // diminishing returns on a bag
   const leverage = Math.max(0.6, Math.min(1.5, 1.5 - (margin||0)/100)); // close=1.5 → blowout=0.6
   const tilt = res === 'W' ? 1.1 : (res === 'L' ? 0.9 : 1.0);       // win premium / loss discount
-  return eff * leverage * tilt;
+  return eff * leverage * tilt * finalsWeightMultiplier(isFinals, isGrandFinal);
+}
+// A slight bump for performances that happened when it mattered most — same small scale as the
+// existing win/loss tilt above (1.1/0.9), not a dramatic reweighting. Applied identically to both
+// weighted goals and weighted best-player points so the two stay on a consistent basis.
+function finalsWeightMultiplier(isFinals, isGrandFinal){
+  return isGrandFinal ? 1.2 : (isFinals ? 1.1 : 1.0);
 }
 
 function computeAggregates(gamesOverride){
@@ -7035,7 +7054,8 @@ function computeAggregates(gamesOverride){
       players[key] = {
         key, name, club: getClub(team), team, teams:new Set(), gamesPlayed:0, totalGoals:0, weightedGoals:0, goalsInWins:0, goalsInLosses:0,
         bestCount:0, weightedBest:0, multiGoal2:0, multiGoal3:0, multiGoal5:0,
-        shareSum:0, shareGames:0, timeline:[], _bestRun:0, bestStreak:0, playhqId:''
+        shareSum:0, shareGames:0, timeline:[], _bestRun:0, bestStreak:0, playhqId:'',
+        finalsAppearances:0, finalsWins:0, grandFinalAppearances:0, grandFinalWins:0
       };
     }
     if(useId && !idToKey[playhqId]) idToKey[playhqId] = key;
@@ -7114,13 +7134,15 @@ function computeAggregates(gamesOverride){
     const bestRankA = new Map(g.teamA.best.map((n,idx)=>[n.toLowerCase(), idx+1]));
     const bestRankB = new Map(g.teamB.best.map((n,idx)=>[n.toLowerCase(), idx+1]));
     const isPlaceholderName = name => !name || /^[-–—\s]*$/.test(name) || /^private player$/i.test(name.trim());
+    // Once per game, not once per player — isFinalsGame/isGrandFinalGame only depend on g itself.
+    const gameIsFinals = isFinalsGame(g), gameIsGF = gameIsFinals && isGrandFinalGame(g);
 
     g.teamA.players.forEach(row=>{
       if(isPlaceholderName(row.name)) return;
       const p = ensurePlayer(g.teamA.name, row.name, row.tag, row.playhqId, getGameYear(g));
       if(row.playhqId && !p.playhqId) p.playhqId = row.playhqId;
       p.gamesPlayed++; p.totalGoals += row.goals;
-      p.weightedGoals += contextGoalWeight(row.goals, g.margin, aRes);
+      p.weightedGoals += contextGoalWeight(row.goals, g.margin, aRes, gameIsFinals, gameIsGF);
       if(aRes==='W') p.goalsInWins += row.goals; else if(aRes==='L') p.goalsInLosses += row.goals;
       if(row.goals>=2) p.multiGoal2++;
       if(row.goals>=3) p.multiGoal3++;
@@ -7130,14 +7152,16 @@ function computeAggregates(gamesOverride){
       const isBest = bestRank !== null;
       p._bestRun = isBest ? p._bestRun+1 : 0;
       p.bestStreak = Math.max(p.bestStreak, p._bestRun);
-      p.timeline.push({ date: gameDate, dateTime: g.dateTime, goals: row.goals, isBest, bestRank, opponent: g.teamB.name, result: aRes, division: getDivision(g), team: g.teamA.name, gameId: g.id, margin: g.margin });
+      if(gameIsFinals){ p.finalsAppearances++; if(aRes==='W') p.finalsWins++; }
+      if(gameIsGF){ p.grandFinalAppearances++; if(aRes==='W') p.grandFinalWins++; }
+      p.timeline.push({ date: gameDate, dateTime: g.dateTime, goals: row.goals, isBest, bestRank, opponent: g.teamB.name, result: aRes, division: getDivision(g), team: g.teamA.name, gameId: g.id, margin: g.margin, isFinals: gameIsFinals, isGrandFinal: gameIsGF });
     });
     g.teamB.players.forEach(row=>{
       if(isPlaceholderName(row.name)) return;
       const p = ensurePlayer(g.teamB.name, row.name, row.tag, row.playhqId, getGameYear(g));
       if(row.playhqId && !p.playhqId) p.playhqId = row.playhqId;
       p.gamesPlayed++; p.totalGoals += row.goals;
-      p.weightedGoals += contextGoalWeight(row.goals, g.margin, bRes);
+      p.weightedGoals += contextGoalWeight(row.goals, g.margin, bRes, gameIsFinals, gameIsGF);
       if(bRes==='W') p.goalsInWins += row.goals; else if(bRes==='L') p.goalsInLosses += row.goals;
       if(row.goals>=2) p.multiGoal2++;
       if(row.goals>=3) p.multiGoal3++;
@@ -7147,20 +7171,22 @@ function computeAggregates(gamesOverride){
       const isBest = bestRank !== null;
       p._bestRun = isBest ? p._bestRun+1 : 0;
       p.bestStreak = Math.max(p.bestStreak, p._bestRun);
-      p.timeline.push({ date: gameDate, dateTime: g.dateTime, goals: row.goals, isBest, bestRank, opponent: g.teamA.name, result: bRes, division: getDivision(g), team: g.teamB.name, gameId: g.id, margin: g.margin });
+      if(gameIsFinals){ p.finalsAppearances++; if(bRes==='W') p.finalsWins++; }
+      if(gameIsGF){ p.grandFinalAppearances++; if(bRes==='W') p.grandFinalWins++; }
+      p.timeline.push({ date: gameDate, dateTime: g.dateTime, goals: row.goals, isBest, bestRank, opponent: g.teamA.name, result: bRes, division: getDivision(g), team: g.teamB.name, gameId: g.id, margin: g.margin, isFinals: gameIsFinals, isGrandFinal: gameIsGF });
     });
 
     g.teamA.best.forEach((name,idx)=>{
       if(isPlaceholderName(name)) return;
       const matchRow = g.teamA.players.find(r=>r.name.toLowerCase()===name.toLowerCase());
       const p = ensurePlayer(g.teamA.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null, getGameYear(g));
-      p.bestCount++; p.weightedBest += Math.max(6-idx, 1);
+      p.bestCount++; p.weightedBest += Math.max(6-idx, 1) * finalsWeightMultiplier(gameIsFinals, gameIsGF);
     });
     g.teamB.best.forEach((name,idx)=>{
       if(isPlaceholderName(name)) return;
       const matchRow = g.teamB.players.find(r=>r.name.toLowerCase()===name.toLowerCase());
       const p = ensurePlayer(g.teamB.name, name, matchRow ? matchRow.tag : null, matchRow ? matchRow.playhqId : null, getGameYear(g));
-      p.bestCount++; p.weightedBest += Math.max(6-idx, 1);
+      p.bestCount++; p.weightedBest += Math.max(6-idx, 1) * finalsWeightMultiplier(gameIsFinals, gameIsGF);
     });
   });
 
@@ -9682,6 +9708,228 @@ function renderTeamPossibleLinks(teamObj, playerList){
   if(exportBtn) exportBtn.onclick = ()=> exportTeamPossibleLinksToXlsx(teamObj, results);
 }
 
+// ─── Standout team stats ────────────────────────────────────────────────────────────────────
+// For every real grade+division+year group, which team leads in each of several notable stats —
+// built entirely from numbers already tracked per team (wins/losses/pointsFor/pointsAgainst/
+// biggestWin/winMarginSum), so this is a leaderboard pass over existing data, not a new
+// computation. Rate-based stats (win rate, percentage, average winning margin) require a minimum
+// of 5 games played to lead a group — otherwise a team that's played just 1-2 games could "lead"
+// a division on a small-sample fluke, which wouldn't mean the same thing as a season-long leader.
+// Count-based stats (most wins, most goals, biggest single win) have no such threshold since
+// they're cumulative totals, where more games played is just part of the real picture.
+const STANDOUT_STAT_DEFS = [
+  { key:'mostWins',     label:'Most wins',                emoji:'🥇', minGames:0, val:t=>t.wins },
+  { key:'mostGoals',    label:'Most goals scored',         emoji:'⚡', minGames:0, val:t=>t.goalsKicked },
+  { key:'fewestConceded', label:'Fewest points conceded',  emoji:'🛡️', minGames:5, val:t=>t.pointsAgainst, lowerIsBetter:true },
+  { key:'bestPercentage', label:'Best percentage',         emoji:'📈', minGames:5, val:t=> t.pointsAgainst>0 ? (t.pointsFor/t.pointsAgainst)*100 : (t.pointsFor>0 ? Infinity : null) },
+  { key:'bestWinRate',   label:'Best win rate',            emoji:'🎯', minGames:5, val:t=> t.gamesPlayed>0 ? t.wins/t.gamesPlayed : null },
+  { key:'biggestAvgMargin', label:'Biggest average winning margin', emoji:'💥', minGames:5, val:t=> t.decidedWins>0 ? t.winMarginSum/t.decidedWins : null },
+  { key:'biggestSingleWin', label:'Biggest single-game win margin', emoji:'🔨', minGames:0, val:t=>t.biggestWin },
+];
+let _standoutStatsCache = null, _standoutStatsCacheVersion = -1;
+function computeStandoutTeamStats(){
+  if(_standoutStatsCacheVersion === _aggVersion) return _standoutStatsCache;
+  const { teamList } = computeAggregates();
+  const groups = new Map(); // grade|division|year -> [team]
+  teamList.forEach(t=>{
+    if(!t.year || !GRADED_AGE_GROUPS.includes(t.ageGroup)) return;
+    const div = getTeamDivisionMap(t.year)[t.name];
+    if(div==null) return;
+    const key = t.ageGroup+'|'+div+'|'+t.year;
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+
+  const standoutsByTeamKey = new Map(); // "teamName__year" -> [{ key, label, emoji, grade, division, year }]
+  const groupResults = []; // for the browsable page: [{ grade, division, year, leaders:[{stat, teamName, value}] }]
+
+  groups.forEach((teams, gKey)=>{
+    const [grade, divStr, yearStr] = gKey.split('|');
+    const division = parseInt(divStr,10), year = parseInt(yearStr,10);
+    const leaders = [];
+    STANDOUT_STAT_DEFS.forEach(def=>{
+      const eligible = teams.filter(t=> t.gamesPlayed >= def.minGames);
+      const scored = eligible.map(t=>({ team:t, value: def.val(t) })).filter(s=> s.value!=null && Number.isFinite(s.value));
+      if(!scored.length) return;
+      const best = def.lowerIsBetter ? Math.min(...scored.map(s=>s.value)) : Math.max(...scored.map(s=>s.value));
+      const winners = scored.filter(s=> Math.abs(s.value-best) < 1e-9);
+      winners.forEach(w=>{
+        const teamKey = w.team.name+'__'+year;
+        if(!standoutsByTeamKey.has(teamKey)) standoutsByTeamKey.set(teamKey, []);
+        standoutsByTeamKey.get(teamKey).push({ key:def.key, label:def.label, emoji:def.emoji, grade, division, year, value:w.value });
+      });
+      leaders.push({ stat:def, teamNames: winners.map(w=>w.team.name), value: best });
+    });
+    if(leaders.length) groupResults.push({ grade, division, year, leaders, teamCount: teams.length });
+  });
+
+  groupResults.sort((a,b)=> b.year-a.year || gradeDisplayRank(a.grade)-gradeDisplayRank(b.grade) || a.division-b.division);
+  _standoutStatsCache = { standoutsByTeamKey, groupResults };
+  _standoutStatsCacheVersion = _aggVersion;
+  return _standoutStatsCache;
+}
+
+let standoutStatsFilters = { year:null, gradeScope:'ALL' };
+
+function doOpenStandoutStats(){
+  showPanel('standout-stats');
+  renderWithLoadingIndicator(document.getElementById('standoutStatsWrap'),
+    `<span class="back-link" id="backFromStandoutStats">&larr; Back to tools</span><h2 style="font-size:20px;">Standout stats</h2>`,
+    ()=> renderStandoutStats());
+}
+function openStandoutStats(){
+  doOpenStandoutStats();
+  navPush('standout-stats', 'Standout Stats', 'tools/standout-stats', doOpenStandoutStats);
+}
+
+function renderStandoutStats(){
+  const wrap = document.getElementById('standoutStatsWrap');
+  const header = `<span class="back-link" id="backFromStandoutStats">&larr; Back to tools</span><h2 style="font-size:20px;">Standout stats</h2>`;
+  const { groupResults } = computeStandoutTeamStats();
+  const f = standoutStatsFilters;
+
+  const years = [...new Set(groupResults.map(g=>g.year))].sort((a,b)=>b-a);
+  if(!f.year || !years.includes(f.year)) f.year = years[0] || null;
+
+  let filtered = groupResults.filter(g=>g.year===f.year);
+  const grades = [...new Set(filtered.map(g=>g.grade))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  if(f.gradeScope!=='ALL') filtered = filtered.filter(g=>g.grade===f.gradeScope);
+
+  const fmtValue = (key, v) => {
+    if(key==='bestWinRate') return Math.round(v*100)+'%';
+    if(key==='bestPercentage') return Math.round(v)+'%';
+    if(!Number.isInteger(v)) return v.toFixed(1);
+    return String(v);
+  };
+
+  wrap.innerHTML = `
+    ${header}
+    <p class="hint" style="margin:0 0 12px;">Every real division's leader in a handful of notable stats — who scored the most, conceded the fewest, had the best percentage, and so on. Win rate, percentage and average margin need at least 5 games played to lead a group, so a 1-2 game fluke can't top a division; raw totals (most wins, most goals, biggest single win) have no such minimum.</p>
+    <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
+      <select id="standoutYearSel">${years.map(y=>`<option value="${y}" ${f.year===y?'selected':''}>${y}</option>`).join('')}</select>
+      <select id="standoutGradeSel">
+        <option value="ALL" ${f.gradeScope==='ALL'?'selected':''}>All age groups</option>
+        ${grades.map(g=>`<option value="${g}" ${f.gradeScope===g?'selected':''}>${g} only</option>`).join('')}
+      </select>
+    </div>
+    ${filtered.length===0 ? '<div class="empty">No graded divisions found for this year.</div>' : filtered.map(g=>`
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px;margin-bottom:12px;">
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${g.grade} Division ${g.division} <span style="font-weight:400;color:var(--muted);font-size:12px;">(${g.teamCount} teams)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${g.leaders.map(l=>`<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${fmtValue(l.stat.key,l.value)}"><span style="font-size:13px;">${l.stat.emoji}</span>${l.stat.label}: <span class="team-link" data-key="${l.teamNames[0]+'__'+g.year}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${l.teamNames.join(' / ')}</span></span>`).join('')}
+        </div>
+      </div>`).join('')}
+  `;
+
+  document.getElementById('backFromStandoutStats').onclick = ()=> navBack();
+  const yearSel = document.getElementById('standoutYearSel');
+  if(yearSel) yearSel.onchange = e=>{ standoutStatsFilters.year = parseInt(e.target.value,10); renderStandoutStats(); };
+  const gradeSel = document.getElementById('standoutGradeSel');
+  if(gradeSel) gradeSel.onchange = e=>{ standoutStatsFilters.gradeScope = e.target.value; renderStandoutStats(); };
+  wrap.querySelectorAll('.team-link').forEach(el=>{ el.onclick = ()=> openTeamDetail(el.dataset.key); });
+}
+
+
+// One-time, cached pass building every player's grade+division+year awards. A player's season is
+// attributed to whichever grade+division they played the MOST games in that year (their primary
+// team's division, via getTeamDivisionMap) — handles a mid-season regrade or a rare multi-team
+// year without needing a separate "which division does this game belong to" decision per game.
+// Best-and-fairest uses the same weighted best-player points already used everywhere else in the
+// app (6pts for 1st down to 1pt for 6th, with the same slight finals/Grand Final bump) — there's
+// no separate "B&F votes" concept in this data, so this is the existing, established stand-in
+// rather than inventing a new scoring system just for this badge.
+let _seasonAwardsCache = null, _seasonAwardsCacheVersion = -1;
+function computeSeasonAwards(){
+  if(_seasonAwardsCacheVersion === _aggVersion) return _seasonAwardsCache;
+  const { playerList } = computeAggregates();
+  const seasonStats = new Map(); // playerKey|grade|year -> { goals, weightedBest, teamCounts }
+
+  playerList.forEach(p=>{
+    p.timeline.forEach(t=>{
+      const year = t.date ? new Date(t.date).getFullYear() : null;
+      if(!year) return;
+      const grade = getAgeGroupLabel(t.team);
+      if(!grade || grade==='Other') return;
+      const key = p.key+'|'+grade+'|'+year;
+      if(!seasonStats.has(key)) seasonStats.set(key, { playerKey:p.key, grade, year, goals:0, weightedBest:0, teamCounts:new Map() });
+      const s = seasonStats.get(key);
+      s.goals += t.goals||0;
+      if(t.isBest && t.bestRank){
+        s.weightedBest += Math.max(7-t.bestRank, 1) * finalsWeightMultiplier(t.isFinals, t.isGrandFinal);
+      }
+      s.teamCounts.set(t.team, (s.teamCounts.get(t.team)||0)+1);
+    });
+  });
+
+  const groups = new Map(); // grade|division|year -> [{ playerKey, goals, weightedBest }]
+  seasonStats.forEach(s=>{
+    let primaryTeam = null, maxCount = 0;
+    s.teamCounts.forEach((count,team)=>{ if(count>maxCount){ maxCount=count; primaryTeam=team; } });
+    if(!primaryTeam) return;
+    const div = getTeamDivisionMap(s.year)[primaryTeam];
+    if(div==null) return; // no real numbered division that season — not eligible for these awards
+    const gKey = s.grade+'|'+div+'|'+s.year;
+    if(!groups.has(gKey)) groups.set(gKey, []);
+    groups.get(gKey).push({ playerKey: s.playerKey, goals: s.goals, weightedBest: s.weightedBest });
+  });
+
+  const awardsByPlayer = new Map(); // playerKey -> [{ type, grade, division, year }]
+  function addAward(playerKey, award){
+    if(!awardsByPlayer.has(playerKey)) awardsByPlayer.set(playerKey, []);
+    awardsByPlayer.get(playerKey).push(award);
+  }
+  groups.forEach((players, gKey)=>{
+    const [grade, divStr, yearStr] = gKey.split('|');
+    const division = parseInt(divStr,10), year = parseInt(yearStr,10);
+    const maxGoals = Math.max(...players.map(p=>p.goals));
+    if(maxGoals>0) players.filter(p=>p.goals===maxGoals).forEach(p=> addAward(p.playerKey, { type:'goldenBoot', grade, division, year }));
+    const maxBest = Math.max(...players.map(p=>p.weightedBest));
+    if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'bestAndFairest', grade, division, year }));
+  });
+
+  playerList.forEach(p=>{
+    p.timeline.forEach(t=>{
+      if(!(t.isGrandFinal && t.result==='W')) return;
+      const year = t.date ? new Date(t.date).getFullYear() : null;
+      if(!year) return;
+      const grade = getAgeGroupLabel(t.team);
+      const division = getTeamDivisionMap(year)[t.team];
+      addAward(p.key, { type:'grandFinal', grade, division: division ?? null, year });
+    });
+  });
+
+  _seasonAwardsCache = awardsByPlayer;
+  _seasonAwardsCacheVersion = _aggVersion;
+  return awardsByPlayer;
+}
+const AWARD_META = {
+  grandFinal:     { emoji:'🏆', label:'Grand Final win' },
+  // Tinted red via CSS filter — emoji glyphs can't be recolored directly (they're rendered as
+  // fixed-color images by the font), so a filter is the only way to shift the plain brown ball
+  // toward red without hand-drawing a custom icon. Confirmed to look right at real badge size (14px).
+  goldenBoot:     { emoji:'🏈', label:'Leading goalkicker', filter:'sepia(1) saturate(6) hue-rotate(300deg) brightness(1) contrast(1.1)' },
+  // Labelled by what this actually tracks (most best-player points that season), not "Best &
+  // fairest" — there's no official B&F voting in this data, and calling it that would imply a
+  // real club award this competition doesn't actually run through this tracker.
+  bestAndFairest: { emoji:'💪', label:'Most best-player points' },
+};
+// Prefers the pre-computed p.awards field (baked into summaries.json by publish.js) over the live
+// computeSeasonAwards() computation — the live version needs every player's FULL timeline, which
+// isn't loaded until a player's detail page is actually opened in the precomputed-publish flow, so
+// checking the pre-baked field first avoids a real, measured ~6 second one-time computation cost
+// that publish.js can absorb once at build time instead of every visitor's browser doing it fresh.
+function renderAwardBadges(player){
+  const awards = player.awards || computeSeasonAwards().get(player.key);
+  if(!awards || !awards.length) return '';
+  const sorted = [...awards].sort((a,b)=> b.year-a.year || a.type.localeCompare(b.type));
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;">${sorted.map(a=>{
+    const meta = AWARD_META[a.type];
+    const divLabel = a.division!=null ? `D${a.division}` : '';
+    const divisionPhrase = a.grade + (divLabel?' Division '+a.division:'');
+    return `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${meta.label} in ${divisionPhrase}, ${a.year}"><span style="font-size:14px;line-height:1;${meta.filter?`filter:${meta.filter};`:''}">${meta.emoji}</span>${a.grade}${divLabel?' '+divLabel:''} '${String(a.year).slice(-2)}</span>`;
+  }).join('')}</div>`;
+}
+
 function renderPlayerDetail(key){
   const { playerList } = computeAggregates();
   const p = playerList.find(pl => pl.key === key);
@@ -9726,6 +9974,7 @@ function renderPlayerDetail(key){
       <div>
         <h2 style="${playerClubColor ? `color:${lightenHex(playerClubColor.primary,0.55)};` : ''}">${p.name}</h2>
         <div class="team-tag">${p.team}${p.playhqId ? ` · <a href="https://www.playhq.com/public/profile/${encodeURIComponent(p.playhqId)}?tenant=afl" target="_blank" rel="noopener noreferrer" style="color:var(--gold);text-decoration:underline;">PlayHQ profile ↗</a>` : ''}</div>
+        ${renderAwardBadges(p)}
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
         <span class="form-badge ${formClass}" title="${formTip.replace(/"/g,'&quot;')}" style="cursor:help;">${formLabel}</span>
@@ -9736,6 +9985,10 @@ function renderPlayerDetail(key){
     <div class="card-grid">
       <div class="stat-card" title="Number of games this player has appeared in"><div class="label">Games played</div><div class="value">${p.gamesPlayed}</div></div>
       <div class="stat-card" title="This player's record in games they played — wins, losses and draws (${winPct}% win rate)"><div class="label">Win-Loss-Draw</div><div class="value">${wld.w}-${wld.l}-${wld.d}</div></div>
+      ${p.finalsAppearances>0 ? `<div class="stat-card" title="Games played in a finals series (any round)"><div class="label">Finals appearances</div><div class="value">${p.finalsAppearances}</div></div>
+      <div class="stat-card" title="Wins in a finals series (any round)"><div class="label">Finals wins</div><div class="value">${p.finalsWins}</div></div>` : ''}
+      ${p.grandFinalAppearances>0 ? `<div class="stat-card" title="Grand Finals played"><div class="label">Grand Final appearances</div><div class="value">${p.grandFinalAppearances}</div></div>
+      <div class="stat-card" title="Grand Finals won"><div class="label">Grand Final wins</div><div class="value">${p.grandFinalWins}</div></div>` : ''}
       <div class="stat-card" title="Total goals scored across all games"><div class="label">Total goals</div><div class="value">${p.totalGoals}</div></div>
       <div class="stat-card" title="Total goals divided by games played"><div class="label">Season avg / gm</div><div class="value">${p.avgGoals}</div></div>
       <div class="stat-card" title="Average goals across their most recent 3 games — a quick read on current form"><div class="label">Goals/gm, last 3</div><div class="value">${p.rolling3}</div></div>
@@ -10833,8 +11086,8 @@ function applyConfirmedMerges(){
 // what made switching to "all years" feel slow: a bigger playerList, recomputed on every click.
 const _juniorPathwayCache = new Map();
 function computeJuniorPathwayByClub(playerList, filters){
-  filters = filters || { gradeScope:'both', juniorScope:'any' };
-  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${_aggVersion}|${playerList.length}`;
+  filters = filters || { gradeScope:'both', juniorScope:'any', currentYear:null };
+  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${filters.currentYear}|${_aggVersion}|${playerList.length}`;
   if(_juniorPathwayCache.has(cacheKey)) return _juniorPathwayCache.get(cacheKey);
   const result = computeJuniorPathwayByClubUncached(playerList, filters);
   _juniorPathwayCache.set(cacheKey, result);
@@ -10844,12 +11097,33 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
   const byClub = new Map(); // club -> { total, withJuniors, players:[] }
   playerList.forEach(p=>{
     if(!p.club) return;
-    const ageGroup = getAgeGroupLabel(p.team);
+    // Which timeline entries count as this player's "current" level. With no year chosen, that's
+    // just their single most recent team (the original behaviour). With a specific year chosen
+    // (the tool's own local year picker — separate from, and NOT affected by, the top bar's global
+    // filter), it's whichever Seniors/Reserves team(s) they actually played for THAT year, so
+    // "Seniors in 2026" means exactly that rather than "whoever's most recent team happens to be
+    // Seniors regardless of when".
+    let currentEntries;
+    if(filters.currentYear){
+      currentEntries = p.timeline.filter(t=>{
+        if(!t.date) return false;
+        if(new Date(t.date).getFullYear() !== filters.currentYear) return false;
+        const g = getAgeGroupLabel(t.team);
+        return g==='Seniors' || g==='Reserves';
+      });
+    } else {
+      const g = getAgeGroupLabel(p.team);
+      currentEntries = (g==='Seniors' || g==='Reserves') ? [{ team:p.team }] : [];
+    }
+    if(!currentEntries.length) return;
+    const ageGroups = new Set(currentEntries.map(t=>getAgeGroupLabel(t.team)));
     // Which "current" grade counts toward this club's total — combined Seniors/Reserves (the
     // original behaviour), or narrowed to just one of the two.
-    if(filters.gradeScope==='seniors' && ageGroup!=='Seniors') return;
-    if(filters.gradeScope==='reserves' && ageGroup!=='Reserves') return;
-    if(filters.gradeScope==='both' && ageGroup!=='Seniors' && ageGroup!=='Reserves') return;
+    if(filters.gradeScope==='seniors' && !ageGroups.has('Seniors')) return;
+    if(filters.gradeScope==='reserves' && !ageGroups.has('Reserves')) return;
+    // Junior history is always checked against the player's FULL career timeline regardless of
+    // the currentYear filter above — that filter narrows WHICH players get checked (their roster
+    // in a given year), never how far back their own junior history is allowed to be found.
     let juniorEntries = p.timeline.filter(t=> isJuniorGrade(getAgeGroupLabel(t.team)));
     // "Same club" scope: only count a junior game as pathway evidence if it was at the SAME club
     // this player is now at — i.e. did THIS club develop them, not just "did they play juniors
@@ -10885,8 +11159,18 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
     const entry = byClub.get(p.club);
     entry.total++;
     if(hasJuniorHistory) entry.withJuniors++;
+    // How many games this player has actually played at the CURRENTLY SELECTED level (Seniors,
+    // Reserves, or both, matching gradeScope) — lets a "known junior pathway" number be checked
+    // against whether that's a handful of games or a real, established senior career, rather than
+    // treating one game and fifty games as the same "yes" for pathway purposes.
+    const levelGames = p.timeline.filter(t=>{
+      const tGrade = getAgeGroupLabel(t.team);
+      if(filters.gradeScope==='seniors') return tGrade==='Seniors';
+      if(filters.gradeScope==='reserves') return tGrade==='Reserves';
+      return tGrade==='Seniors' || tGrade==='Reserves';
+    }).length;
     entry.players.push({
-      key:p.key, name:p.name, currentTeam:p.team, hasJuniorHistory,
+      key:p.key, name:p.name, currentTeam:p.team, hasJuniorHistory, levelGames,
       juniorClub: lastJunior ? getClub(lastJunior.team) : null,
       juniorAgeGroup: lastJunior ? getAgeGroupLabel(lastJunior.team) : null,
       juniorYear: lastJunior && lastJunior.date ? new Date(lastJunior.date).getFullYear() : null,
@@ -11270,7 +11554,7 @@ function backToToolsFromAbsenceLeaderboard(){ navBack(); }
 
 let juniorPathwaySort = { key:'pct', dir:'desc' };
 let juniorPathwayExpandedClub = null;
-let juniorPathwayFilters = { gradeScope:'both', juniorScope:'any' };
+let juniorPathwayFilters = { gradeScope:'both', juniorScope:'any', currentYear:null };
 
 function doOpenJuniorPathway(){
   showPanel('junior-pathway');
@@ -11286,7 +11570,15 @@ function renderJuniorPathway(){
   const wrap = document.getElementById('juniorPathwayWrap');
   if(!wrap) return;
 
-  const { playerList } = computeAggregates();
+  // This tool's whole point is career-spanning history (a player's current level PLUS whatever
+  // junior years they had, however long ago) — the same reason Home Grown and the ladder ignore
+  // the top bar's Year/Phase pills. Left unwrapped, computeAggregates() with no override falls
+  // through to getVisibleGames() (filtered by those pills), so deselecting an earlier year would
+  // silently make that year's junior games invisible to this tool — a real player's junior history
+  // would read as "no junior data on file" for no reason a user looking at THIS page would expect.
+  // The tool gets its own separate year picker below (juniorPathwayFilters.currentYear) for "which
+  // year's Seniors/Reserves roster to check" — that one's meant to narrow, this wrapper isn't.
+  const { playerList } = withAllDataFilters(()=> computeAggregates());
   const jf = juniorPathwayFilters;
   const pathway = computeJuniorPathwayByClub(playerList, jf);
 
@@ -11313,16 +11605,19 @@ function renderJuniorPathway(){
 
   const rowHtml = r => {
     const expanded = juniorPathwayExpandedClub === r.club;
-    const sortedPlayers = [...r.players].sort((a,b)=> (b.hasJuniorHistory - a.hasJuniorHistory) || a.name.localeCompare(b.name));
+    // Only players with known junior history are worth listing here — "no junior data on file"
+    // told you nothing you couldn't already see from the withJuniors/total numbers above, and just
+    // pushed the actually-useful rows further down the page.
+    const withHistory = r.players.filter(p=>p.hasJuniorHistory);
+    const sortedPlayers = [...withHistory].sort((a,b)=> b.levelGames - a.levelGames || a.name.localeCompare(b.name));
     const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 3);
     const remaining = sortedPlayers.length - visiblePlayers.length;
     const yearBreakdownHtml = p => p.juniorYears.map(y=>{
       const teamsStr = y.teams.map(te=> `${te.team} (${te.games} game${te.games!==1?'s':''}${te.divisions.length ? ' — '+te.divisions.join(', ') : ''})`).join(', ');
       return `<div style="padding:2px 0 2px 14px;">${y.year}: ${teamsStr}</div>`;
     }).join('');
-    const playerLine = p => p.hasJuniorHistory
-      ? `<details style="display:inline;"><summary style="display:inline;cursor:pointer;list-style:none;"><span class="player-link" data-key="${p.key}" onclick="event.stopPropagation();">${p.name}</span> <span style="color:var(--muted);font-size:11px;">(${p.juniorClub}${p.juniorClub!==r.club?' — different club':''}, ${p.juniorAgeGroup} in ${p.juniorYear} — click to see every junior year)</span></summary>${yearBreakdownHtml(p)}</details>`
-      : `<span class="player-link" data-key="${p.key}">${p.name}</span> <span style="color:var(--muted);font-size:11px;">(no junior data on file)</span>`;
+    const playerLine = p =>
+      `<details style="display:inline;"><summary style="display:inline;cursor:pointer;list-style:none;"><span class="player-link" data-key="${p.key}" onclick="event.stopPropagation();">${p.name}</span> <span style="color:var(--muted);font-size:11px;">(${p.juniorClub}${p.juniorClub!==r.club?' — different club':''}, ${p.juniorAgeGroup} in ${p.juniorYear} — ${p.levelGames} ${gradeLabel} game${p.levelGames!==1?'s':''} — click to see every junior year)</span></summary>${yearBreakdownHtml(p)}</details>`;
     return `<tr>
       <td style="font-weight:600;">${r.club}</td>
       <td class="num">${r.total}</td>
@@ -11330,7 +11625,7 @@ function renderJuniorPathway(){
       <td class="num">${r.pct}%</td>
     </tr>
     <tr><td colspan="4" style="padding-top:0;padding-bottom:14px;font-size:12px;color:var(--muted);">
-      ${visiblePlayers.map(playerLine).join('<br>')}
+      ${sortedPlayers.length===0 ? '<span style="font-style:italic;">No known junior history among current players.</span>' : visiblePlayers.map(playerLine).join('<br>')}
       ${remaining>0 ? ` <span class="club-expand-link" data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--blue);text-decoration:underline;">+${remaining} more</span>` : (expanded && sortedPlayers.length>3 ? ` <span class="club-expand-link" data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--blue);text-decoration:underline;">show less</span>` : '')}
     </td></tr>`;
   };
@@ -11347,20 +11642,32 @@ function renderJuniorPathway(){
     ? 'Only counts a junior game as pathway evidence if it was at THIS SAME club — i.e. did this club actually develop them, not just did they play juniors anywhere.'
     : 'Counts a junior game at ANY club, not just this one.';
 
+  // This tool's OWN year picker — separate from, and unaffected by, the top bar's global Year
+  // filter (which this page ignores entirely; see the withAllDataFilters wrapper in
+  // renderJuniorPathway). Picking a year here narrows WHICH players get checked (their
+  // Seniors/Reserves roster in that specific year) — it never narrows how far back a junior
+  // history match can be found, which always looks at a player's whole career on file.
+  const allYears = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
+  const yearSelectHtml = `<select id="jpYearSel">
+    <option value="" ${!jf.currentYear?'selected':''}>Current (latest team)</option>
+    ${allYears.map(y=>`<option value="${y}" ${String(jf.currentYear)===String(y)?'selected':''}>${gradeLabel} in ${y}</option>`).join('')}
+  </select>`;
+
   wrap.innerHTML = `
     <span class="back-link" id="backToToolsFromJuniorPathway">&larr; Back to tools</span>
     <h2 style="font-size:20px;">Junior pathway</h2>
-    <p class="hint" style="margin:0 0 12px;">For each club's current ${gradeLabel} players, how many have a known junior (U-grade) game anywhere in the competition since 2022 — this tracker's own records only go back that far, so "no junior data" means genuinely none on file, not that they definitely never played juniors; anyone whose junior years were earlier than 2022 will show the same way. ${juniorScopeDesc}</p>
+    <p class="hint" style="margin:0 0 12px;">For each club's ${jf.currentYear?`${jf.currentYear} `:'current '}${gradeLabel} players, how many have a known junior (U-grade) game anywhere in the competition since 2022 — this tracker's own records only go back that far, so "no junior data" means genuinely none on file, not that they definitely never played juniors; anyone whose junior years were earlier than 2022 will show the same way. Always checks a player's FULL career for junior history, regardless of the top bar's Year filter. ${juniorScopeDesc}</p>
     <div class="controls-row" style="margin-bottom:8px;gap:6px;flex-wrap:wrap;">
       ${gradeChip('both','Seniors/Reserves')}
       ${gradeChip('seniors','Seniors only')}
       ${gradeChip('reserves','Reserves only')}
+      ${yearSelectHtml}
     </div>
     <div class="controls-row" style="margin-bottom:14px;gap:6px;flex-wrap:wrap;">
       ${juniorChip('any','Juniors at any club')}
       ${juniorChip('same','Juniors at same club')}
     </div>
-    ${sorted.length===0 ? `<div class="empty">No ${gradeLabel} players on file yet.</div>` : `
+    ${sorted.length===0 ? `<div class="empty">No ${gradeLabel} players on file yet${jf.currentYear?` for ${jf.currentYear}`:''}.</div>` : `
     <table><thead><tr>${thHtml}</tr></thead>
     <tbody>${sorted.map(rowHtml).join('')}</tbody></table>`}
   `;
@@ -11371,6 +11678,8 @@ function renderJuniorPathway(){
   wrap.querySelectorAll('.jp-junior-chip').forEach(el=>{
     el.onclick = ()=>{ juniorPathwayFilters.juniorScope = el.dataset.val; renderJuniorPathway(); };
   });
+  const jpYearSel = document.getElementById('jpYearSel');
+  if(jpYearSel) jpYearSel.onchange = e=>{ juniorPathwayFilters.currentYear = e.target.value ? parseInt(e.target.value,10) : null; renderJuniorPathway(); };
   wrap.querySelectorAll('.player-link').forEach(el=>{
     el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, openJuniorPathway);
   });
@@ -11726,6 +12035,24 @@ function renderAbsenceLeaderboard(){
   });
 }
 
+function renderTeamStandoutBadges(teamName, year){
+  if(!year) return '';
+  const { standoutsByTeamKey } = computeStandoutTeamStats();
+  const standouts = standoutsByTeamKey.get(teamName+'__'+year);
+  if(!standouts || !standouts.length) return '';
+  const fmtValue = (key, v) => {
+    if(key==='bestWinRate') return Math.round(v*100)+'%';
+    if(key==='bestPercentage') return Math.round(v)+'%';
+    if(!Number.isInteger(v)) return v.toFixed(1);
+    return String(v);
+  };
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;">${standouts.map(s=>{
+    const divLabel = s.division!=null ? `D${s.division}` : '';
+    const divisionPhrase = s.grade + (divLabel?' Division '+s.division:'');
+    return `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${s.label} in ${divisionPhrase}, ${s.year}: ${fmtValue(s.key,s.value)}"><span style="font-size:13px;line-height:1;">${s.emoji}</span>${s.label}</span>`;
+  }).join('')}</div>`;
+}
+
 function renderTeamDetail(teamKey){
   const { playerList, teamList } = computeAggregates();
   const t = teamList.find(x=>x.key===teamKey);
@@ -11780,7 +12107,7 @@ function renderTeamDetail(teamKey){
   wrap.innerHTML = `
     <span class="back-link" id="backToTeams">&larr; Back to teams</span>
     <div class="player-header" style="${headerBannerStyle}border-radius:10px;">
-      <div><h2 style="${teamColor ? `color:${lightenHex(teamColor.primary,0.55)};` : ''}">${t.name}</h2><div class="team-tag">${t.gamesPlayed} games played &middot; ${roster.length} players used</div></div>
+      <div><h2 style="${teamColor ? `color:${lightenHex(teamColor.primary,0.55)};` : ''}">${t.name}</h2><div class="team-tag">${t.gamesPlayed} games played &middot; ${roster.length} players used</div>${renderTeamStandoutBadges(t.name, t.year)}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="ghost" id="squadProgressionsBtn" title="See which squads across the whole competition improved, held steady, or dropped back — filterable by year, age group and division">Squad progressions</button>
         <button class="ghost" id="cohortTrajectoryBtn" title="See this team's real split-and-reunite cycle — the bottom-age half that stays, the top-age half that moves up, and where each lands">Cohort trajectory</button>
@@ -13883,39 +14210,31 @@ function getCohortProgression(cohort){
     ...r, teams:[...r.teams], divisions:[...r.divisions]
   })).sort((a,b)=> a.year-b.year);
 
-  // Trend compares average division+ladder score year to year (lower is always stronger, and a
-  // division boundary always wins over any in-division ladder movement — see
-  // divisionAndLadderScore above). Grades that never run a numbered division (Seniors/Reserves, or
-  // any grade in a season with no graded field) fall back to a win% percentile against everyone
-  // else who fielded that grade+year — tracked on its own separate chain, since a division-based
-  // trend and a win%-based trend aren't on the same scale and shouldn't be compared to each other.
+  // Trend compares overall (cross-division) level year to year — the SAME computeOverallLevelFrac
+  // scale every other Squad Progressions view now uses (1 = strongest team that grade+year across
+  // EVERY division, 0 = weakest), rather than the old division-number+in-division-ladder score.
+  // That old score could disagree with Cohort Trajectory's own "true overall rank" for the exact
+  // same team's exact same season — this is the fix for that. The win% fallback (grades with no
+  // real numbered division) now shares the identical 0-1 scale too, so one tolerance band covers
+  // both instead of needing two separate ones on two different scales.
   const { teamList } = computeAggregates();
-  let prevRank = null, prevWinLevel = null;
+  let prevLevel = null;
   rows.forEach(r=>{
-    const scores = r.teams.map(t=> divisionAndLadderScore(t, r.year)).filter(x=>x!=null);
-    const avgRank = scores.length ? scores.reduce((s,x)=>s+x,0)/scores.length : null;
-    if(avgRank!=null){
-      // A small tolerance band around "no change" — the score is now continuous (division +
-      // fractional ladder position), so exact equality almost never happens even for a
-      // genuinely unchanged standing. 0.08 is roughly one ladder spot in a ~12-team division;
-      // anything smaller reads as normal week-to-week noise rather than a real move.
-      const STEADY_BAND = 0.08;
-      r.trend = prevRank!=null ? (avgRank < prevRank - STEADY_BAND ? 'Improved' : (avgRank > prevRank + STEADY_BAND ? 'Dropped back' : 'Steady')) : null;
-      r.trendBasis = 'division';
+    const grade = getAgeGroupLabel(r.teams[0]||'');
+    const { levelFrac, basis } = computeOverallLevelFrac(r.teams, grade, r.year, teamList);
+    if(levelFrac!=null){
+      // 0.03 on this 0-1 scale is roughly 1-2 ladder places in a typical 40-50 team pool — similar
+      // in spirit to Cohort Trajectory's own "at least 2 places" tolerance for calling something a
+      // real move rather than noise, just expressed on the normalized scale this function uses.
+      const STEADY_BAND = 0.03;
+      r.trend = prevLevel!=null ? (levelFrac > prevLevel + STEADY_BAND ? 'Improved' : (levelFrac < prevLevel - STEADY_BAND ? 'Dropped back' : 'Steady')) : null;
+      r.trendBasis = basis;
     } else {
-      const grade = getAgeGroupLabel(r.teams[0]||'');
-      const winLevel = winPctLevelFrac(grade, r.year, r.teams, teamList);
-      if(winLevel!=null){
-        r.trend = prevWinLevel!=null ? (winLevel > prevWinLevel + 0.02 ? 'Improved' : (winLevel < prevWinLevel - 0.02 ? 'Dropped back' : 'Steady')) : null;
-        r.trendBasis = 'winpct';
-      } else {
-        r.trend = null;
-        r.trendBasis = null;
-      }
-      r._winLevel = winLevel;
+      r.trend = null;
+      r.trendBasis = null;
     }
-    if(avgRank!=null) prevRank = avgRank;
-    if(r._winLevel!=null) prevWinLevel = r._winLevel;
+    r.levelFrac = levelFrac;
+    if(levelFrac!=null) prevLevel = levelFrac;
   });
   return rows.reverse();
 }
@@ -14370,16 +14689,16 @@ function renderCohortTrajectoryInner(wrap, header){
       if(gaps.length){
         const maxGap = Math.max(...gaps);
         splitNote = maxGap>25
-          ? ` The two halves weren't close in strength at the split (about ${maxGap} percentile points apart) — one branch was carrying most of the group's overall standing.`
-          : ` The two halves were fairly evenly matched at the split (within ${maxGap} percentile points of each other).`;
+          ? `One branch carried most of the group's standing (about ${maxGap} points apart at the split).`
+          : `The two halves were fairly evenly matched at the split.`;
       }
     }
     insightsHtml = `
       <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
         <div style="font-size:13px;color:var(--muted);margin-bottom:2px;">Overall, ${first.year} \u2192 ${last.year}</div>
         <div style="font-size:19px;font-weight:700;color:${dirColor};">Rank ${first.rank} of ${first.total} \u2192 ${last.rank} of ${last.total} (${dirWord}${rankChange!==0?', '+(rankChange<0?'':'+')+(-rankChange)+' place'+(Math.abs(rankChange)===1?'':'s'):''})</div>
-        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">As a percentage of each year's pool: ${firstPct}% \u2192 ${lastPct}%${poolChanged?` (pool size changed, ${first.total} \u2192 ${last.total} teams)`:''}.${disagree ? ` <b style="color:var(--gold);">Rank and percentage point different directions here</b> — that happens when the pool size itself shrinks or grows a lot between the two years; treat the RANK figure above as the more reliable one, the same lesson from the Squad Progressions fix.` : ''}</div>
-        <div style="font-size:12.5px;color:var(--muted);margin-top:4px;">This end-to-end read skips the mid-cycle split/reunite detour shown in the chart below — use it as the headline number, and the chart for the shape of how it got there.${splitNote}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">${firstPct}% \u2192 ${lastPct}% of each year's pool.${disagree ? ` <b style="color:var(--gold);">Rank and % disagree here</b> <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(why?)</summary> The pool size changed a lot between years (${first.total}\u2192${last.total} teams) — trust the rank figure above.</details>` : ''}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:4px;">Skips the mid-cycle split shown in the chart below. ${splitNote}</div>
       </div>`;
 
     // Next-step trend continuation — deliberately simple: this cohort's own average change per
@@ -14393,7 +14712,7 @@ function renderCohortTrajectoryInner(wrap, header){
       <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
         <div style="font-size:13px;color:var(--muted);margin-bottom:2px;">If this trend continues, ${trend.nextYear} (not yet played)</div>
         <div style="font-size:17px;font-weight:700;color:var(--gold);">Roughly rank ${projectedRank} of ~${last.total} (${trendWord})</div>
-        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">A simple continuation of this cohort's OWN average change per hop (${first.year}\u2192${last.year}, ${trend.hops} hop${trend.hops===1?'':'s'}) — nothing more. It does not account for teams typically drifting back toward the middle of the competition regardless of their recent trend, which is a real, common pattern in this data — so treat this as "what happens if nothing changes," not a statistically weighted forecast.</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">A simple continuation of this cohort's own trend — nothing more. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(what does this not account for?)</summary> Teams often drift back toward the middle regardless of their recent trend — this doesn't correct for that, so treat it as "what happens if nothing changes," not a real forecast.</details></div>
       </div>`;
     }
   }
@@ -14443,7 +14762,7 @@ function renderCohortTrajectoryInner(wrap, header){
     const changeColor = c => c<-1?'var(--green)':(c>1?'var(--red)':'var(--muted)');
     leaderboardHtml = `
     <h3 style="font-size:15px;margin:22px 0 6px;">How every ${seedGrade} ${seedYear} club has moved, ${lbRows[0]?lbRows[0].first.year:''}\u2192${lbRows[0]?lbRows[0].last.year:''}</h3>
-    <p class="hint" style="margin:0 0 10px;">Same comparison group as the chart above — each club's own earliest traceable point to its latest, by raw rank (lower change = bigger climb). ${cohortTrajFilters.club} is highlighted.</p>
+    <p class="hint" style="margin:0 0 10px;">Each club's own earliest point to its latest, by raw rank. ${cohortTrajFilters.club} is highlighted.</p>
     <table><thead><tr>${lbThHtml}</tr></thead><tbody>
     ${lbRows.map(r=>{
       const isCurrent = r.club === cohortTrajFilters.club;
@@ -14460,7 +14779,7 @@ function renderCohortTrajectoryInner(wrap, header){
 
   wrap.innerHTML = `
     ${header}
-    <p class="hint" style="margin:0 0 12px;">A team is really a rolling cycle: a whole grade-cohort plays together, splits into a bottom-age half (stays another year in the same grade) and a top-age half (moves up early) the next season, then those two halves reunite two years later as the next grade's whole team. This traces that real cycle — one grade back, the season you pick, and one grade forward — using actual ladder ranks throughout, not a percentage (a shrinking or growing pool of teams year to year can distort a percentage in a way raw rank doesn't).</p>
+    <p class="hint" style="margin:0 0 12px;">One team's own story, not a league comparison — for that, see Squad progressions. A team splits in two as players age up, then reunites two years later. This traces that cycle using real ladder rank, not percentage <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(why rank, not %?)</summary> A shrinking or growing pool of teams year to year can distort a percentage in a way raw rank doesn't.</details></p>
     <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center;">
       <select id="cohortTrajClubSel">${clubs.map(c=>`<option value="${c}" ${cohortTrajFilters.club===c?'selected':''}>${c}</option>`).join('')}</select>
       <select id="cohortTrajTeamSel" ${teamKeys.length?'':'disabled'}>
@@ -14482,7 +14801,7 @@ function renderCohortTrajectoryInner(wrap, header){
     <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="position:relative;height:${(showAll||showAllCohorts)?440:360}px;"><canvas id="cohortTrajChart"></canvas></div>
       ${showAllCohorts ? `<div id="cohortTrajLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11.5px;"></div>` : ''}
-      ${showAllFull ? `<p class="hint" style="margin:10px 0 0;font-size:11.5px;">Every other club's own split shown too — 2023 shows only each club's traceable half (the group already in the older grade that year); the rest of that year's team was in an ungraded age with no real division or ladder rank to show.</p>` : ''}
+      ${showAllFull ? `<p class="hint" style="margin:10px 0 0;font-size:11.5px;">Every other club's own split shown too. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(why does 2023 only show one line?)</summary> That's each club's traceable half — the rest of that year's team was in an ungraded age with no real division or ladder rank to show.</details></p>` : ''}
     </div>
     <table><thead><tr><th>Year</th><th>Stage</th><th>Team</th><th class="num">Rank</th></tr></thead><tbody>
     ${trajectory.flatMap(col=>col.points.map(p=>`<tr>
@@ -14786,6 +15105,29 @@ function computeMaxDivByGradeYear(teamList){
   return maxDiv;
 }
 
+// Shared level-fraction helper for every Squad Progressions view: 1 = strongest team in this
+// grade+year across EVERY division, 0 = weakest — the same overall (cross-division) ranking
+// Cohort Trajectory uses (computeOverallGradeRank), not a division-NUMBER-only measure. The old
+// division-number-only version couldn't tell a 2nd-place team in Division 4 apart from a 4th-place
+// team in the same division — real teams showed as "Steady" across a genuine ladder slide within
+// their own division, which is exactly the gap this fixes, and it's what let Squad Progressions
+// and Cohort Trajectory quietly disagree about the same team's same season. Falls back to a win%
+// percentile when there's no real numbered division to place a team in (Seniors/Reserves, or any
+// grade in a season with no graded field) — unchanged from the old behaviour for that case.
+function computeOverallLevelFrac(teamNames, grade, year, teamList){
+  const overall = computeOverallGradeRank(grade, year);
+  if(overall.total>0){
+    const ranks = teamNames.map(t=>overall.rankOf[t]).filter(x=>x!=null);
+    if(ranks.length){
+      const avgRank = ranks.reduce((s,x)=>s+x,0)/ranks.length;
+      const levelFrac = overall.total>1 ? (overall.total-avgRank)/(overall.total-1) : 1;
+      return { levelFrac, basis:'division' };
+    }
+  }
+  const levelFrac = winPctLevelFrac(grade, year, teamNames, teamList);
+  return { levelFrac, basis: levelFrac!=null?'winpct':null };
+}
+
 // Fallback "level" for grades that never run a numbered division at all (Seniors/Reserves in
 // this competition, and any age group in a season with no graded field) — instead of giving up
 // and calling it "Not comparable", place the team within the field of everyone else who fielded
@@ -14830,7 +15172,6 @@ function computeSquadImprovementUncached(sinceYear){
   const { playerList, teamList } = computeAggregates();
   const rosters = buildTeamSeasonRosters(playerList);
   const threshold = squadProgFilters.cohortThreshold ?? 0.35;
-  const maxDiv = computeMaxDivByGradeYear(teamList);
 
   const assigned = new Set();
   const out = [];
@@ -14842,31 +15183,23 @@ function computeSquadImprovementUncached(sinceYear){
     cohort.forEach(k=>assigned.add(k));
     const prog = getCohortProgression(cohort).slice().sort((a,b)=> a.year-b.year); // oldest → newest
 
-    // Numbered-division seasons are placed by division rank; grades that never run a numbered
-    // division (Seniors/Reserves in this competition, or any grade in a season with no graded
-    // field) fall back to a win% percentile against everyone else who fielded that grade+year —
-    // still on the same 0-1 scale, just a different yardstick. Only truly skipped when NEITHER
-    // basis can place the season (e.g. only one team fielded that grade that year), the season
-    // is an ungraded junior age (see isCompetitiveGrade), or it's before the optional sinceYear
-    // floor (the "Since" picker on the Multi-year Stability vs improvement view).
+    // Numbered-division seasons are placed by OVERALL (cross-division) rank, the same measure
+    // Cohort Trajectory uses; grades that never run a numbered division (Seniors/Reserves in this
+    // competition, or any grade in a season with no graded field) fall back to a win% percentile
+    // against everyone else who fielded that grade+year — still on the same 0-1 scale, just a
+    // different yardstick. Only truly skipped when NEITHER basis can place the season (e.g. only
+    // one team fielded that grade that year), the season is an ungraded junior age (see
+    // isCompetitiveGrade), or it's before the optional sinceYear floor (the "Since" picker on the
+    // Multi-year Stability vs improvement view).
     const seasons = [];
     prog.forEach(row=>{
       const grade = getAgeGroupLabel(row.teams[0]||'');
       if(!isCompetitiveGrade(grade)) return;
       if(sinceYear!=null && row.year < sinceYear) return;
-      const divNums = row.divisions.map(divisionRank).filter(x=>x!=null);
-      const md = maxDiv[grade+'||'+row.year];
-      let levelFrac, basis;
-      if(divNums.length && md!=null){
-        const avgRank = divNums.reduce((s,x)=>s+x,0)/divNums.length;
-        levelFrac = md>1 ? (md-avgRank)/(md-1) : 1; // 1 = top division that grade/year, 0 = bottom
-        basis = 'division';
-      } else {
-        levelFrac = winPctLevelFrac(grade, row.year, row.teams, teamList);
-        basis = 'winpct';
-      }
+      const { levelFrac, basis } = computeOverallLevelFrac(row.teams, grade, row.year, teamList);
       if(levelFrac==null) return; // can't place this season on either basis
-      seasons.push({ year:row.year, grade, divNums:[...new Set(divNums)].sort((a,b)=>a-b), levelFrac, basis,
+      const divNums = [...new Set(row.divisions.map(divisionRank).filter(x=>x!=null))].sort((a,b)=>a-b);
+      seasons.push({ year:row.year, grade, divNums, levelFrac, basis,
         // Which club(s) this specific season was played at — lets the journey line flag a season
         // that belongs to a DIFFERENT club than the one being filtered on, instead of silently
         // presenting another club's history as if it were this club's.
@@ -15008,7 +15341,6 @@ function computeSquadTransitionsUncached(){
   const { playerList, teamList } = computeAggregates();
   const rosters = buildTeamSeasonRosters(playerList);
   const threshold = squadProgFilters.cohortThreshold ?? 0.35;
-  const maxDiv = computeMaxDivByGradeYear(teamList);
 
   const assigned = new Set();
   const out = [];
@@ -15023,17 +15355,7 @@ function computeSquadTransitionsUncached(){
     const seasons = [];
     prog.forEach(row=>{
       const grade = getAgeGroupLabel(row.teams[0]||'');
-      const divNums = row.divisions.map(divisionRank).filter(x=>x!=null);
-      const md = maxDiv[grade+'||'+row.year];
-      let levelFrac, basis;
-      if(divNums.length && md!=null){
-        const avgRank = divNums.reduce((s,x)=>s+x,0)/divNums.length;
-        levelFrac = md>1 ? (md-avgRank)/(md-1) : 1;
-        basis = 'division';
-      } else {
-        levelFrac = winPctLevelFrac(grade, row.year, row.teams, teamList);
-        basis = 'winpct';
-      }
+      const { levelFrac, basis } = computeOverallLevelFrac(row.teams, grade, row.year, teamList);
       if(levelFrac==null) return;
       seasons.push({ year:row.year, grade, teams:row.teams, levelFrac, basis });
     });
@@ -15111,27 +15433,13 @@ function computeClubSquadLeaderboard(){
 // (or a gap in it) at a glance rather than one age group at a time.
 function computeClubPathway(club, year){
   const { teamList } = computeAggregates();
-  const maxDiv = computeMaxDivByGradeYear(teamList);
   const teamsThisYear = teamList.filter(t=> String(t.year)===String(year) && getClub(t.name)===club);
   const grades = Object.keys(GRADE_DISPLAY_ORDER);
   const out = [];
   grades.forEach(grade=>{
     const teams = teamsThisYear.filter(t=>t.ageGroup===grade);
     if(!teams.length) return;
-    const divNums = teams.flatMap(t=>t.divisions.map(divisionRank)).filter(x=>x!=null);
-    const md = maxDiv[grade+'||'+year];
-    let levelFrac = null, basis = null;
-    if(divNums.length && md!=null){
-      const avgRank = divNums.reduce((s,x)=>s+x,0)/divNums.length;
-      levelFrac = md>1 ? (md-avgRank)/(md-1) : 1;
-      basis = 'division';
-    } else {
-      // No numbered division this grade/year (Seniors/Reserves in this competition, or any grade
-      // in a season with no graded field) — place it by win% against every other club that
-      // fielded the same grade+year instead of leaving it "Not comparable".
-      levelFrac = winPctLevelFrac(grade, year, teams.map(t=>t.name), teamList);
-      basis = levelFrac!=null ? 'winpct' : null;
-    }
+    const { levelFrac, basis } = computeOverallLevelFrac(teams.map(t=>t.name), grade, year, teamList);
     out.push({
       ageGroup: grade,
       teamNames: teams.map(t=>t.name),
@@ -15645,8 +15953,8 @@ function renderHomeGrown(){
   wrap.innerHTML = `
     <span class="back-link" id="backToTeamsFromHG">&larr; Back to teams</span>
     <h2 style="font-size:20px;">Home grown</h2>
-    <p class="hint" style="max-width:640px;">A "home-grown" player is one who has only ever appeared for the <strong>one club</strong> across every season on file — no moves in or out (joint/merged teams don\'t count against it). In this selection, <strong>${pctStr(leaguePct)}</strong> of players (${totalHome} of ${totalPlayers}) are one-club players. ${subtitle}</p>
-    <div class="warn-box" style="max-width:640px;">"Home grown" only reflects the seasons on file, not necessarily a player\'s whole career — coverage varies by year and gets thinner the further back it goes. An older player who genuinely moved clubs early on, before that season was tracked, can still read as one-club here simply because their earlier club isn\'t recorded. Treat this as "no move found in the data," not proof one never happened — the more recent and complete a player\'s history, the more that reads.</div>
+    <p class="hint" style="max-width:640px;">A "home-grown" player has only ever appeared for <strong>one club</strong> across every season on file. In this selection, <strong>${pctStr(leaguePct)}</strong> of players (${totalHome} of ${totalPlayers}) are one-club players. ${subtitle}</p>
+    <div class="warn-box" style="max-width:640px;">Only reflects seasons on file — an older player who moved clubs before tracking began can still read as one-club here. Treat this as "no move found in the data," not proof one never happened.</div>
     <div class="players-toolbar">
       <p class="hint" style="margin:0 0 6px;">Search for a specific ${f.mode==='clubs'?'club':'team'}</p>
       <div class="search-input-wrap">
@@ -15655,7 +15963,7 @@ function renderHomeGrown(){
       <div class="filter-strip">${filterStrip}</div>
     </div>
     ${body}
-    <p class="hint" style="margin-top:12px;color:var(--muted);">Home-grown status is judged across a player\'s whole history, not just the filtered seasons. Based on name-matched history, so it can\'t tell apart two people with the same name — treat it as a strong indication, not a roll-call.</p>`;
+    <p class="hint" style="margin-top:12px;color:var(--muted);">Judged across a player's whole history, not just the filtered seasons. Name-matched, so it can't tell apart two people with the same name.</p>`;
 
   document.getElementById('backToTeamsFromHG').onclick = backToTeamsFromRankings;
   const bind = (id, fn) => { const el = document.getElementById(id); if(el) el.onchange = ()=>{ fn(el.value); renderHomeGrown(); }; };
@@ -15714,6 +16022,7 @@ function renderSquadProgressions(){
   const header = `
     <span class="back-link" id="backToTeamsFromProg">&larr; Back to teams</span>
     <h2 style="font-size:20px;">${TILE_GROUP_TITLES[f.tileGroup] || 'Squad progressions'}</h2>
+    <p class="hint" style="margin:0 0 10px;">Compares every squad in the league at once. For one team's own detailed story instead, see Cohort trajectory.</p>
     ${modeToggle}`;
 
   if(f.mode === 'improvement'){
@@ -15797,8 +16106,8 @@ function renderSquadProgressions(){
 
   wrap.innerHTML = `
     ${header}
-    <p class="hint" style="margin:0 0 12px;">Every squad's move up or down for a chosen season, measured against its OWN previous year — a squad is the same group of players tracked as they age up and change team names, so this follows the kids, not the label. "Improved" means a stronger (lower-numbered) division than last season, "Dropped back" a weaker one. Grades that never run a numbered division (Seniors, Reserves, and any grade in a season with no graded field) are judged by win% against the field instead — marked "(win%)" next to the trend — rather than left "Not comparable". First-season squads still show as New since there's nothing earlier to compare against. Pick "All years" to see every season's moves at once instead of one year at a time.</p>
-    <div class="warn-box" style="margin:0 0 14px;">Squad identity is inferred by shared players (currently ≥${Math.round((f.cohortThreshold??0.35)*100)}% roster overlap — adjustable on the right), the same way the team page's own Squad history works — so a squad that split in two or merged for a season may read approximately. Treat it as a read on the group, not an official grading record.</div>
+    <p class="hint" style="margin:0 0 12px;">Every squad's move up or down for a chosen season, compared to its own previous year. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(how is this worked out?)</summary> A squad is the same group of players tracked as they age up and change team names, so this follows the kids, not the label. "Improved" means a stronger (lower-numbered) division than last season. Grades with no numbered division (Seniors, Reserves) are judged by win% instead, marked "(win%)". First-season squads show as New. Pick "All years" to see every season's moves at once.</details></p>
+    <div class="warn-box" style="margin:0 0 14px;">Squad identity is inferred by shared players (currently ≥${Math.round((f.cohortThreshold??0.35)*100)}% roster overlap — adjustable on the right) — a squad that split or merged for a season may read approximately.</div>
     <div class="controls-row" style="margin-bottom:12px;gap:8px;flex-wrap:wrap;">
       <select id="progYear">
         <option value="ALL" ${f.year==='ALL'?'selected':''}>All years</option>
@@ -15963,8 +16272,8 @@ function renderSquadImprovement(wrap, header, teamList){
 
   wrap.innerHTML = `
     ${header}
-    <p class="hint" style="margin:0 0 12px;">Ranks each squad by how much it climbed across its WHOLE journey, not just the last season. Because grades run different numbers of divisions, every season is first converted to how high the squad sat within its own grade's field that year (top division = 1, bottom = 0). Grades that never run a numbered division — Seniors, Reserves, and any grade in a season with no graded field — are placed the same way using a win% percentile against everyone else who fielded that grade that year instead (shown as "%W" in the journey line rather than "D"). The <strong>Score</strong> is half how far it climbed in that normalised space and half how fast — so a steady Div 5 → 4 → 3 → 2 climb outranks a slower Div 4 → 2 over six years. Squads need at least two placeable seasons to appear.</p>
-    <div class="warn-box" style="margin:0 0 14px;">Cross-age comparison, so it leans on that grade-relative normalisation — a read on trajectory, not an official grading record. A season is only skipped when NEITHER basis can place it (e.g. only one team fielded that grade that year). Squad identity is inferred by shared players (currently ≥${Math.round((f.cohortThreshold??0.35)*100)}% roster overlap — adjustable above).</div>
+    <p class="hint" style="margin:0 0 12px;">Ranks each squad by how much it climbed across its whole journey, not just the last season. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(how is Score worked out?)</summary> Every season is converted to how high the squad sat within its own grade's field that year (top division = 1, bottom = 0), so grades with different division counts stay comparable. Grades with no numbered division use a win% percentile instead (shown as "%W"). Score is half how far it climbed, half how fast — a steady multi-year climb outranks a slower one over more years. Needs at least two placeable seasons to appear.</details></p>
+    <div class="warn-box" style="margin:0 0 14px;">A read on trajectory, not an official grading record. Squad identity is inferred by shared players (currently ≥${Math.round((f.cohortThreshold??0.35)*100)}% roster overlap — adjustable above).</div>
     <div class="controls-row" style="margin-bottom:12px;gap:8px;flex-wrap:wrap;">
       <select id="impAge">
         <option value="ALL" ${f.impAge==='ALL'?'selected':''}>Any current age group</option>
@@ -16238,8 +16547,8 @@ function renderClubStabilitySingle(wrap, header, modeToggle){
   wrap.innerHTML = `
     ${header}
     ${modeToggle}
-    <p class="hint" style="margin:0 0 12px;">Tests a real question: do squads that keep more of the same roster together actually improve more, or is turnover (recruiting) doing the work? Each row is ONE season-to-season hop for a squad (not its whole career) — see the Multi-year view above for a squad's whole tracked span instead. Roster stability is one blended percentage; Retained/Arrivals/Departures give the actual head-counts behind it — Retained is the core group that stuck around, Arrivals/Departures show which direction the rest of the change came from. A squad can end up at the same stability % by recruiting hard, by losing players without replacing them, or both at once, and those are different situations. Sort by any column, narrow to one age group / juniors / seniors, or loosen/tighten the roster-overlap threshold below to see how "similar" a squad has to stay to count as the same group.</p>
-    <div class="warn-box" style="margin:0 0 14px;">Only squad-transitions with a measurable roster overlap are shown. Age group here is the LATER season's age group in each transition. The roster-overlap threshold on the right controls squad IDENTITY (how much carryover counts as "still the same squad") — it's a different thing from the Roster stability COLUMN, which measures the actual overlap for that specific hop once a squad has been identified. Retained/Arrivals/Departures are raw head-counts, so smaller squads will naturally show bigger swings than larger ones for the same number of changes.</div>
+    <p class="hint" style="margin:0 0 12px;">Does keeping the same roster together predict improvement? Each row is one season-to-season change. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(what do the columns mean?)</summary> Retained/Arrivals/Departures show the actual head-counts behind the stability % — a squad can end up at the same stability % by recruiting hard, by losing players without replacing them, or both, and those are different situations. Sort any column, or narrow by age group below. See the Multi-year view above for a squad's whole tracked span instead of one hop.</details></p>
+    <div class="warn-box" style="margin:0 0 14px;">Only squad-transitions with a measurable roster overlap are shown. Age group is the LATER season's age group. The roster-overlap threshold on the right controls squad identity, separately from the Roster stability column.</div>
     <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <select id="stabSeasonSel">
         <option value="ALL" ${f.stabSeason==='ALL'?'selected':''}>All seasons</option>
@@ -16373,7 +16682,7 @@ function renderClubStabilityMulti(wrap, header, modeToggle){
   wrap.innerHTML = `
     ${header}
     ${modeToggle}
-    <p class="hint" style="margin:0 0 12px;">Each row is ONE squad's whole tracked competitive span — from its earliest graded season (U9/U10/U12 don't run a real division ladder here, so they're never the starting point) through to its latest — rather than a single season-to-season hop. This is the better view for "does staying together over YEARS predict climbing over those same years", since a single hop can be noisy in a way a multi-year trend usually isn't. Click any row to see the individual seasons behind its numbers.</p>
+    <p class="hint" style="margin:0 0 12px;">Each row is one squad's full tracked span, not a single season. Click a row to see the individual seasons behind it. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(why not just single-hop?)</summary> A single hop can be noisy in a way a multi-year trend usually isn't — this is the better view for "does staying together over years predict climbing over those years". U9/U10/U12 don't run a real division ladder, so they're never the starting point.</details></p>
     <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <select id="stabSinceSel" title="Narrow every squad's span to start no earlier than this year. Leave on 'as far back as possible' to use each squad's own earliest graded season.">
         <option value="" ${!f.stabSinceYear?'selected':''}>Since: as far back as possible</option>
@@ -16513,7 +16822,7 @@ function renderClubChurnView(wrap, header){
 
   wrap.innerHTML = `
     ${header}
-    <p class="hint" style="margin:0 0 12px;">For each club, how much of last season's playing base is still turning out this season — independent of age group or team name, so a player aging up or shifting sides within the club still counts as retained. A club can look fine on Squad progressions while quietly leaking players; this is the pipeline-health check for that. Everyone who left is split into "Moved clubs" (still appears somewhere else in AFL Barwon FNL this season) and "No longer playing" (doesn't appear anywhere in the competition this season). Narrow to one age group / juniors / seniors below — a club can retain juniors well while leaking seniors, or vice versa.</p>
+    <p class="hint" style="margin:0 0 12px;">For each club, how much of last season's playing base is still turning out this season — a player aging up or shifting sides still counts as retained. This is the pipeline-health check behind Squad progressions. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(what do "moved" and "left" mean?)</summary> Everyone who left is split into "Moved clubs" (still appears elsewhere in AFL Barwon FNL) and "No longer playing" (doesn't appear anywhere this season). Narrow to one age group / juniors / seniors below — a club can retain juniors well while leaking seniors, or vice versa.</details></p>
     <div class="warn-box" style="margin:0 0 14px;">
       Compares each club's two most recent seasons on file only (not a multi-year average). Identity is by player NAME across the whole competition — a same-named different person at another club would misread as "Moved clubs" rather than "No longer playing". Joint/merged teams (e.g. "Newcomb / Belmont Power Lions") ARE included — each player on a joint roster is attributed to their actual home club via the same SP-tag mechanism used elsewhere, not skipped or double-counted. When filtered to one age group / juniors / seniors, "Moved clubs" means moved to another club WITHIN that same filter (e.g. under "Juniors only", a junior who moved up into Seniors reads as "No longer playing" for this view, not "Moved clubs").<br><br>
       <strong>"No longer playing" only means no longer playing in AFL Barwon FNL</strong> (or, when filtered, in that slice of it) — this app only has visibility into this one competition, so that group can include players who've switched to a different league, a different sport, moved away, or genuinely stopped playing altogether. Treat it as "not here anymore", not proof of "gave the sport away".
@@ -17588,6 +17897,7 @@ document.getElementById('toolTileSquadProgressions').onclick = ()=> openSquadPro
 document.getElementById('toolTileClubPathwayRetention').onclick = ()=> openSquadProgressions(null,'pathway');
 document.getElementById('toolTileStabilityImprovement').onclick = ()=> openSquadProgressions(null,'stability');
 document.getElementById('toolTileCohortTrajectory').onclick = ()=> openCohortTrajectory();
+document.getElementById('toolTileStandoutStats').onclick = ()=> openStandoutStats();
 document.getElementById('toolTileHomeGrown').onclick = ()=> openHomeGrown();
 document.getElementById('toolTileAbsenceLeaderboard').onclick = ()=> openAbsenceLeaderboard();
 document.getElementById('toolTileJuniorPathway').onclick = ()=> openJuniorPathway();
