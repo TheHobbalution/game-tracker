@@ -631,6 +631,7 @@
       <div class="tool-tile tool-tile-blue" id="toolTileStabilityImprovement"><div class="tool-tile-title">Stability vs improvement</div><div class="tool-tile-desc">Do squads that keep their roster together actually improve more?</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileCohortTrajectory"><div class="tool-tile-title">Cohort trajectory</div><div class="tool-tile-desc">One team's own story — the real split-and-reunite cycle as players age up, not a league comparison.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileStandoutStats"><div class="tool-tile-title">Standout stats</div><div class="tool-tile-desc">Every division's leader in goals, defence, percentage, win rate and more.</div></div>
+      <div class="tool-tile tool-tile-blue" id="toolTileOnFirePlayers"><div class="tool-tile-title">On fire players</div><div class="tool-tile-desc">Everyone currently on a hot streak — 3+ games as 1st-best and/or 3+ goals.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileAbsenceLeaderboard"><div class="tool-tile-title">Missing games</div><div class="tool-tile-desc">Which teams have the most roster absence this season.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
@@ -702,6 +703,11 @@
   <!-- STANDOUT STATS -->
   <section class="panel" id="panel-standout-stats">
     <div id="standoutStatsWrap"></div>
+  </section>
+
+  <!-- ON FIRE PLAYERS -->
+  <section class="panel" id="panel-on-fire-players">
+    <div id="onFirePlayersWrap"></div>
   </section>
 
   <!-- HOME GROWN -->
@@ -6954,6 +6960,23 @@ function contextGoalWeight(goals, margin, res, isFinals, isGrandFinal){
 function finalsWeightMultiplier(isFinals, isGrandFinal){
   return isGrandFinal ? 1.2 : (isFinals ? 1.1 : 1.0);
 }
+// Display-only rounding for any weighted-best-points value. Since the finals/Grand Final
+// multipliers above (1.1/1.2) aren't exactly representable in binary floating point, repeatedly
+// adding them produces values like 229.89999999999998 — a real, confirmed display bug spotted on
+// the live site, not a rare edge case. Round to 1 decimal everywhere this number is shown, since a
+// single fractional bonus (e.g. a 3rd-best in one finals game) is the finest distinction that's
+// actually meaningful here.
+function fmtWeightedBest(v){
+  return Math.round(v*10)/10;
+}
+// Generic display formatter for the LEAGUE_CONTEXT_STATS percentile-comparison view below, which
+// shows several different stat keys through the same generic p[key] lookup — weightedBest needs
+// its own rounding there too (same floating-point drift as everywhere else this value is shown),
+// so this dispatches to fmtWeightedBest for that one key and passes everything else through as-is.
+function formatStatValue(key, value){
+  if(key==='weightedBest') return fmtWeightedBest(value);
+  return value;
+}
 
 function computeAggregates(gamesOverride){
   const _sig = aggregateCacheSignature(gamesOverride);
@@ -7517,7 +7540,22 @@ function renderPlayers(){
   };
 
   const clubs = [...new Set(playerList.filter(p=>matches(p,'club')).map(p=>p.club))].sort((a,b)=>a.localeCompare(b));
-  const teamNames = [...new Set(playerList.filter(p=>matches(p,'team')).flatMap(p=>p.teams))].sort((a,b)=>a.localeCompare(b));
+  // Team names need their OWN filter, not just "any team belonging to a player who currently
+  // matches the other filters" — a player's p.teams is their whole career, so that approach let a
+  // Newcomb U16 player's OTHER team (e.g. an earlier club, or a different age group) leak into the
+  // dropdown even with Newcomb + U16 selected. Each candidate team name is checked directly
+  // against club/age/division here instead.
+  const teamNames = [...new Set(playerList.filter(p=>matches(p,'team')).flatMap(p=>p.teams))]
+    .filter(name=>{
+      if(curClub!=='ALL' && getClub(name)!==curClub) return false;
+      if(curAge!=='ALL' && getAgeGroupLabel(name)!==curAge) return false;
+      if(curDiv!=='ALL'){
+        const teamDivs = playerList.some(p=>p.teams.includes(name) && p.divisions.includes(curDiv));
+        if(!teamDivs) return false;
+      }
+      return true;
+    })
+    .sort((a,b)=>a.localeCompare(b));
   const ageGroups = [...new Set(playerList.filter(p=>matches(p,'age')).map(p=>p.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const divisions = [...new Set(playerList.filter(p=>matches(p,'div')).flatMap(p=>p.divisions))].sort();
 
@@ -7637,7 +7675,7 @@ function renderPlayers(){
               <td class="num">${p.multiGoal5}</td>
               <td class="num">${p.bestCount}</td>
               <td class="num">${p.bestsPerGame}</td>
-              <td class="num">${p.weightedBest}</td>
+              <td class="num">${fmtWeightedBest(p.weightedBest)}</td>
               <td class="num">${p.bestStreak}</td>
               <td class="num">${p.rolling3BestLabel}</td>
               <td class="num">${p.rolling5BestLabel}</td>
@@ -8877,7 +8915,7 @@ function exportToXlsx(){
     Name:p.name, Team:p.team, GamesPlayed:p.gamesPlayed, TotalGoals:p.totalGoals, AvgGoalsPerGame:p.avgGoals,
     GoalsInWins:p.goalsInWins, GoalsInLosses:p.goalsInLosses, ScoringSharePct:p.scoringShare,
     TwoPlusGoalGames:p.multiGoal2, ThreePlusGoalGames:p.multiGoal3, FivePlusGoalGames:p.multiGoal5,
-    BestAppearances:p.bestCount, BestPoints:p.weightedBest, BestStreak:p.bestStreak
+    BestAppearances:p.bestCount, BestPoints:fmtWeightedBest(p.weightedBest), BestStreak:p.bestStreak
   })));
   const teamSheet = XLSX.utils.json_to_sheet(teamList.map(t=>({
     Team:t.name, GamesPlayed:t.gamesPlayed, Wins:t.wins, Losses:t.losses, Draws:t.draws,
@@ -9173,7 +9211,7 @@ function playerLeagueContextHtml(p, playerList){
       return `<div class="ctx-row">
         <div class="ctx-label">${label}</div>
         <div class="ctx-readout" style="justify-content:flex-start;">
-          <span style="color:var(--gold);">${p.name}: ${p[key]} <span class="ctx-pct">(${pct}th pct.)</span></span>
+          <span style="color:var(--gold);">${p.name}: ${formatStatValue(key,p[key])} <span class="ctx-pct">(${pct}th pct.)</span></span>
         </div>
         ${leagueContextDensity(pool, key, [{ value:p[key]||0, color:'var(--gold)', label:p.name }])}
       </div>`;
@@ -9862,12 +9900,19 @@ function computeSeasonAwards(){
   });
 
   const groups = new Map(); // grade|division|year -> [{ playerKey, goals, weightedBest }]
+  const teamGroups = new Map(); // team|year -> [{ playerKey, goals, weightedBest }]
   seasonStats.forEach(s=>{
     let primaryTeam = null, maxCount = 0;
     s.teamCounts.forEach((count,team)=>{ if(count>maxCount){ maxCount=count; primaryTeam=team; } });
     if(!primaryTeam) return;
+    // Club-level awards (this team's own leading goalkicker / best-points leader, compared only
+    // against teammates) don't need a real numbered division the way league-wide awards do — any
+    // team with at least 2 players that season can have its own internal leader, graded or not.
+    const tKey = primaryTeam+'|'+s.year;
+    if(!teamGroups.has(tKey)) teamGroups.set(tKey, []);
+    teamGroups.get(tKey).push({ playerKey: s.playerKey, goals: s.goals, weightedBest: s.weightedBest });
     const div = getTeamDivisionMap(s.year)[primaryTeam];
-    if(div==null) return; // no real numbered division that season — not eligible for these awards
+    if(div==null) return; // no real numbered division that season — not eligible for LEAGUE awards specifically
     const gKey = s.grade+'|'+div+'|'+s.year;
     if(!groups.has(gKey)) groups.set(gKey, []);
     groups.get(gKey).push({ playerKey: s.playerKey, goals: s.goals, weightedBest: s.weightedBest });
@@ -9886,6 +9931,20 @@ function computeSeasonAwards(){
     const maxBest = Math.max(...players.map(p=>p.weightedBest));
     if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'bestAndFairest', grade, division, year }));
   });
+  // Club-level equivalents — same "who led in goals / best-points" question, but compared only
+  // against this one team's own roster for the season, not the whole division. A team of just one
+  // eligible player has no real "led the team" comparison to make, so needs at least 2.
+  teamGroups.forEach((players, tKey)=>{
+    if(players.length<2) return;
+    const idx = tKey.lastIndexOf('|');
+    const team = tKey.slice(0,idx), year = parseInt(tKey.slice(idx+1),10);
+    const grade = getAgeGroupLabel(team);
+    const division = getTeamDivisionMap(year)[team] ?? null;
+    const maxGoals = Math.max(...players.map(p=>p.goals));
+    if(maxGoals>0) players.filter(p=>p.goals===maxGoals).forEach(p=> addAward(p.playerKey, { type:'clubGoalLeader', grade, division, year, team }));
+    const maxBest = Math.max(...players.map(p=>p.weightedBest));
+    if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'clubBestPlayer', grade, division, year, team }));
+  });
 
   playerList.forEach(p=>{
     p.timeline.forEach(t=>{
@@ -9902,32 +9961,122 @@ function computeSeasonAwards(){
   _seasonAwardsCacheVersion = _aggVersion;
   return awardsByPlayer;
 }
+const GREY_FILTER = 'grayscale(1) brightness(0.5) contrast(1.1)'; // tuned to read as grey, not washed-out white
 const AWARD_META = {
   grandFinal:     { emoji:'🏆', label:'Grand Final win' },
   // Tinted red via CSS filter — emoji glyphs can't be recolored directly (they're rendered as
   // fixed-color images by the font), so a filter is the only way to shift the plain brown ball
   // toward red without hand-drawing a custom icon. Confirmed to look right at real badge size (14px).
-  goldenBoot:     { emoji:'🏈', label:'Leading goalkicker', filter:'sepia(1) saturate(6) hue-rotate(300deg) brightness(1) contrast(1.1)' },
+  goldenBoot:     { emoji:'🏈', label:'Leading goalkicker', scope:'League', filter:'sepia(1) saturate(6) hue-rotate(300deg) brightness(1) contrast(1.1)' },
   // Labelled by what this actually tracks (most best-player points that season), not "Best &
   // fairest" — there's no official B&F voting in this data, and calling it that would imply a
   // real club award this competition doesn't actually run through this tracker.
-  bestAndFairest: { emoji:'💪', label:'Most best-player points' },
+  bestAndFairest: { emoji:'⭐', label:'Most best-player points', scope:'League' },
+  // Club-level equivalents: same two questions, but compared only against a player's own
+  // teammates for the season, not the whole division. Same base emoji, greyscale instead of the
+  // league colour, so the two read as clearly related but distinct at a glance.
+  clubGoalLeader:   { emoji:'🏈', label:'Leading goalkicker', scope:'Club', filter:GREY_FILTER },
+  clubBestPlayer:   { emoji:'⭐', label:'Most best-player points', scope:'Club', filter:GREY_FILTER },
 };
 // Prefers the pre-computed p.awards field (baked into summaries.json by publish.js) over the live
 // computeSeasonAwards() computation — the live version needs every player's FULL timeline, which
 // isn't loaded until a player's detail page is actually opened in the precomputed-publish flow, so
 // checking the pre-baked field first avoids a real, measured ~6 second one-time computation cost
 // that publish.js can absorb once at build time instead of every visitor's browser doing it fresh.
+// All badges — league and club — sit together in one row, oldest to newest, rather than split into
+// separate sections: a player's badge history reads as one timeline this way, not two lists to
+// cross-reference against each other by year.
 function renderAwardBadges(player){
   const awards = player.awards || computeSeasonAwards().get(player.key);
   if(!awards || !awards.length) return '';
-  const sorted = [...awards].sort((a,b)=> b.year-a.year || a.type.localeCompare(b.type));
+  const sorted = [...awards].sort((a,b)=> a.year-b.year || a.type.localeCompare(b.type));
   return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;">${sorted.map(a=>{
     const meta = AWARD_META[a.type];
     const divLabel = a.division!=null ? `D${a.division}` : '';
     const divisionPhrase = a.grade + (divLabel?' Division '+a.division:'');
-    return `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${meta.label} in ${divisionPhrase}, ${a.year}"><span style="font-size:14px;line-height:1;${meta.filter?`filter:${meta.filter};`:''}">${meta.emoji}</span>${a.grade}${divLabel?' '+divLabel:''} '${String(a.year).slice(-2)}</span>`;
+    const scopePhrase = meta.scope ? `${meta.scope} — ` : '';
+    const teamPhrase = a.team ? ` (${a.team})` : '';
+    return `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${scopePhrase}${meta.label} in ${divisionPhrase}, ${a.year}${teamPhrase}"><span style="font-size:14px;line-height:1;${meta.filter?`filter:${meta.filter};`:''}">${meta.emoji}</span>${a.grade}${divLabel?' '+divLabel:''} '${String(a.year).slice(-2)}</span>`;
   }).join('')}</div>`;
+}
+
+// A LIVE indicator, not a career-best record — counts backward from the player's most recent
+// game only, so it disappears the moment their current run breaks (e.g. a game where they're not
+// named 1st-best ends the best-player streak even if they were 1st-best for 10 straight games
+// before that). Two independent streaks: 3+ straight games as 1st-NAMED best player specifically
+// (not just named at any rank), and 3+ straight games with 3+ goals — a player only needs to be
+// currently on ONE of these to get a single flame; both at once (not necessarily the identical
+// games) gets both.
+function computeHotStreak(p){
+  const tl = p.timeline || [];
+  let bestStreak = 0;
+  for(let i=tl.length-1; i>=0; i--){
+    if(tl[i].isBest && tl[i].bestRank===1) bestStreak++; else break;
+  }
+  let goalStreak = 0;
+  for(let i=tl.length-1; i>=0; i--){
+    if((tl[i].goals||0)>=3) goalStreak++; else break;
+  }
+  return { bestStreak, goalStreak, isBestHot: bestStreak>=3, isGoalHot: goalStreak>=3 };
+}
+function renderHotStreakBadge(hotStreak){
+  if(!hotStreak.isBestHot && !hotStreak.isGoalHot) return '';
+  const parts = [];
+  if(hotStreak.isBestHot) parts.push(`${hotStreak.bestStreak} straight games as 1st-named best player`);
+  if(hotStreak.isGoalHot) parts.push(`${hotStreak.goalStreak} straight games with 3+ goals`);
+  const flames = (hotStreak.isBestHot && hotStreak.isGoalHot) ? '🔥🔥' : '🔥';
+  return `<span title="${parts.join(' and ')}" style="cursor:help;font-size:16px;margin-left:6px;">${flames}</span>`;
+}
+
+// Every currently on-fire player, league-wide. Prefers each player's pre-computed p.hotStreak
+// (baked into summaries.json by publish.js) over live computeHotStreak() — on the real sharded
+// site most players' timelines aren't loaded until their own page is opened, so scanning everyone
+// live would need every shard fetched first. A player with no pre-baked entry is implicitly NOT on
+// a streak (publish.js only bakes an entry for players who ARE), which happens to match exactly
+// what computeHotStreak() itself returns for an empty/unloaded timeline — so the fallback is safe.
+function computeOnFirePlayers(){
+  const { playerList } = computeAggregates();
+  return playerList
+    .map(p=>({ p, streak: p.hotStreak || computeHotStreak(p) }))
+    .filter(({streak})=> streak.isBestHot || streak.isGoalHot)
+    .sort((a,b)=>{
+      const aBoth = a.streak.isBestHot && a.streak.isGoalHot, bBoth = b.streak.isBestHot && b.streak.isGoalHot;
+      if(aBoth!==bBoth) return aBoth ? -1 : 1; // double-fire first
+      return Math.max(b.streak.bestStreak,b.streak.goalStreak) - Math.max(a.streak.bestStreak,a.streak.goalStreak);
+    });
+}
+
+function doOpenOnFirePlayers(){
+  showPanel('on-fire-players');
+  renderOnFirePlayers();
+}
+function openOnFirePlayers(){
+  doOpenOnFirePlayers();
+  navPush('on-fire-players', 'On Fire Players', 'tools/on-fire-players', doOpenOnFirePlayers);
+}
+
+function renderOnFirePlayers(){
+  const wrap = document.getElementById('onFirePlayersWrap');
+  const rows = computeOnFirePlayers();
+  wrap.innerHTML = `
+    <span class="back-link" id="backFromOnFirePlayers">&larr; Back to tools</span>
+    <h2 style="font-size:20px;">On fire players</h2>
+    <p class="hint" style="margin:0 0 12px;">Every player currently on a hot streak — 3+ straight games as 1st-named best player, and/or 3+ straight games with 3+ goals. A LIVE list: a streak disappears the moment a player's most recent game doesn't qualify, so this only shows what's true right now, not a career-best record. 🔥🔥 means both streaks are running at once.</p>
+    ${rows.length===0 ? '<div class="empty">No one is currently on a qualifying streak.</div>' : `
+    <table><thead><tr><th></th><th>Player</th><th>Team</th><th class="num">Best streak</th><th class="num">Goal streak</th></tr></thead>
+    <tbody>${rows.map(({p,streak})=>{
+      const flames = (streak.isBestHot && streak.isGoalHot) ? '🔥🔥' : '🔥';
+      return `<tr>
+        <td style="font-size:16px;">${flames}</td>
+        <td><span class="player-link" data-key="${p.key}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${p.name}</span></td>
+        <td style="font-size:12.5px;color:var(--muted);">${p.team}</td>
+        <td class="num">${streak.isBestHot ? streak.bestStreak : '—'}</td>
+        <td class="num">${streak.isGoalHot ? streak.goalStreak : '—'}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`}
+  `;
+  document.getElementById('backFromOnFirePlayers').onclick = ()=> navBack();
+  wrap.querySelectorAll('.player-link').forEach(el=>{ el.onclick = ()=> openPlayerDetail(el.dataset.key); });
 }
 
 function renderPlayerDetail(key){
@@ -9940,23 +10089,49 @@ function renderPlayerDetail(key){
     return;
   }
 
-  // Form trend = recent scoring vs the stretch just before it (momentum), NOT vs career average —
-  // a career baseline drags in old seasons and easier age groups, so a kid who aged up read as
-  // permanently "trending down". Compares goals/game over the last 3 games against the previous 5.
+  // Form trend = recent form vs the stretch just before it (momentum), NOT vs career average — a
+  // career baseline drags in old seasons and easier age groups, so a kid who aged up read as
+  // permanently "trending down". Blends goals AND best-player appearances, not goals alone — a
+  // player racking up best-player nods without a corresponding goal tally is still a real form
+  // spike this should catch. Both are normalized to a comparable ~0-1 scale BEFORE the 3:2
+  // weighting is applied — confirmed as a real, necessary fix on a real case (Carlie Ambrus, a
+  // 9-game consecutive best-player streak) that still showed "Trending down" under an earlier
+  // version of this formula: bestsRate is naturally capped at 1.0 (max contribution 2), but a raw
+  // goals rate is unbounded, so even a modest goals dip could swamp a genuinely excellent,
+  // sustained best-player run. Normalizing goals against ~2/game (a strong game, not a rare one)
+  // keeps both components in the same range, so neither can trivially drown out the other.
   const tl = p.timeline || [];
   const last3 = tl.slice(-3);
   const prev5 = tl.slice(-8, -3);
-  const avgOf = arr => arr.length ? +(arr.reduce((s,t)=>s+(t.goals||0),0)/arr.length).toFixed(2) : 0;
-  const recentAvg = avgOf(last3), priorAvg = avgOf(prev5);
+  const blendedRate = arr => {
+    if(!arr.length) return 0;
+    const goalsRate = arr.reduce((s,t)=>s+(t.goals||0),0)/arr.length;
+    const goalsNorm = Math.min(goalsRate/2, 1);
+    const bestsRate = arr.filter(t=>t.isBest).length/arr.length;
+    return +((goalsNorm*3) + (bestsRate*2)).toFixed(2);
+  };
+  const recentAvg = blendedRate(last3), priorAvg = blendedRate(prev5);
   const canTrend = last3.length === 3 && prev5.length >= 3; // need ~6+ games for a meaningful trend
+  // Guard: a sustained best-player run spanning BOTH windows should never read as "Trending down",
+  // no matter what a blended score says — confirmed as a real, necessary case (a 9-game
+  // consecutive best-player streak still showed "down" under the blend above, because goals
+  // dropping to near-zero can outweigh even a maxed-out, unchanging bests contribution). Named
+  // best in every recent game, and in most of the prior window too, means form has genuinely NOT
+  // declined by the measure that actually matters here — being consistently recognised as best on
+  // the ground — even if goalkicking specifically dipped.
+  const bestsRateRecent = last3.length ? last3.filter(t=>t.isBest).length/last3.length : 0;
+  const bestsRatePrior = prev5.length ? prev5.filter(t=>t.isBest).length/prev5.length : 0;
+  const sustainedBestRun = bestsRateRecent>=1 && bestsRatePrior>=0.6;
   let formClass = 'form-flat', formLabel = 'Steady';
   if(canTrend){
     if(recentAvg > priorAvg * 1.15){ formClass='form-up'; formLabel='Trending up'; }
-    else if(recentAvg < priorAvg * 0.85){ formClass='form-down'; formLabel='Trending down'; }
+    else if(recentAvg < priorAvg * 0.85 && !sustainedBestRun){ formClass='form-down'; formLabel='Trending down'; }
   }
   const formTip = !canTrend
     ? 'Form trend needs at least 6 games (last 3 vs the previous few) — shown as Steady until then.'
-    : `Goals over the last 3 games (${recentAvg}/game) vs the previous ${prev5.length} (${priorAvg}/game): Trending up when 15%+ higher, Trending down when 15%+ lower, Steady in between. Goalkicking only.`;
+    : `Blended goals + best-player form over the last 3 games (${recentAvg}) vs the previous ${prev5.length} (${priorAvg}): Trending up when 15%+ higher, Trending down when 15%+ lower, Steady in between.${sustainedBestRun && recentAvg < priorAvg*0.85 ? ' Held at Steady here despite a lower blended score, since a sustained best-player run (named best in every recent game) should not read as declining form.' : ' Combines goals and best-player appearances, not goals alone.'}`;
+
+  const hotStreak = p.hotStreak || computeHotStreak(p);
 
   const wld = p.timeline.reduce((acc,t)=>{
     if(t.result==='W') acc.w++; else if(t.result==='L') acc.l++; else if(t.result==='D') acc.d++;
@@ -9972,7 +10147,7 @@ function renderPlayerDetail(key){
     <span class="back-link" id="backToPlayers">&larr; Back to players</span>
     <div class="player-header" style="${playerHeaderStyle}">
       <div>
-        <h2 style="${playerClubColor ? `color:${lightenHex(playerClubColor.primary,0.55)};` : ''}">${p.name}</h2>
+        <h2 style="${playerClubColor ? `color:${lightenHex(playerClubColor.primary,0.55)};` : ''}">${p.name}${renderHotStreakBadge(hotStreak)}</h2>
         <div class="team-tag">${p.team}${p.playhqId ? ` · <a href="https://www.playhq.com/public/profile/${encodeURIComponent(p.playhqId)}?tenant=afl" target="_blank" rel="noopener noreferrer" style="color:var(--gold);text-decoration:underline;">PlayHQ profile ↗</a>` : ''}</div>
         ${renderAwardBadges(p)}
       </div>
@@ -9985,6 +10160,7 @@ function renderPlayerDetail(key){
     <div class="card-grid">
       <div class="stat-card" title="Number of games this player has appeared in"><div class="label">Games played</div><div class="value">${p.gamesPlayed}</div></div>
       <div class="stat-card" title="This player's record in games they played — wins, losses and draws (${winPct}% win rate)"><div class="label">Win-Loss-Draw</div><div class="value">${wld.w}-${wld.l}-${wld.d}</div></div>
+      <div class="stat-card" title="Number of games named in the Best Players list, at any rank, divided by games played"><div class="label">Bests per game</div><div class="value">${p.gamesPlayed ? Math.round((p.bestCount/p.gamesPlayed)*100) : 0}%</div></div>
       ${p.finalsAppearances>0 ? `<div class="stat-card" title="Games played in a finals series (any round)"><div class="label">Finals appearances</div><div class="value">${p.finalsAppearances}</div></div>
       <div class="stat-card" title="Wins in a finals series (any round)"><div class="label">Finals wins</div><div class="value">${p.finalsWins}</div></div>` : ''}
       ${p.grandFinalAppearances>0 ? `<div class="stat-card" title="Grand Finals played"><div class="label">Grand Final appearances</div><div class="value">${p.grandFinalAppearances}</div></div>
@@ -10212,12 +10388,24 @@ function renderPlayerDetail(key){
   // Best-player ranking chart: 1st = highest point, "Not named" = bottom
   const bestData = chrono.map(t => t.isBest ? (7 - t.bestRank) : 0);
   const rankLabel = v => v===0 ? 'Not named' : (['','6th','5th','4th','3rd','2nd','1st'][v]);
+  const bestRoll3 = bestData.map((_,idx)=>{
+    const slice = bestData.slice(Math.max(0,idx-2), idx+1);
+    return +(slice.reduce((s,v)=>s+v,0)/slice.length).toFixed(2);
+  });
+  const bestRoll5 = bestData.map((_,idx)=>{
+    const slice = bestData.slice(Math.max(0,idx-4), idx+1);
+    return +(slice.reduce((s,v)=>s+v,0)/slice.length).toFixed(2);
+  });
   if(window._playerBestChartInstance) window._playerBestChartInstance.destroy();
   window._playerBestChartInstance = new Chart(document.getElementById('playerBestChart').getContext('2d'), {
     type:'line',
     data:{
       labels,
-      datasets:[{ label:'Best player ranking', data:bestData, borderColor:'#C9A227', backgroundColor:'rgba(201,162,39,0.15)', fill:true, stepped:false, tension:0, pointRadius:4, pointBackgroundColor:'#C9A227' }]
+      datasets:[
+        { label:'Best player ranking', data:bestData, borderColor:'#3F8556', backgroundColor:'rgba(63,133,86,0.15)', fill:true, stepped:false, tension:0, pointRadius:4, pointBackgroundColor:'#3F8556' },
+        { label:'3-game avg', data:bestRoll3, borderColor:'#4B7BA8', backgroundColor:'transparent', fill:false, tension:0.25, pointRadius:0 },
+        { label:'5-game avg', data:bestRoll5, borderColor:'#C9A227', backgroundColor:'transparent', fill:false, tension:0.25, pointRadius:0 }
+      ]
     },
     plugins:[yearBoundaryPlugin],
     options:{
@@ -10227,9 +10415,12 @@ function renderPlayerDetail(key){
         y:{ min:0, max:6, ticks:{ color:'#8FA0A3', stepSize:1, callback:v=>rankLabel(v) }, grid:{ color:'#2E3A3E' } }
       },
       plugins:{
-        legend:{ display:false },
+        legend:{ labels:{ color:'#EDF1F0' } },
         title:{ display:true, text:'Best player ranking per game', color:'#EDF1F0' },
-        tooltip:{ callbacks:{ label: ctx => rankLabel(ctx.parsed.y), footer: tooltipFooterFor } }
+        tooltip:{ callbacks:{
+          label: ctx => `${ctx.dataset.label}: ${ctx.dataset.label==='Best player ranking' ? rankLabel(ctx.parsed.y) : ctx.parsed.y}`,
+          footer: tooltipFooterFor
+        } }
       }
     }
   });
@@ -12223,7 +12414,7 @@ function renderTeamDetail(teamKey){
     <h3 style="font-size:14px;margin-top:8px;">Leaderboards</h3>
     <div class="card-grid">
       ${leaderboardBox('Top goal kickers', 'Most total goals this season', topGoals, p=>p.totalGoals+' gls')}
-      ${leaderboardBox('Top bests', 'Highest weighted best-player score (1st=6pts down to 6th=1pt per game)', topBests, p=>p.weightedBest+' pts')}
+      ${leaderboardBox('Top bests', 'Highest weighted best-player score (1st=6pts down to 6th=1pt per game)', topBests, p=>fmtWeightedBest(p.weightedBest)+' pts')}
       ${leaderboardBox('In form', 'Recent form score: (avg goals last 3 games × 3) + (best appearances last 3 games × 2)', topForm, p=>p.formScore)}
       ${leaderboardBox('MVP ranking', 'Season MVP score: (goals × 3) + best-player points + games played + goals-in-wins bonus', topMvp, p=>p.mvpScore)}
     </div>
@@ -12413,7 +12604,7 @@ function renderTeamRoster(teamObj){
             <td class="num">${p.totalGoals}</td>
             <td class="num">${p.avgGoals}</td>
             <td class="num">${p.bestCount}</td>
-            <td class="num">${p.weightedBest}</td>
+            <td class="num">${fmtWeightedBest(p.weightedBest)}</td>
             <td class="num">${p.formScore}</td>
             <td class="num">${p.mvpScore}</td>
           </tr>
@@ -13481,7 +13672,7 @@ function renderTopPlayers(){
   resultEl.innerHTML = `
     <div class="card-grid">
       ${leaderboardBox('Top goal kickers', 'Most total goals', topGoals, p=>p.totalGoals+' gls')}
-      ${leaderboardBox('Top bests', 'Highest weighted best-player score', topBests, p=>p.weightedBest+' pts')}
+      ${leaderboardBox('Top bests', 'Highest weighted best-player score', topBests, p=>fmtWeightedBest(p.weightedBest)+' pts')}
       ${leaderboardBox('In form', 'Recent form score (last 3 games)', topForm, p=>p.formScore)}
       ${leaderboardBox('MVP ranking', 'Season MVP score', topMvp, p=>p.mvpScore)}
     </div>
@@ -13820,8 +14011,8 @@ function renderPlayerComparisonResult(playerList){
       return `<div class="ctx-row">
         <div class="ctx-label">${label}</div>
         <div class="ctx-readout">
-          <span style="color:var(--green);">${pA.name}: ${pA[key]} <span class="ctx-pct">(${paPct}th pct.)</span></span>
-          <span style="color:var(--blue);">${pB.name}: ${pB[key]} <span class="ctx-pct">(${pbPct}th pct.)</span></span>
+          <span style="color:var(--green);">${pA.name}: ${formatStatValue(key,pA[key])} <span class="ctx-pct">(${paPct}th pct.)</span></span>
+          <span style="color:var(--blue);">${pB.name}: ${formatStatValue(key,pB[key])} <span class="ctx-pct">(${pbPct}th pct.)</span></span>
         </div>
         ${leagueContextDensity(pool, key, [
           { value:pA[key]||0, color:'var(--green)', label:pA.name },
@@ -17052,8 +17243,8 @@ async function renderTeamComparisonResult(teamList){
     <div class="card-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:600px;">
       <div class="stat-card"><div class="label" style="color:${headColorALight};">${tA.name} — top scorers</div><div style="margin-top:8px;font-size:13px;">${miniList(topScorersA, p=>p.totalGoals+' gls')}</div></div>
       <div class="stat-card"><div class="label" style="color:${headColorBLight};">${tB.name} — top scorers</div><div style="margin-top:8px;font-size:13px;">${miniList(topScorersB, p=>p.totalGoals+' gls')}</div></div>
-      <div class="stat-card"><div class="label" style="color:${headColorALight};">${tA.name} — top bests</div><div style="margin-top:8px;font-size:13px;">${miniList(topBestsA, p=>p.weightedBest+' pts')}</div></div>
-      <div class="stat-card"><div class="label" style="color:${headColorBLight};">${tB.name} — top bests</div><div style="margin-top:8px;font-size:13px;">${miniList(topBestsB, p=>p.weightedBest+' pts')}</div></div>
+      <div class="stat-card"><div class="label" style="color:${headColorALight};">${tA.name} — top bests</div><div style="margin-top:8px;font-size:13px;">${miniList(topBestsA, p=>fmtWeightedBest(p.weightedBest)+' pts')}</div></div>
+      <div class="stat-card"><div class="label" style="color:${headColorBLight};">${tB.name} — top bests</div><div style="margin-top:8px;font-size:13px;">${miniList(topBestsB, p=>fmtWeightedBest(p.weightedBest)+' pts')}</div></div>
     </div>
     <div class="chart-wrap" style="margin-top:20px;"><canvas id="compareTeamsRadar"></canvas></div>
     ${(tA.quarterGames>0 || tB.quarterGames>0)
@@ -17898,6 +18089,7 @@ document.getElementById('toolTileClubPathwayRetention').onclick = ()=> openSquad
 document.getElementById('toolTileStabilityImprovement').onclick = ()=> openSquadProgressions(null,'stability');
 document.getElementById('toolTileCohortTrajectory').onclick = ()=> openCohortTrajectory();
 document.getElementById('toolTileStandoutStats').onclick = ()=> openStandoutStats();
+document.getElementById('toolTileOnFirePlayers').onclick = ()=> openOnFirePlayers();
 document.getElementById('toolTileHomeGrown').onclick = ()=> openHomeGrown();
 document.getElementById('toolTileAbsenceLeaderboard').onclick = ()=> openAbsenceLeaderboard();
 document.getElementById('toolTileJuniorPathway').onclick = ()=> openJuniorPathway();
