@@ -913,7 +913,12 @@ let clubNicknames = {
   // arm is entered as bare "Power Lions U12" and otherwise shows as its own phantom club. Per the
   // user's call, assign bare "Power Lions" sides to Newcomb — Power is named first. Prefixed joint
   // teams still match their real club words before this fallback is ever reached.
-  "power lions": "Newcomb"
+  "power lions": "Newcomb",
+  // "Panthers" is Bell Post Hill's own nickname (their U10 sides are named "Bell Post Hill
+  // Panthers Blue/Red U10", which already resolve correctly on the real club words). One further
+  // U10 side is entered as bare "Panthers U10" with no club prefix at all, and otherwise shows as
+  // its own phantom club — same shape of gap as gw giants fnc/power lions above.
+  "panthers": "Bell Post Hill"
 }; // nickname word(s) -> canonical club, for names that share no real words (e.g. "Ammos" = "Amateur")
 let currentPlayerDetailKey = null;
 // Set right before opening a player's profile from somewhere other than the plain Players list —
@@ -1248,10 +1253,23 @@ function canonicalizeMergeTeamName(g){
     if(s && s.name && MERGE_TEAM_NAME_ALIASES[s.name]) s.name = MERGE_TEAM_NAME_ALIASES[s.name];
   });
 }
+// "Practice Match" fixtures — pre-season friendlies scraped alongside real competition rounds,
+// entered under a competitionRaw of "Open Mixed" (never a real graded competition) with a
+// placeholder opponent name like "Away Team Underage Practice Match 2025" or "Home team Practice
+// Match", and sometimes a REAL club's own name with "Practice Match" appended instead (e.g.
+// "Barwon Heads Seagulls Senior Practice Match") — neither side is a genuine club fielding a
+// genuine team, so this checks for the phrase itself rather than trying to enumerate every
+// generic-placeholder variant, catching both cases in one pattern. Confirmed on real data: 96
+// such games, all 0-0 with competitionRaw "Open Mixed", visibly surfacing as phantom "clubs" in
+// dropdowns (Home Grown's club list) that were never a real team at all.
+function isPlaceholderPracticeMatch(g){
+  const re = /practice match/i;
+  return !!(g && g.teamA && g.teamB && (re.test(g.teamA.name||'') || re.test(g.teamB.name||'')));
+}
 function stripJunkFixtures(list){
   if(!Array.isArray(list)) return list;
   list.forEach(canonicalizeMergeTeamName);
-  return list.filter(g=> !isJunkTestFixture(g) && !isExcludedCompetition(g) && !isPlaceholderBracketSlot(g));
+  return list.filter(g=> !isJunkTestFixture(g) && !isExcludedCompetition(g) && !isPlaceholderBracketSlot(g) && !isPlaceholderPracticeMatch(g));
 }
 
 // BUG (fixed): the PlayHQ scraper's export format changed at some point to write each side's
@@ -10036,6 +10054,33 @@ function renderAwardBadges(player){
 // (not just named at any rank), and 3+ straight games with 3+ goals — a player only needs to be
 // currently on ONE of these to get a single flame; both at once (not necessarily the identical
 // games) gets both.
+// The latest REGULAR SEASON (non-finals) date on file, per grade — the reference point for
+// whether a streak is still current. Deliberately excludes finals dates: once a grade's regular
+// season winds down, only teams that MADE finals keep playing, so using "the latest date
+// anything happened in this grade" would wrongly demand a finals-phase game from a player whose
+// team's season legitimately ended without qualifying for finals. Using the regular season's own
+// end date instead means a player whose last game WAS that final regular-season round reads as
+// perfectly current, while someone who's missed one or more regular rounds since (injury, drop,
+// bye) correctly reads as stale — and a player who reached finals is automatically still later
+// than this date anyway, since finals are chronologically after the regular season ends.
+let _latestRegularSeasonDateByGradeCache = null, _latestRegularSeasonDateByGradeCacheVersion = -1;
+function computeLatestRegularSeasonDateByGrade(){
+  if(_latestRegularSeasonDateByGradeCacheVersion === _aggVersion) return _latestRegularSeasonDateByGradeCache;
+  const byGrade = {};
+  games.forEach(g=>{
+    if(isFinalsGame(g)) return;
+    const d = extractGameDate(g);
+    if(!d) return;
+    [g.teamA, g.teamB].forEach(side=>{
+      const grade = getAgeGroupLabel(side.name);
+      if(!grade || grade==='Other') return;
+      if(byGrade[grade]==null || d > byGrade[grade]) byGrade[grade] = d;
+    });
+  });
+  _latestRegularSeasonDateByGradeCache = byGrade;
+  _latestRegularSeasonDateByGradeCacheVersion = _aggVersion;
+  return byGrade;
+}
 function computeHotStreak(p){
   const tl = p.timeline || [];
   let bestStreak = 0;
@@ -10046,7 +10091,20 @@ function computeHotStreak(p){
   for(let i=tl.length-1; i>=0; i--){
     if((tl[i].goals||0)>=3) goalStreak++; else break;
   }
-  return { bestStreak, goalStreak, isBestHot: bestStreak>=3, isGoalHot: goalStreak>=3 };
+  // A streak only counts as CURRENT if the player's most recent game is at least as recent as
+  // the latest regular-season round on file for their grade — otherwise it's a real but stale
+  // streak from weeks or months ago, not something that should still read as "on fire" today.
+  let isCurrent = true;
+  if(tl.length){
+    const lastEntry = tl[tl.length-1];
+    const lastGrade = getAgeGroupLabel(lastEntry.team);
+    const latestForGrade = computeLatestRegularSeasonDateByGrade()[lastGrade];
+    const lastDate = lastEntry.dateTime ? extractGameDate({dateTime:lastEntry.dateTime}) : (lastEntry.date ? new Date(lastEntry.date).getTime() : null);
+    // lastDate of 0 means unparseable (extractGameDate's own fallback), not "very old" — only a
+    // genuine positive timestamp older than the grade's latest regular-season date counts as stale.
+    if(latestForGrade!=null && lastDate && lastDate < latestForGrade) isCurrent = false;
+  }
+  return { bestStreak, goalStreak, isBestHot: isCurrent && bestStreak>=3, isGoalHot: isCurrent && goalStreak>=3 };
 }
 function renderHotStreakBadge(hotStreak){
   if(!hotStreak.isBestHot && !hotStreak.isGoalHot) return '';
@@ -11305,9 +11363,23 @@ function applyConfirmedMerges(){
 // change the underlying data at all — sorting a column, or expanding a club's player list. That's
 // what made switching to "all years" feel slow: a bigger playerList, recomputed on every click.
 const _juniorPathwayCache = new Map();
+// Extracts which of the 3 senior/reserves leagues a division label belongs to — division labels
+// for Seniors/Reserves games are already the canonical "<League> <Grade>" string produced by
+// canonicalSeniorDivision(), so this just reads the league back out of that same string. Checks
+// "district" before "geelong" for the same reason canonicalSeniorDivision does — GDFL's own name
+// also contains the word "geelong".
+function leagueFromDivisionLabel(label){
+  if(!label) return null;
+  if(/district/i.test(label)) return 'GDFL';
+  if(/bellarine/i.test(label)) return 'BFNL';
+  if(/geelong/i.test(label)) return 'GFNL';
+  return null;
+}
+const LEAGUE_FULL_NAMES = { GFNL:'Geelong FNL', BFNL:'Bellarine FNL', GDFL:'Geelong & District FNL' };
+
 function computeJuniorPathwayByClub(playerList, filters){
-  filters = filters || { gradeScope:'both', juniorScope:'any', currentYear:null };
-  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${filters.currentYear}|${_aggVersion}|${playerList.length}`;
+  filters = filters || { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL' };
+  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${filters.currentYear}|${filters.league}|${_aggVersion}|${playerList.length}`;
   if(_juniorPathwayCache.has(cacheKey)) return _juniorPathwayCache.get(cacheKey);
   const result = computeJuniorPathwayByClubUncached(playerList, filters);
   _juniorPathwayCache.set(cacheKey, result);
@@ -11333,9 +11405,17 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
       });
     } else {
       const g = getAgeGroupLabel(p.team);
-      currentEntries = (g==='Seniors' || g==='Reserves') ? [{ team:p.team }] : [];
+      // Need the real timeline entries for p.team (not a bare synthesized object) so their
+      // division field is available for the league filter below.
+      currentEntries = (g==='Seniors' || g==='Reserves') ? p.timeline.filter(t=>t.team===p.team) : [];
     }
     if(!currentEntries.length) return;
+    // Which league(s) do these "current" entries actually belong to? A club fielding in more
+    // than one league (rare, but real — see Geelong West Giants) shows up correctly under each.
+    if(filters.league && filters.league!=='ALL'){
+      const leagues = new Set(currentEntries.map(t=>leagueFromDivisionLabel(t.division)).filter(Boolean));
+      if(!leagues.has(filters.league)) return;
+    }
     const ageGroups = new Set(currentEntries.map(t=>getAgeGroupLabel(t.team)));
     // Which "current" grade counts toward this club's total — combined Seniors/Reserves (the
     // original behaviour), or narrowed to just one of the two.
@@ -11375,10 +11455,11 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
         year,
         teams: [...teamMap.values()].map(te=> ({ ...te, divisions:[...te.divisions] })).sort((a,b)=> b.games-a.games)
       }));
-    if(!byClub.has(p.club)) byClub.set(p.club, { club:p.club, total:0, withJuniors:0, players:[] });
+    if(!byClub.has(p.club)) byClub.set(p.club, { club:p.club, total:0, withJuniors:0, players:[], leagues:new Set() });
     const entry = byClub.get(p.club);
     entry.total++;
     if(hasJuniorHistory) entry.withJuniors++;
+    currentEntries.forEach(t=>{ const lg = leagueFromDivisionLabel(t.division); if(lg) entry.leagues.add(lg); });
     // How many games this player has actually played at the CURRENTLY SELECTED level (Seniors,
     // Reserves, or both, matching gradeScope) — lets a "known junior pathway" number be checked
     // against whether that's a handful of games or a real, established senior career, rather than
@@ -11398,7 +11479,7 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
     });
   });
   return [...byClub.values()]
-    .map(e=> ({ ...e, pct: e.total>0 ? Math.round((e.withJuniors/e.total)*100) : 0 }))
+    .map(e=> ({ ...e, leagues:[...e.leagues], pct: e.total>0 ? Math.round((e.withJuniors/e.total)*100) : 0 }))
     .sort((a,b)=> b.pct - a.pct);
 }
 
@@ -11774,7 +11855,7 @@ function backToToolsFromAbsenceLeaderboard(){ navBack(); }
 
 let juniorPathwaySort = { key:'pct', dir:'desc' };
 let juniorPathwayExpandedClub = null;
-let juniorPathwayFilters = { gradeScope:'both', juniorScope:'any', currentYear:null };
+let juniorPathwayFilters = { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL' };
 
 function doOpenJuniorPathway(){
   showPanel('junior-pathway');
@@ -11805,6 +11886,7 @@ function renderJuniorPathway(){
   const gradeLabel = jf.gradeScope==='seniors' ? 'Seniors' : jf.gradeScope==='reserves' ? 'Reserves' : 'Seniors/Reserves';
   const COLUMNS = [
     { key:'club', label:'Club', numeric:false, defaultDir:'asc', val:r=>r.club.toLowerCase() },
+    { key:'league', label:'League', numeric:false, defaultDir:'asc', val:r=>r.leagues.join(',') },
     { key:'total', label:`${gradeLabel} players`, numeric:true, defaultDir:'desc', val:r=>r.total },
     { key:'withJuniors', label:'Known junior history', numeric:true, defaultDir:'desc', val:r=>r.withJuniors },
     { key:'pct', label:'% known', numeric:true, defaultDir:'desc', val:r=>r.pct },
@@ -11840,11 +11922,12 @@ function renderJuniorPathway(){
       `<details style="display:inline;"><summary style="display:inline;cursor:pointer;list-style:none;"><span class="player-link" data-key="${p.key}" onclick="event.stopPropagation();">${p.name}</span> <span style="color:var(--muted);font-size:11px;">(${p.juniorClub}${p.juniorClub!==r.club?' — different club':''}, ${p.juniorAgeGroup} in ${p.juniorYear} — ${p.levelGames} ${gradeLabel} game${p.levelGames!==1?'s':''} — click to see every junior year)</span></summary>${yearBreakdownHtml(p)}</details>`;
     return `<tr>
       <td style="font-weight:600;">${r.club}</td>
+      <td style="font-size:12px;color:var(--muted);">${r.leagues.length ? r.leagues.join(', ') : '—'}</td>
       <td class="num">${r.total}</td>
       <td class="num">${r.withJuniors}</td>
       <td class="num">${r.pct}%</td>
     </tr>
-    <tr><td colspan="4" style="padding-top:0;padding-bottom:14px;font-size:12px;color:var(--muted);">
+    <tr><td colspan="5" style="padding-top:0;padding-bottom:14px;font-size:12px;color:var(--muted);">
       ${sortedPlayers.length===0 ? '<span style="font-style:italic;">No known junior history among current players.</span>' : visiblePlayers.map(playerLine).join('<br>')}
       ${remaining>0 ? ` <span class="club-expand-link" data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--blue);text-decoration:underline;">+${remaining} more</span>` : (expanded && sortedPlayers.length>3 ? ` <span class="club-expand-link" data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--blue);text-decoration:underline;">show less</span>` : '')}
     </td></tr>`;
@@ -11873,6 +11956,18 @@ function renderJuniorPathway(){
     ${allYears.map(y=>`<option value="${y}" ${String(jf.currentYear)===String(y)?'selected':''}>${gradeLabel} in ${y}</option>`).join('')}
   </select>`;
 
+  // League filter — lets each of the 3 senior/reserves leagues be viewed on its own, or all
+  // together (the default). GDFL clubs are always represented in the overall/"all leagues" view
+  // already (they field Seniors/Reserves like anyone else) — this is for isolating one league's
+  // own numbers specifically, e.g. to see GDFL clubs' junior-pathway rates without Geelong FNL
+  // and Bellarine FNL clubs mixed in (GDFL itself runs no junior grades, so its clubs' juniors
+  // always trace through a Geelong FNL or Bellarine FNL junior team, never a GDFL one — expected,
+  // not a data gap).
+  const leagueSelectHtml = `<select id="jpLeagueSel">
+    <option value="ALL" ${jf.league==='ALL'?'selected':''}>All leagues</option>
+    ${Object.entries(LEAGUE_FULL_NAMES).map(([code,name])=>`<option value="${code}" ${jf.league===code?'selected':''}>${name} only</option>`).join('')}
+  </select>`;
+
   wrap.innerHTML = `
     <span class="back-link" id="backToToolsFromJuniorPathway">&larr; Back to tools</span>
     <h2 style="font-size:20px;">Junior pathway</h2>
@@ -11882,6 +11977,7 @@ function renderJuniorPathway(){
       ${gradeChip('seniors','Seniors only')}
       ${gradeChip('reserves','Reserves only')}
       ${yearSelectHtml}
+      ${leagueSelectHtml}
     </div>
     <div class="controls-row" style="margin-bottom:14px;gap:6px;flex-wrap:wrap;">
       ${juniorChip('any','Juniors at any club')}
@@ -11900,6 +11996,8 @@ function renderJuniorPathway(){
   });
   const jpYearSel = document.getElementById('jpYearSel');
   if(jpYearSel) jpYearSel.onchange = e=>{ juniorPathwayFilters.currentYear = e.target.value ? parseInt(e.target.value,10) : null; renderJuniorPathway(); };
+  const jpLeagueSel = document.getElementById('jpLeagueSel');
+  if(jpLeagueSel) jpLeagueSel.onchange = e=>{ juniorPathwayFilters.league = e.target.value; renderJuniorPathway(); };
   wrap.querySelectorAll('.player-link').forEach(el=>{
     el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, openJuniorPathway);
   });
@@ -13640,8 +13738,34 @@ function renderTopPlayers(){
       t.date && (yearNum==null || new Date(t.date).getFullYear()===yearNum) &&
       (curAge==='ALL' || getAgeGroupLabel(t.team)===curAge)
     ));
-    divisions = [...new Set(inScope.flatMap(p=>p.divisions))].sort();
-    const filtered = curDiv==='ALL' ? inScope : inScope.filter(p=>p.divisions.includes(curDiv));
+    // Division must be scoped to the SAME year(s) actually in play here — p.divisions is a
+    // career-wide union of every division tag ever seen on ANY of a player's games, with no year
+    // scoping at all. Confirmed as a real bug on a real player (Ashley Muscat showing up under a
+    // 2026 Division 5 filter despite his only 2026 team being Division 4 — Division 5 belonged to
+    // a completely different season in his history). Also uses each year's PRIMARY team (most
+    // games that year) via getTeamDivisionMap rather than raw per-game division tags, since a
+    // single mid-season regrade game can carry a division label that doesn't reflect the team's
+    // real division for that season.
+    function playerDivisionsInYears(p, years){
+      const byYear = {};
+      p.timeline.forEach(t=>{
+        if(!t.date) return;
+        const y = new Date(t.date).getFullYear();
+        if(years && !years.includes(y)) return;
+        (byYear[y] = byYear[y] || {})[t.team] = (byYear[y][t.team]||0) + 1;
+      });
+      const divs = new Set();
+      Object.keys(byYear).forEach(y=>{
+        const yr = parseInt(y,10);
+        const primaryTeam = Object.entries(byYear[y]).sort((a,b)=>b[1]-a[1])[0][0];
+        const div = getTeamDivisionMap(yr)[primaryTeam];
+        if(div!=null) divs.add('Division '+div);
+      });
+      return divs;
+    }
+    const scopeYears = yearNum==null ? null : [yearNum];
+    divisions = [...new Set(inScope.flatMap(p=>[...playerDivisionsInYears(p, scopeYears)]))].sort();
+    const filtered = curDiv==='ALL' ? inScope : inScope.filter(p=>playerDivisionsInYears(p, scopeYears).has(curDiv));
     eligible = computeSeasonScopedPlayerStats(filtered, yearNum==null ? null : [yearNum]);
     modeDescription = curYear==='ALL'
       ? 'Career totals across every year you\'ve logged.'
