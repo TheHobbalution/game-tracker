@@ -2691,6 +2691,15 @@ function computeLadder({ year, ageGroup, division }){
 // instead) just falls back to date order among themselves, appended after the known types.
 const FINALS_ROUND_ORDER = ['Qualifying Final','Elimination Final','Semi Final','Preliminary Final','Grand Final'];
 function finalsRoundRank(label){
+  // "Finals Round N" (e.g. U14's early finals weeks, from expandFinalsLabel's FR1/FR2 handling)
+  // isn't in FINALS_ROUND_ORDER at all, so it was falling through to the 999 "unrecognised" rank —
+  // which the display's own descending sort then treated as the HIGHEST rank, incorrectly showing
+  // it before the Grand Final instead of before every named final round. Confirmed as a real bug
+  // on real data (a U16 finals series showing "Finals Round 1" above the Grand Final). These
+  // rounds genuinely come first in a longer finals series, so they get a rank before everything
+  // in FINALS_ROUND_ORDER, ordered among themselves by their own number.
+  const frMatch = /^Finals Round (\d+)$/.exec(label||'');
+  if(frMatch) return -1000 + parseInt(frMatch[1],10);
   const idx = FINALS_ROUND_ORDER.indexOf(label);
   return idx===-1 ? 999 : idx;
 }
@@ -2958,14 +2967,25 @@ async function renderLadder(){
   const matchCardHtml = g => {
     const aWin = !g.draw && g.winner===g.teamA.name, bWin = !g.draw && g.winner===g.teamB.name;
     const divTag = ''; // ladders only ever show one division now, so the per-game division tag is never needed
+    // A finals fixture whose matchup is already known (the bracket's set) but hasn't been played
+    // yet has no winner and no draw — shown as "Pending" instead of leaving the scores blank, so
+    // the upcoming pairing is visible rather than looking like a missing/broken card. Falls back
+    // to the scheduled date/time when known, same field the played-card's own date line already
+    // uses, so this isn't a new source of truth — just a different label for the same data.
+    const notYetPlayed = !g.winner && !g.draw;
+    const scoreA = notYetPlayed ? '' : (g.teamA.total ?? '');
+    const scoreB = notYetPlayed ? '' : (g.teamB.total ?? '');
+    const dateLine = notYetPlayed
+      ? `<span style="color:var(--gold);">${g.dateTime ? g.dateTime : 'Pending'}</span>`
+      : (g.dateTime||'').slice(0,10)+divTag;
     return `
-      <div style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:170px;">
-        <div style="font-size:10.5px;color:var(--muted);margin-bottom:6px;">${(g.dateTime||'').slice(0,10)}${divTag}</div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:170px;${notYetPlayed?'border-style:dashed;':''}">
+        <div style="font-size:10.5px;color:var(--muted);margin-bottom:6px;">${dateLine}</div>
         <div style="display:flex;justify-content:space-between;gap:10px;${aWin?'color:var(--gold);font-weight:600;':''}">
-          <span class="game-link" data-id="${g.id}" style="cursor:pointer;text-decoration:underline;">${g.teamA.name}</span><span>${g.teamA.total ?? ''}</span>
+          <span class="game-link" data-id="${g.id}" style="cursor:pointer;text-decoration:underline;">${g.teamA.name}</span><span>${scoreA}</span>
         </div>
         <div style="display:flex;justify-content:space-between;gap:10px;margin-top:2px;${bWin?'color:var(--gold);font-weight:600;':''}">
-          <span class="game-link" data-id="${g.id}" style="cursor:pointer;text-decoration:underline;">${g.teamB.name}</span><span>${g.teamB.total ?? ''}</span>
+          <span class="game-link" data-id="${g.id}" style="cursor:pointer;text-decoration:underline;">${g.teamB.name}</span><span>${scoreB}</span>
         </div>
       </div>`;
   };
@@ -9793,6 +9813,36 @@ function renderTeamPossibleLinks(teamObj, playerList){
   if(exportBtn) exportBtn.onclick = ()=> exportTeamPossibleLinksToXlsx(teamObj, results);
 }
 
+// Seniors/Reserves don't run numbered divisions the way junior grades do — this competition runs
+// 3 separate senior leagues side by side (Geelong FNL, Bellarine FNL, Geelong & District FNL)
+// instead, each one playing the role a numbered division plays for juniors. Parallels
+// getTeamDivisionMap's own approach (most common value seen across a team's games that season)
+// but matches a league name via leagueFromDivisionLabel instead of a "Division N" pattern.
+let _teamLeagueMapCache = new Map();
+function getTeamLeagueMap(year){
+  const cacheKey = year+'|'+_aggVersion;
+  if(_teamLeagueMapCache.has(cacheKey)) return _teamLeagueMapCache.get(cacheKey);
+  const counts = {}; // teamName -> { league -> gameCount }
+  games.forEach(g=>{
+    if(getGameYear(g) !== year) return;
+    ['teamA','teamB'].forEach(side=>{
+      const teamName = g[side].name;
+      const grade = getAgeGroupLabel(teamName);
+      if(grade!=='Seniors' && grade!=='Reserves') return;
+      const league = leagueFromDivisionLabel(getDivision(g));
+      if(!league) return;
+      counts[teamName] = counts[teamName] || {};
+      counts[teamName][league] = (counts[teamName][league]||0) + 1;
+    });
+  });
+  const map = {};
+  Object.keys(counts).forEach(teamName=>{
+    map[teamName] = Object.entries(counts[teamName]).sort((a,b)=>b[1]-a[1])[0][0];
+  });
+  _teamLeagueMapCache.set(cacheKey, map);
+  return map;
+}
+
 // ─── Standout team stats ────────────────────────────────────────────────────────────────────
 // For every real grade+division+year group, which team leads in each of several notable stats —
 // built entirely from numbers already tracked per team (wins/losses/pointsFor/pointsAgainst/
@@ -9815,22 +9865,37 @@ let _standoutStatsCache = null, _standoutStatsCacheVersion = -1;
 function computeStandoutTeamStats(){
   if(_standoutStatsCacheVersion === _aggVersion) return _standoutStatsCache;
   const { teamList } = computeAggregates();
-  const groups = new Map(); // grade|division|year -> [team]
+  const groups = new Map(); // grade|groupKey|year -> [team], where groupKey is a division NUMBER for juniors or a league CODE (GFNL/BFNL/GDFL) for Seniors/Reserves
   teamList.forEach(t=>{
-    if(!t.year || !GRADED_AGE_GROUPS.includes(t.ageGroup)) return;
-    const div = getTeamDivisionMap(t.year)[t.name];
-    if(div==null) return;
-    const key = t.ageGroup+'|'+div+'|'+t.year;
-    if(!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(t);
+    if(!t.year) return;
+    let groupKey, division = null, league = null;
+    if(GRADED_AGE_GROUPS.includes(t.ageGroup)){
+      const div = getTeamDivisionMap(t.year)[t.name];
+      if(div==null) return;
+      division = div;
+      groupKey = 'D'+div;
+    } else if(t.ageGroup==='Seniors' || t.ageGroup==='Reserves'){
+      // Seniors/Reserves don't run numbered divisions — 3 separate senior leagues stand in for
+      // that role here instead, so each league is its own group the same way each division is
+      // its own group for juniors.
+      const lg = getTeamLeagueMap(t.year)[t.name];
+      if(!lg) return;
+      league = lg;
+      groupKey = 'L'+lg;
+    } else {
+      return; // U9/U10/U12 — genuinely ungraded/mixed, no real division or league to group by
+    }
+    const key = t.ageGroup+'|'+groupKey+'|'+t.year;
+    if(!groups.has(key)) groups.set(key, { teams: [], division, league });
+    groups.get(key).teams.push(t);
   });
 
-  const standoutsByTeamKey = new Map(); // "teamName__year" -> [{ key, label, emoji, grade, division, year }]
-  const groupResults = []; // for the browsable page: [{ grade, division, year, leaders:[{stat, teamName, value}] }]
+  const standoutsByTeamKey = new Map(); // "teamName__year" -> [{ key, label, emoji, grade, division, league, year }]
+  const groupResults = []; // for the browsable page: [{ grade, division, league, year, leaders:[{stat, teamName, value}] }]
 
-  groups.forEach((teams, gKey)=>{
-    const [grade, divStr, yearStr] = gKey.split('|');
-    const division = parseInt(divStr,10), year = parseInt(yearStr,10);
+  groups.forEach(({ teams, division, league }, gKey)=>{
+    const [grade, , yearStr] = gKey.split('|');
+    const year = parseInt(yearStr,10);
     const leaders = [];
     STANDOUT_STAT_DEFS.forEach(def=>{
       const eligible = teams.filter(t=> t.gamesPlayed >= def.minGames);
@@ -9841,14 +9906,14 @@ function computeStandoutTeamStats(){
       winners.forEach(w=>{
         const teamKey = w.team.name+'__'+year;
         if(!standoutsByTeamKey.has(teamKey)) standoutsByTeamKey.set(teamKey, []);
-        standoutsByTeamKey.get(teamKey).push({ key:def.key, label:def.label, emoji:def.emoji, grade, division, year, value:w.value });
+        standoutsByTeamKey.get(teamKey).push({ key:def.key, label:def.label, emoji:def.emoji, grade, division, league, year, value:w.value });
       });
       leaders.push({ stat:def, teamNames: winners.map(w=>w.team.name), value: best });
     });
-    if(leaders.length) groupResults.push({ grade, division, year, leaders, teamCount: teams.length });
+    if(leaders.length) groupResults.push({ grade, division, league, year, leaders, teamCount: teams.length });
   });
 
-  groupResults.sort((a,b)=> b.year-a.year || gradeDisplayRank(a.grade)-gradeDisplayRank(b.grade) || a.division-b.division);
+  groupResults.sort((a,b)=> b.year-a.year || gradeDisplayRank(a.grade)-gradeDisplayRank(b.grade) || (a.division!=null && b.division!=null ? a.division-b.division : (a.league||'').localeCompare(b.league||'')));
   _standoutStatsCache = { standoutsByTeamKey, groupResults };
   _standoutStatsCacheVersion = _aggVersion;
   return _standoutStatsCache;
@@ -9899,7 +9964,7 @@ function renderStandoutStats(){
     </div>
     ${filtered.length===0 ? '<div class="empty">No graded divisions found for this year.</div>' : filtered.map(g=>`
       <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px;margin-bottom:12px;">
-        <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${g.grade} Division ${g.division} <span style="font-weight:400;color:var(--muted);font-size:12px;">(${g.teamCount} teams)</span></div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${g.league ? `${g.grade} ${LEAGUE_FULL_NAMES[g.league]||g.league}` : `${g.grade} Division ${g.division}`} <span style="font-weight:400;color:var(--muted);font-size:12px;">(${g.teamCount} teams)</span></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;">
           ${g.leaders.map(l=>`<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${fmtValue(l.stat.key,l.value)}"><span style="font-size:13px;">${l.stat.emoji}</span>${l.stat.label}: <span class="team-link" data-key="${l.teamNames[0]+'__'+g.year}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${l.teamNames.join(' / ')}</span></span>`).join('')}
         </div>
@@ -11378,13 +11443,80 @@ function leagueFromDivisionLabel(label){
 const LEAGUE_FULL_NAMES = { GFNL:'Geelong FNL', BFNL:'Bellarine FNL', GDFL:'Geelong & District FNL' };
 
 function computeJuniorPathwayByClub(playerList, filters){
-  filters = filters || { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL' };
-  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${filters.currentYear}|${filters.league}|${_aggVersion}|${playerList.length}`;
+  filters = filters || { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL', juniorYear:null };
+  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${filters.currentYear}|${filters.league}|${filters.juniorYear}|${_aggVersion}|${playerList.length}`;
   if(_juniorPathwayCache.has(cacheKey)) return _juniorPathwayCache.get(cacheKey);
   const result = computeJuniorPathwayByClubUncached(playerList, filters);
   _juniorPathwayCache.set(cacheKey, result);
   return result;
 }
+// Year-by-year trend: for each year, how many Seniors/Reserves players that year have known
+// junior history, and of those, how many are playing their FIRST-EVER Seniors/Reserves season
+// (a genuine junior-to-senior debut, not just "has junior history and happens to still be
+// playing"). Shares the same gradeScope/league/juniorScope rules as the main club table, so the
+// two stay answering the same underlying question at different granularities (per-club-now vs
+// league-wide-over-time). currentYear is deliberately ignored here — this table always spans
+// every year on file, since that's the whole point of a year-by-year trend.
+function computeJuniorPathwayYearlyTrend(playerList, filters){
+  // Each player's EARLIEST Seniors/Reserves year on file, so a "debut" can be told apart from a
+  // player who's simply still playing in a later season.
+  const firstSeniorYear = new Map();
+  playerList.forEach(p=>{
+    let earliest = null;
+    p.timeline.forEach(t=>{
+      if(!t.date) return;
+      const g = getAgeGroupLabel(t.team);
+      if(g!=='Seniors' && g!=='Reserves') return;
+      const y = new Date(t.date).getFullYear();
+      if(earliest==null || y<earliest) earliest = y;
+    });
+    if(earliest!=null) firstSeniorYear.set(p.key, earliest);
+  });
+
+  const allYears = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>a-b);
+  const byYear = allYears.map(year=>({ year, total:0, debuts:0 }));
+  const byYearMap = new Map(byYear.map(r=>[r.year,r]));
+
+  playerList.forEach(p=>{
+    if(!p.club) return;
+    allYears.forEach(year=>{
+      const entries = p.timeline.filter(t=>{
+        if(!t.date || new Date(t.date).getFullYear()!==year) return false;
+        const g = getAgeGroupLabel(t.team);
+        return g==='Seniors' || g==='Reserves';
+      });
+      if(!entries.length) return;
+      if(filters.league && filters.league!=='ALL'){
+        const leagues = new Set(entries.map(t=>leagueFromDivisionLabel(t.division)).filter(Boolean));
+        if(!leagues.has(filters.league)) return;
+      }
+      const ageGroups = new Set(entries.map(t=>getAgeGroupLabel(t.team)));
+      if(filters.gradeScope==='seniors' && !ageGroups.has('Seniors')) return;
+      if(filters.gradeScope==='reserves' && !ageGroups.has('Reserves')) return;
+      let juniorEntries = p.timeline.filter(t=> isJuniorGrade(getAgeGroupLabel(t.team)));
+      if(filters.juniorScope==='same') juniorEntries = juniorEntries.filter(t=> getClub(t.team)===p.club);
+      if(!juniorEntries.length) return;
+      const row = byYearMap.get(year);
+      row.total++;
+      if(firstSeniorYear.get(p.key)===year) row.debuts++;
+    });
+  });
+
+  const withData = byYear.filter(r=>r.total>0);
+  const avgTotal = withData.length ? withData.reduce((s,r)=>s+r.total,0)/withData.length : 0;
+  const avgDebuts = withData.length ? withData.reduce((s,r)=>s+r.debuts,0)/withData.length : 0;
+  return { byYear: byYear.slice().reverse(), avgTotal, avgDebuts };
+}
+
+const _juniorPathwayTrendCache = new Map();
+function computeJuniorPathwayYearlyTrendCached(playerList, filters){
+  const cacheKey = `${filters.gradeScope}|${filters.juniorScope}|${filters.league}|${_aggVersion}|${playerList.length}`;
+  if(_juniorPathwayTrendCache.has(cacheKey)) return _juniorPathwayTrendCache.get(cacheKey);
+  const result = computeJuniorPathwayYearlyTrend(playerList, filters);
+  _juniorPathwayTrendCache.set(cacheKey, result);
+  return result;
+}
+
 function computeJuniorPathwayByClubUncached(playerList, filters){
   const byClub = new Map(); // club -> { total, withJuniors, players:[] }
   playerList.forEach(p=>{
@@ -11430,6 +11562,13 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
     // somewhere". Filtered before anything else derives from juniorEntries, so the year-by-year
     // breakdown and "came up via" line stay consistent with whichever scope is active.
     if(filters.juniorScope==='same') juniorEntries = juniorEntries.filter(t=> getClub(t.team)===p.club);
+    // Optional: narrow to a SPECIFIC junior year — separate from, and answering a different
+    // question than, the currentYear filter above (that one picks which year's SENIOR roster to
+    // check; this one asks "did their junior history include this particular year", e.g. to see
+    // which current seniors/reserves players came through juniors in one specific graduating
+    // year). Filtered before hasJuniorHistory is computed so a player with SOME junior history,
+    // just not in the selected year, correctly reads as "no junior data for this filter".
+    if(filters.juniorYear) juniorEntries = juniorEntries.filter(t=> t.date && new Date(t.date).getFullYear()===filters.juniorYear);
     const hasJuniorHistory = juniorEntries.length > 0;
     // Most recent junior entry, so "came up via" shows where they were LAST as a junior, not
     // their very first game on file (more useful — a player's most recent junior club/grade is
@@ -11855,7 +11994,7 @@ function backToToolsFromAbsenceLeaderboard(){ navBack(); }
 
 let juniorPathwaySort = { key:'pct', dir:'desc' };
 let juniorPathwayExpandedClub = null;
-let juniorPathwayFilters = { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL' };
+let juniorPathwayFilters = { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL', juniorYear:null };
 
 function doOpenJuniorPathway(){
   showPanel('junior-pathway');
@@ -11882,6 +12021,7 @@ function renderJuniorPathway(){
   const { playerList } = withAllDataFilters(()=> computeAggregates());
   const jf = juniorPathwayFilters;
   const pathway = computeJuniorPathwayByClub(playerList, jf);
+  const trend = computeJuniorPathwayYearlyTrendCached(playerList, jf);
 
   const gradeLabel = jf.gradeScope==='seniors' ? 'Seniors' : jf.gradeScope==='reserves' ? 'Reserves' : 'Seniors/Reserves';
   const COLUMNS = [
@@ -11968,10 +12108,33 @@ function renderJuniorPathway(){
     ${Object.entries(LEAGUE_FULL_NAMES).map(([code,name])=>`<option value="${code}" ${jf.league===code?'selected':''}>${name} only</option>`).join('')}
   </select>`;
 
+  // A DIFFERENT year filter from the one above — that one picks which year's SENIOR roster to
+  // check; this one asks "did their junior history include this particular year" (e.g. to see
+  // which current seniors/reserves players came through juniors in one specific graduating year),
+  // and is checked against a player's FULL junior career regardless of what currentYear is set to.
+  const juniorYearSelectHtml = `<select id="jpJuniorYearSel">
+    <option value="" ${!jf.juniorYear?'selected':''}>Any junior year</option>
+    ${allYears.map(y=>`<option value="${y}" ${String(jf.juniorYear)===String(y)?'selected':''}>Played juniors in ${y}</option>`).join('')}
+  </select>`;
+
+  // Year-by-year trend table — league-wide (respects gradeScope/league/juniorScope, same as the
+  // main club table above, but deliberately NOT the currentYear or juniorYear filters, since
+  // those pick a single year and this table's whole point is showing every year side by side).
+  const trendTableHtml = `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px;">${gradeLabel} players with known junior history, by year</div>
+      <p class="hint" style="margin:0 0 8px;">"Debuts" is how many of that year's total are playing their first-ever ${gradeLabel} season, not just still playing after an earlier debut.</p>
+      <table><thead><tr><th>Year</th><th class="num">${gradeLabel} players w/ junior history</th><th class="num">Of those, debuting that year</th></tr></thead>
+      <tbody>
+        ${trend.byYear.map(r=>`<tr><td>${r.year}</td><td class="num">${r.total}</td><td class="num">${r.debuts}</td></tr>`).join('')}
+        <tr style="border-top:1px solid var(--border-strong);"><td style="font-weight:600;">Average</td><td class="num" style="font-weight:600;">${trend.avgTotal.toFixed(1)}</td><td class="num" style="font-weight:600;">${trend.avgDebuts.toFixed(1)}</td></tr>
+      </tbody></table>
+    </div>`;
+
   wrap.innerHTML = `
     <span class="back-link" id="backToToolsFromJuniorPathway">&larr; Back to tools</span>
     <h2 style="font-size:20px;">Junior pathway</h2>
-    <p class="hint" style="margin:0 0 12px;">For each club's ${jf.currentYear?`${jf.currentYear} `:'current '}${gradeLabel} players, how many have a known junior (U-grade) game anywhere in the competition since 2022 — this tracker's own records only go back that far, so "no junior data" means genuinely none on file, not that they definitely never played juniors; anyone whose junior years were earlier than 2022 will show the same way. Always checks a player's FULL career for junior history, regardless of the top bar's Year filter. ${juniorScopeDesc}</p>
+    <p class="hint" style="margin:0 0 12px;">For each club's ${jf.currentYear?`${jf.currentYear} `:'current '}${gradeLabel} players, how many have a known junior (U-grade) game anywhere in the competition since 2022 — this tracker's own records only go back that far, so "no junior data" means genuinely none on file, not that they definitely never played juniors; anyone whose junior years were earlier than 2022 will show the same way. Always checks a player's FULL career for junior history, regardless of the top bar's Year filter.${jf.juniorYear ? ` Narrowed here to players whose junior history includes ${jf.juniorYear} specifically.` : ''} ${juniorScopeDesc}</p>
     <div class="controls-row" style="margin-bottom:8px;gap:6px;flex-wrap:wrap;">
       ${gradeChip('both','Seniors/Reserves')}
       ${gradeChip('seniors','Seniors only')}
@@ -11982,7 +12145,9 @@ function renderJuniorPathway(){
     <div class="controls-row" style="margin-bottom:14px;gap:6px;flex-wrap:wrap;">
       ${juniorChip('any','Juniors at any club')}
       ${juniorChip('same','Juniors at same club')}
+      ${juniorYearSelectHtml}
     </div>
+    ${trendTableHtml}
     ${sorted.length===0 ? `<div class="empty">No ${gradeLabel} players on file yet${jf.currentYear?` for ${jf.currentYear}`:''}.</div>` : `
     <table><thead><tr>${thHtml}</tr></thead>
     <tbody>${sorted.map(rowHtml).join('')}</tbody></table>`}
@@ -11998,6 +12163,8 @@ function renderJuniorPathway(){
   if(jpYearSel) jpYearSel.onchange = e=>{ juniorPathwayFilters.currentYear = e.target.value ? parseInt(e.target.value,10) : null; renderJuniorPathway(); };
   const jpLeagueSel = document.getElementById('jpLeagueSel');
   if(jpLeagueSel) jpLeagueSel.onchange = e=>{ juniorPathwayFilters.league = e.target.value; renderJuniorPathway(); };
+  const jpJuniorYearSel = document.getElementById('jpJuniorYearSel');
+  if(jpJuniorYearSel) jpJuniorYearSel.onchange = e=>{ juniorPathwayFilters.juniorYear = e.target.value ? parseInt(e.target.value,10) : null; renderJuniorPathway(); };
   wrap.querySelectorAll('.player-link').forEach(el=>{
     el.onclick = ()=> openPlayerDetailWithReturn(el.dataset.key, openJuniorPathway);
   });
@@ -12366,7 +12533,7 @@ function renderTeamStandoutBadges(teamName, year){
   };
   return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;">${standouts.map(s=>{
     const divLabel = s.division!=null ? `D${s.division}` : '';
-    const divisionPhrase = s.grade + (divLabel?' Division '+s.division:'');
+    const divisionPhrase = s.league ? `${s.grade} ${LEAGUE_FULL_NAMES[s.league]||s.league}` : s.grade + (divLabel?' Division '+s.division:'');
     return `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${s.label} in ${divisionPhrase}, ${s.year}: ${fmtValue(s.key,s.value)}"><span style="font-size:13px;line-height:1;">${s.emoji}</span>${s.label}</span>`;
   }).join('')}</div>`;
 }
@@ -15995,7 +16162,8 @@ let homeGrownDetail = null; // {name, year} when drilled into a single team-seas
 // trail: two different real people sharing a name would have their club history merged into one
 // Set, which is especially damaging here since the whole point of this data is "did this exact
 // person ever play elsewhere" — so it gets the same id-aware resolver.
-function computeNameClubs(gamesList){
+function computeNameClubs(gamesList, clubKeyFn){
+  clubKeyFn = clubKeyFn || getClub;
   const nameClubs = {};
   const nameClubsKeyOwner = {};
   const idToNameClubsKey = {};
@@ -16037,7 +16205,7 @@ function computeNameClubs(gamesList){
     const yr = getGameYear(g);
     ['teamA','teamB'].forEach(side=>{
       const t = g[side]; if(!t || isMergedTeam(t.name, yr)) return;
-      const club = getClub(t.name); if(!club) return;
+      const club = clubKeyFn(t.name); if(!club) return;
       const grade = getAgeGroupLabel(t.name);
       (t.players||[]).forEach(row=>{
         const nm = (row.name||'').trim();
@@ -16053,12 +16221,15 @@ function computeNameClubs(gamesList){
 // Cached the same way as buildMovementContext above — another full-dataset scan (career-wide,
 // deliberately unfiltered by design) that was being redone from scratch by three separate callers
 // (Home Grown's league table, its per-team detail view, and Team Squad Origins) even when nothing
-// about the underlying data had changed between them.
+// about the underlying data had changed between them. Accepts an optional clubKeyFn (defaults to
+// plain getClub) so Home Grown specifically can pass a GDFL-aware variant (splitting Geelong West
+// Giants' two league programs into separate "clubs") without changing what Team Squad Origins or
+// any other caller sees — cached separately per function via cacheTag, so the two never collide.
 const _nameClubsCache = new Map();
-function computeNameClubsWithResolver(gamesList){
-  const cacheKey = `${_aggVersion}|${gamesList.length}`;
+function computeNameClubsWithResolver(gamesList, clubKeyFn, cacheTag){
+  const cacheKey = `${cacheTag||'default'}|${_aggVersion}|${gamesList.length}`;
   if(_nameClubsCache.has(cacheKey)) return _nameClubsCache.get(cacheKey);
-  const nameClubs = computeNameClubs(gamesList);
+  const nameClubs = computeNameClubs(gamesList, clubKeyFn);
   const resolveNameClubsKey = nameClubs.resolveNameClubsKey;
   delete nameClubs.resolveNameClubsKey;
   const result = { nameClubs, resolveNameClubsKey };
@@ -16078,6 +16249,23 @@ function computeHomeGrown(){
   _homeGrownCache.set(cacheKey, result);
   return result;
 }
+// Geelong West Giants fields senior/reserves sides in BOTH Geelong FNL (as "Geelong West
+// Giants ...") and GDFL (as "GW Giants FNC ...") — the only club that does this. getClub()
+// deliberately resolves both to the one "Geelong West Giants" club everywhere else in the app
+// (avoids the GDFL side showing as a phantom club), but Home Grown specifically splits the two
+// programs into separate rows, on request, since a shared club aggregate can hide that these are
+// really two different senior/reserves programs with their own separate one-club rates. Kept as
+// its own top-level function (not scoped inside one caller) so both Home Grown's league table AND
+// its per-team detail view apply the exact same split — otherwise the two could disagree on which
+// "club" a GDFL-side player belongs to.
+function homeGrownClubKey(teamName){
+  const club = getClub(teamName);
+  if(club==='Geelong West Giants'){
+    const lower = teamName.toLowerCase();
+    if(lower.includes('gw giants fnc') || (lower.includes('gw') && lower.includes('giants') && lower.includes('fnc'))) return 'Geelong West Giants (GDFL)';
+  }
+  return club;
+}
 function computeHomeGrownUncached(){
   const f = homeGrownFilters;
   return withAllDataFilters(()=>{
@@ -16086,13 +16274,20 @@ function computeHomeGrownUncached(){
     // history, never just the filtered slice. The filters below only scope WHICH clubs/teams get
     // ranked, so narrowing to (say) U16 2026 asks "of the players in those teams, how many are
     // one-club players", not "did they only play one club within U16 2026".
-    const { nameClubs, resolveNameClubsKey } = computeNameClubsWithResolver(allGames);
+    const { nameClubs, resolveNameClubsKey } = computeNameClubsWithResolver(allGames, homeGrownClubKey, 'homeGrown');
 
     const sideMatches = (g, t) => {
       if(f.year !== 'ALL' && String(getGameYear(g)) !== String(f.year)) return false;
-      if(f.ageGroup !== 'ALL' && getAgeGroupLabel(t.name) !== f.ageGroup) return false;
+      if(f.ageGroup !== 'ALL'){
+        const grade = getAgeGroupLabel(t.name);
+        if(f.ageGroup==='SENIORS_RESERVES'){
+          if(grade!=='Seniors' && grade!=='Reserves') return false;
+        } else if(f.ageGroup==='ALL_JUNIORS'){
+          if(!isJuniorGrade(grade)) return false;
+        } else if(grade !== f.ageGroup) return false;
+      }
       if(f.division !== 'ALL' && getDivision(g) !== f.division) return false;
-      if(f.club !== 'ALL' && getClub(t.name) !== f.club) return false;
+      if(f.club !== 'ALL' && homeGrownClubKey(t.name) !== f.club) return false;
       return true;
     };
 
@@ -16109,7 +16304,7 @@ function computeHomeGrownUncached(){
         const keys = (t.players||[]).filter(r=> r.name && !isPlaceholderPlayerName(r.name))
           .map(r=> resolveNameClubsKey(r.name, r.playhqId, grade));
         if(!isMergedTeam(t.name, yr)){
-          const club = getClub(t.name);
+          const club = homeGrownClubKey(t.name);
           if(club){
             const cp = clubPlayers[club] = clubPlayers[club] || new Set();
             keys.forEach(k=> cp.add(k));
@@ -16149,7 +16344,7 @@ function computeHomeGrownUncached(){
       .filter(Boolean).sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
     const divisions = [...new Set(allGames.map(g=>getDivision(g)).filter(Boolean))].sort();
     const clubList = [...new Set(allGames.flatMap(g=>[g.teamA,g.teamB]
-      .filter(t=>t && !isMergedTeam(t.name)).map(t=>getClub(t.name))))].filter(Boolean).sort();
+      .filter(t=>t && !isMergedTeam(t.name)).map(t=>homeGrownClubKey(t.name))))].filter(Boolean).sort();
 
     return { clubs, teams, totalPlayers, totalHome, years, ageGroups, divisions, clubList };
   });
@@ -16168,9 +16363,13 @@ function openHomeGrown(){
 function computeHomeGrownTeamDetail(teamName, year){
   return withAllDataFilters(()=>{
     const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
-    const { nameClubs, resolveNameClubsKey } = computeNameClubsWithResolver(allGames);
+    // Uses the SAME GDFL-aware club key as the league table above (homeGrownClubKey, not plain
+    // getClub) — otherwise a player who only ever played Geelong West Giants' Geelong FNL side
+    // would incorrectly read as "home grown" when viewing their GDFL side's roster detail, since
+    // plain getClub() collapses both programs to the one club name.
+    const { nameClubs, resolveNameClubsKey } = computeNameClubsWithResolver(allGames, homeGrownClubKey, 'homeGrown');
     const { trail, resolveTrailKey } = buildMovementContext(allGames);
-    const thisClub = getClub(teamName);
+    const thisClub = homeGrownClubKey(teamName);
 
     // Roster = everyone who appeared for this exact team in this season. Keeps each row's real
     // PlayHQ id (when present) alongside the display name, so a same-name collision with someone
@@ -16266,7 +16465,7 @@ function renderHomeGrown(){
   const filterStrip = `
     <select id="hgMode">${opt('clubs','View: Clubs',f.mode)}${opt('teams','View: Teams',f.mode)}</select>
     <select id="hgClub">${opt('ALL','All clubs',f.club)}${clubList.map(c=>opt(c,c,f.club)).join('')}</select>
-    <select id="hgAge">${opt('ALL','All age groups',f.ageGroup)}${ageGroups.map(a=>opt(a,a,f.ageGroup)).join('')}</select>
+    <select id="hgAge">${opt('ALL','All age groups',f.ageGroup)}${opt('SENIORS_RESERVES','Seniors/Reserves combined',f.ageGroup)}${opt('ALL_JUNIORS','All juniors only',f.ageGroup)}${ageGroups.map(a=>opt(a,a,f.ageGroup)).join('')}</select>
     <select id="hgDivision">${opt('ALL','All divisions',f.division)}${divisions.map(d=>opt(d,d,f.division)).join('')}</select>
     <select id="hgYear">${opt('ALL','All years',f.year)}${years.map(y=>opt(y,y,f.year)).join('')}</select>
     ${f.mode==='clubs'
