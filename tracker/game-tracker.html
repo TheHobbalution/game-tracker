@@ -619,6 +619,7 @@
       <div class="tool-tile" id="toolTileTopPlayers"><div class="tool-tile-title">Top players</div><div class="tool-tile-desc">This season's leaders across goals, bests and form.</div></div>
       <div class="tool-tile" id="toolTileComparePlayers"><div class="tool-tile-title">Compare players</div><div class="tool-tile-desc">Head-to-head stats, teammate history and league context for two players.</div></div>
       <div class="tool-tile" id="toolTilePlayerMovement"><div class="tool-tile-title">Player movement</div><div class="tool-tile-desc">Who's changed clubs, lapsed entirely, or shares a roster history — recruiting leads.</div></div>
+      <div class="tool-tile" id="toolTileOnFirePlayers"><div class="tool-tile-title">On fire players</div><div class="tool-tile-desc">Everyone currently on a hot streak — 3+ games as 1st-best and/or 3+ goals.</div></div>
     </div>
     <div class="tools-section-label">Teams</div>
     <div class="tools-grid">
@@ -631,7 +632,6 @@
       <div class="tool-tile tool-tile-blue" id="toolTileStabilityImprovement"><div class="tool-tile-title">Stability vs improvement</div><div class="tool-tile-desc">Do squads that keep their roster together actually improve more?</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileCohortTrajectory"><div class="tool-tile-title">Cohort trajectory</div><div class="tool-tile-desc">One team's own story — the real split-and-reunite cycle as players age up, not a league comparison.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileStandoutStats"><div class="tool-tile-title">Standout stats</div><div class="tool-tile-desc">Every division's leader in goals, defence, percentage, win rate and more.</div></div>
-      <div class="tool-tile tool-tile-blue" id="toolTileOnFirePlayers"><div class="tool-tile-title">On fire players</div><div class="tool-tile-desc">Everyone currently on a hot streak — 3+ games as 1st-best and/or 3+ goals.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileAbsenceLeaderboard"><div class="tool-tile-title">Missing games</div><div class="tool-tile-desc">Which teams have the most roster absence this season.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
@@ -1219,7 +1219,13 @@ function isJunkTestFixture(g){
 // way test fixtures and out-of-scope competitions are, not left for every downstream ranking
 // function to individually guard against.
 function isPlaceholderBracketSlot(g){
-  const re = /^(Winner|Loser)\s+Game\s+\d+$/i;
+  // "Ladder Position N" is the same concept as "Winner/Loser Game N" — a finals bracket slot
+  // whose actual occupant isn't decided yet (depends on final ladder standings rather than an
+  // earlier game's result), scraped the same way with a 0-0 placeholder score and no players.
+  // Confirmed as a real, currently-occurring case (4 such games, all Finals Round 1, 2026 U18)
+  // that the original Winner/Loser pattern didn't catch, surfacing as a phantom "club" in
+  // dropdowns (Manage clubs' unresolved-clubs list) exactly like the junk fixtures above.
+  const re = /^(Winner|Loser)\s+Game\s+\d+$|^Ladder\s+Position\s+\d+$/i;
   return !!(g && g.teamA && g.teamB && (re.test((g.teamA.name||'').trim()) || re.test((g.teamB.name||'').trim())));
 }
 // User's call (2026-08-25): All Abilities / Kardinia Park All-Abilities and Unders Transition
@@ -10011,7 +10017,7 @@ function computeSeasonAwards(){
     });
   });
 
-  const groups = new Map(); // grade|division|year -> [{ playerKey, goals, weightedBest }]
+  const groups = new Map(); // grade|groupKey|year -> [{ playerKey, goals, weightedBest }], groupKey is a division NUMBER for juniors or a league CODE for Seniors/Reserves
   const teamGroups = new Map(); // team|year -> [{ playerKey, goals, weightedBest }]
   seasonStats.forEach(s=>{
     let primaryTeam = null, maxCount = 0;
@@ -10023,25 +10029,38 @@ function computeSeasonAwards(){
     const tKey = primaryTeam+'|'+s.year;
     if(!teamGroups.has(tKey)) teamGroups.set(tKey, []);
     teamGroups.get(tKey).push({ playerKey: s.playerKey, goals: s.goals, weightedBest: s.weightedBest });
-    const div = getTeamDivisionMap(s.year)[primaryTeam];
-    if(div==null) return; // no real numbered division that season — not eligible for LEAGUE awards specifically
-    const gKey = s.grade+'|'+div+'|'+s.year;
-    if(!groups.has(gKey)) groups.set(gKey, []);
-    groups.get(gKey).push({ playerKey: s.playerKey, goals: s.goals, weightedBest: s.weightedBest });
+    // League-wide eligibility: a real numbered division for graded juniors, or a real senior
+    // league (GFNL/BFNL/GDFL) for Seniors/Reserves — Seniors/Reserves used to be silently excluded
+    // from league-wide awards entirely here (no numbered division to group by), meaning no
+    // Seniors/Reserves player could ever win a league-wide goldenBoot/bestAndFairest, only the
+    // club-level equivalent. Fixed using the same league-grouping built for Standout Stats.
+    let groupKey, division = null, league = null;
+    if(s.grade==='Seniors' || s.grade==='Reserves'){
+      league = getTeamLeagueMap(s.year)[primaryTeam];
+      if(!league) return;
+      groupKey = 'L'+league;
+    } else {
+      division = getTeamDivisionMap(s.year)[primaryTeam];
+      if(division==null) return; // no real numbered division that season — not eligible for LEAGUE awards specifically
+      groupKey = 'D'+division;
+    }
+    const gKey = s.grade+'|'+groupKey+'|'+s.year;
+    if(!groups.has(gKey)) groups.set(gKey, { players:[], division, league });
+    groups.get(gKey).players.push({ playerKey: s.playerKey, goals: s.goals, weightedBest: s.weightedBest });
   });
 
-  const awardsByPlayer = new Map(); // playerKey -> [{ type, grade, division, year }]
+  const awardsByPlayer = new Map(); // playerKey -> [{ type, grade, division, league, year }]
   function addAward(playerKey, award){
     if(!awardsByPlayer.has(playerKey)) awardsByPlayer.set(playerKey, []);
     awardsByPlayer.get(playerKey).push(award);
   }
-  groups.forEach((players, gKey)=>{
-    const [grade, divStr, yearStr] = gKey.split('|');
-    const division = parseInt(divStr,10), year = parseInt(yearStr,10);
+  groups.forEach(({ players, division, league }, gKey)=>{
+    const [grade, , yearStr] = gKey.split('|');
+    const year = parseInt(yearStr,10);
     const maxGoals = Math.max(...players.map(p=>p.goals));
-    if(maxGoals>0) players.filter(p=>p.goals===maxGoals).forEach(p=> addAward(p.playerKey, { type:'goldenBoot', grade, division, year }));
+    if(maxGoals>0) players.filter(p=>p.goals===maxGoals).forEach(p=> addAward(p.playerKey, { type:'goldenBoot', grade, division, league, year }));
     const maxBest = Math.max(...players.map(p=>p.weightedBest));
-    if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'bestAndFairest', grade, division, year }));
+    if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'bestAndFairest', grade, division, league, year }));
   });
   // Club-level equivalents — same "who led in goals / best-points" question, but compared only
   // against this one team's own roster for the season, not the whole division. A team of just one
@@ -10052,10 +10071,11 @@ function computeSeasonAwards(){
     const team = tKey.slice(0,idx), year = parseInt(tKey.slice(idx+1),10);
     const grade = getAgeGroupLabel(team);
     const division = getTeamDivisionMap(year)[team] ?? null;
+    const league = (grade==='Seniors' || grade==='Reserves') ? getTeamLeagueMap(year)[team] : null;
     const maxGoals = Math.max(...players.map(p=>p.goals));
-    if(maxGoals>0) players.filter(p=>p.goals===maxGoals).forEach(p=> addAward(p.playerKey, { type:'clubGoalLeader', grade, division, year, team }));
+    if(maxGoals>0) players.filter(p=>p.goals===maxGoals).forEach(p=> addAward(p.playerKey, { type:'clubGoalLeader', grade, division, league, year, team }));
     const maxBest = Math.max(...players.map(p=>p.weightedBest));
-    if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'clubBestPlayer', grade, division, year, team }));
+    if(maxBest>0) players.filter(p=>Math.abs(p.weightedBest-maxBest)<0.01).forEach(p=> addAward(p.playerKey, { type:'clubBestPlayer', grade, division, league, year, team }));
   });
 
   playerList.forEach(p=>{
@@ -10065,7 +10085,8 @@ function computeSeasonAwards(){
       if(!year) return;
       const grade = getAgeGroupLabel(t.team);
       const division = getTeamDivisionMap(year)[t.team];
-      addAward(p.key, { type:'grandFinal', grade, division: division ?? null, year });
+      const league = (grade==='Seniors' || grade==='Reserves') ? getTeamLeagueMap(year)[t.team] : null;
+      addAward(p.key, { type:'grandFinal', grade, division: division ?? null, league, year });
     });
   });
 
@@ -10105,7 +10126,7 @@ function renderAwardBadges(player){
   return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;">${sorted.map(a=>{
     const meta = AWARD_META[a.type];
     const divLabel = a.division!=null ? `D${a.division}` : '';
-    const divisionPhrase = a.grade + (divLabel?' Division '+a.division:'');
+    const divisionPhrase = a.league ? `${a.grade} ${LEAGUE_FULL_NAMES[a.league]||a.league}` : a.grade + (divLabel?' Division '+a.division:'');
     const scopePhrase = meta.scope ? `${meta.scope} — ` : '';
     const teamPhrase = a.team ? ` (${a.team})` : '';
     return `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-1);border:0.5px solid var(--border-strong);border-radius:14px;padding:4px 10px 4px 8px;font-size:12px;color:var(--text-primary);" title="${scopePhrase}${meta.label} in ${divisionPhrase}, ${a.year}${teamPhrase}"><span style="font-size:14px;line-height:1;${meta.filter?`filter:${meta.filter};`:''}">${meta.emoji}</span>${a.grade}${divLabel?' '+divLabel:''} '${String(a.year).slice(-2)}</span>`;
@@ -16760,11 +16781,11 @@ function renderSquadImprovement(wrap, header, teamList){
 
   const COLUMNS = [
     { key:'squad',   label:'Squad',   defaultDir:'asc',  val:r=> (r.latestName||'').toLowerCase() },
-    { key:'seasons', label:'Seasons', defaultDir:'desc', val:r=> r.seasons.length },
-    { key:'span',    label:'Span',    defaultDir:'desc', val:r=> r.span },
-    { key:'net',     label:'Net',     defaultDir:'desc', val:r=> r.net },
-    { key:'rate',    label:'Per yr',  defaultDir:'desc', val:r=> r.rate },
-    { key:'score',   label:'Score',   defaultDir:'desc', val:r=> r.score }
+    { key:'seasons', label:'Seasons', defaultDir:'desc', val:r=> r.seasons.length, tooltip:"How many graded seasons this squad has on file." },
+    { key:'span',    label:'Span',    defaultDir:'desc', val:r=> r.span, tooltip:"Years between their first and most recent graded season." },
+    { key:'net',     label:'Net',     defaultDir:'desc', val:r=> r.net, tooltip:"Total change in grade-relative strength from their first tracked season to their most recent — how far they've climbed (or slid) overall, regardless of how many years it took." },
+    { key:'rate',    label:'Per yr',  defaultDir:'desc', val:r=> r.rate, tooltip:"Net divided by the number of years it took — how fast they've been climbing on average, not just how far." },
+    { key:'score',   label:'Score',   defaultDir:'desc', val:r=> r.score, tooltip:"Combines Net and Per yr equally (half each) — rewards a squad that has both climbed a long way AND done it quickly, not just one or the other." }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.impSortKey) || COLUMNS[5];
   const dirMul = f.impSortDir==='asc' ? 1 : -1;
@@ -16778,7 +16799,8 @@ function renderSquadImprovement(wrap, header, teamList){
     const active = f.impSortKey===c.key;
     const arrow = active ? (f.impSortDir==='asc' ? ' ▲' : ' ▼') : '';
     const numCls = (c.key==='seasons'||c.key==='span'||c.key==='net'||c.key==='rate'||c.key==='score') ? ' num' : '';
-    return `<th class="sortable-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
 
   const dirChip = (kind, label) => {
