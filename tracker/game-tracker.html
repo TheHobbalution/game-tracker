@@ -888,7 +888,7 @@ let _dismissedMatchGroupsVersion = 0;
 function markDismissedMatchGroupsChanged(){ _dismissedMatchGroupsVersion++; }
 let knownClubs = [
   "Aireys Inlet","Anakie","Anglesea","Armstrong Creek","Bannockburn","Barwon Heads","Bell Park",
-  "Bell Post Hill","Belmont Lions","Colac","Corio","Drysdale","East Geelong","Geelong Amateur",
+  "Bell Post Hill","Bellbrae Dolphins","Belmont Lions","Colac","Corio","Drysdale","East Geelong","Geelong Amateur",
   "Geelong West Giants","Grovedale","Inverleigh","Lara","Leopold","Lethbridge","Little River",
   "Modewarre","Newcomb","Newtown & Chilwell","North Geelong","North Shore","Northern Stars","Ocean Grove",
   "Portarlington","Queenscliff","South Barwon","St Albans","St Joseph's","St Mary's",
@@ -15521,7 +15521,7 @@ function renderCohortTrajectoryInner(wrap, header){
 // Cohorts are de-duplicated so one squad aging up through several team names is a single row.
 let squadProgFilters = { mode:'season', tileGroup:'trend', year:null, ageGroup:'ALL', division:'ALL', trend:'ALL', sortKey:'trend', sortDir:'asc', impAge:'ALL', impClub:'ALL', impClubScope:'ONLY', direction:'ALL', impSortKey:'score', impSortDir:'desc', cohortThreshold:0.35,
   clubSortKey:'avgScore', clubSortDir:'desc', pathwayClub:null, pathwayYear:null,
-  stabSortKey:'score', stabSortDir:'desc', stabAge:'ALL', stabSeason:'ALL', churnSortKey:'retentionPct', churnSortDir:'desc', churnAge:'ALL',
+  stabSortKey:'score', stabSortDir:'desc', stabAge:'ALL', stabSeason:'ALL', churnSortKey:'retentionPct', churnSortDir:'desc', churnAge:'ALL', churnYearMode:'latest', churnView:'byClub',
   // Stability vs improvement: multi-year (whole tracked span, per squad) is the default view —
   // stabSinceYear:null means "as far back as practical", which already means "from each squad's
   // first COMPETITIVE (graded) season" via isCompetitiveGrade inside computeSquadImprovement, not
@@ -16101,14 +16101,32 @@ function collapseClubYearRosters(rostersByAge, ageFilter){
 // Cached per (ageFilter|_aggVersion) — calls computeClubYearRosters (now itself cached above),
 // but this function's own grouping/comparison pass was still redone from scratch every render.
 const _clubChurnCache = new Map();
-function computeClubChurn(ageFilter){
-  const cacheKey = `${ageFilter}|${_aggVersion}`;
+function computeClubChurn(ageFilter, yearMode){
+  yearMode = yearMode || 'latest';
+  const cacheKey = `${ageFilter}|${yearMode}|${_aggVersion}`;
   if(_clubChurnCache.has(cacheKey)) return _clubChurnCache.get(cacheKey);
-  const result = computeClubChurnUncached(ageFilter);
+  const result = computeClubChurnUncached(ageFilter, yearMode);
   _clubChurnCache.set(cacheKey, result);
   return result;
 }
-function computeClubChurnUncached(ageFilter){
+// One club's retention for a single year-pair (prev -> latest), the same shape the original
+// single-comparison view always returned.
+function computeChurnTransition(club, rosters, leagueByYear, prev, latest){
+  const setPrev = rosters[club][prev], setLatest = rosters[club][latest];
+  const latestLeague = leagueByYear[latest] || new Set();
+  const retained = [...setPrev].filter(n=>setLatest.has(n)).length;
+  const leftNames = [...setPrev].filter(n=>!setLatest.has(n));
+  const movedCount = leftNames.filter(n=> latestLeague.has(n)).length;
+  const noLongerCount = leftNames.length - movedCount;
+  const retentionPct = setPrev.size ? Math.round((retained/setPrev.size)*100) : null;
+  return {
+    club, prevYear:prev, latestYear:latest,
+    prevCount:setPrev.size, latestCount:setLatest.size,
+    retained, retentionPct, newCount: setLatest.size-retained,
+    lapsedCount: leftNames.length, movedCount, noLongerCount
+  };
+}
+function computeClubChurnUncached(ageFilter, yearMode){
   const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
   const rostersByAge = computeClubYearRosters(allGames);
   const rosters = collapseClubYearRosters(rostersByAge, ageFilter);
@@ -16129,22 +16147,112 @@ function computeClubChurnUncached(ageFilter){
   Object.keys(rosters).forEach(club=>{
     const years = Object.keys(rosters[club]).map(Number).sort((a,b)=>a-b);
     if(years.length<2) return;
-    const latest = years[years.length-1], prev = years[years.length-1-1];
-    const setPrev = rosters[club][prev], setLatest = rosters[club][latest];
-    const latestLeague = leagueByYear[latest] || new Set();
-    const retained = [...setPrev].filter(n=>setLatest.has(n)).length;
-    const leftNames = [...setPrev].filter(n=>!setLatest.has(n));
-    const movedCount = leftNames.filter(n=> latestLeague.has(n)).length; // playing elsewhere in the comp
-    const noLongerCount = leftNames.length - movedCount;                 // not found anywhere in the comp
-    const retentionPct = setPrev.size ? Math.round((retained/setPrev.size)*100) : null;
+
+    // 'latest' (the original, still-default behaviour) and a specific numeric year both resolve
+    // to ONE transition — a specific year means "the transition ENDING in that year", using
+    // whichever earlier season this club actually has on file before it (not necessarily the
+    // adjacent calendar year, since a club can have gaps).
+    if(yearMode==='latest' || /^\d+$/.test(String(yearMode))){
+      let latest, prev;
+      if(yearMode==='latest'){
+        latest = years[years.length-1]; prev = years[years.length-2];
+      } else {
+        const target = Number(yearMode);
+        const idx = years.indexOf(target);
+        if(idx<1) return; // this club has no season on file before the requested year
+        latest = years[idx]; prev = years[idx-1];
+      }
+      out.push(computeChurnTransition(club, rosters, leagueByYear, prev, latest));
+      return;
+    }
+
+    // 'all' / 'last3' / 'last5' — average across every consecutive year-pair this club has on
+    // file (or just the most recent N pairs), so a club's typical retention pattern shows
+    // through rather than whatever happened to occur in one specific season.
+    let pairs = [];
+    for(let i=1;i<years.length;i++) pairs.push([years[i-1], years[i]]);
+    if(yearMode==='last3') pairs = pairs.slice(-3);
+    else if(yearMode==='last5') pairs = pairs.slice(-5);
+    if(!pairs.length) return;
+    const transitions = pairs.map(([p,l])=> computeChurnTransition(club, rosters, leagueByYear, p, l));
+    const avg = arr => Math.round(arr.reduce((s,v)=>s+v,0)/arr.length);
+    const pctVals = transitions.map(t=>t.retentionPct).filter(v=>v!=null);
     out.push({
-      club, prevYear:prev, latestYear:latest,
-      prevCount:setPrev.size, latestCount:setLatest.size,
-      retained, retentionPct, newCount: setLatest.size-retained,
-      lapsedCount: leftNames.length, movedCount, noLongerCount
+      club, prevYear:years[years.length-pairs.length-1], latestYear:years[years.length-1],
+      transitionCount: transitions.length,
+      prevCount: avg(transitions.map(t=>t.prevCount)),
+      latestCount: avg(transitions.map(t=>t.latestCount)),
+      retained: avg(transitions.map(t=>t.retained)),
+      retentionPct: pctVals.length ? Math.round(pctVals.reduce((s,v)=>s+v,0)/pctVals.length) : null,
+      newCount: avg(transitions.map(t=>t.newCount)),
+      lapsedCount: avg(transitions.map(t=>t.lapsedCount)),
+      movedCount: avg(transitions.map(t=>t.movedCount)),
+      noLongerCount: avg(transitions.map(t=>t.noLongerCount))
     });
   });
   return out.sort((a,b)=>(b.retentionPct??-1)-(a.retentionPct??-1));
+}
+
+// League-wide (not per-club) breakdown of "no longer playing" — for each consecutive year-pair
+// across the WHOLE dataset, how many players who appeared anywhere in the competition one year
+// don't appear anywhere the next, with a breakdown by whichever age group was their PRIMARY one
+// (most games) in the year they were last seen. Deliberately league-wide rather than per-club,
+// since the question "which YEAR loses the most players" and "at what age does the drop-off
+// concentrate" is about the competition's overall pipeline, not any one club's roster — a player
+// who moved clubs is correctly excluded here (they're still playing somewhere, just not counted
+// as a loss), same "moved vs genuinely gone" distinction the per-club view already makes.
+const _leagueAttritionCache = new Map();
+function computeLeagueWideAttrition(){
+  const cacheKey = `${_aggVersion}`;
+  if(_leagueAttritionCache.has(cacheKey)) return _leagueAttritionCache.get(cacheKey);
+  const result = computeLeagueWideAttritionUncached();
+  _leagueAttritionCache.set(cacheKey, result);
+  return result;
+}
+function computeLeagueWideAttritionUncached(){
+  const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
+  const rostersByAge = computeClubYearRosters(allGames); // club -> year -> ageGroup -> Set(names)
+
+  // Flatten to league-wide: name -> year -> { ageGroup -> gameCount }, so each player's PRIMARY
+  // age group in a given year can be found (most games that year), regardless of which club(s)
+  // they turned out for.
+  const nameYearAge = {};
+  Object.values(rostersByAge).forEach(byYear=>{
+    Object.entries(byYear).forEach(([yearStr, byAge])=>{
+      const year = Number(yearStr);
+      Object.entries(byAge).forEach(([age, names])=>{
+        names.forEach(name=>{
+          nameYearAge[name] = nameYearAge[name] || {};
+          nameYearAge[name][year] = nameYearAge[name][year] || {};
+          nameYearAge[name][year][age] = (nameYearAge[name][year][age]||0) + 1;
+        });
+      });
+    });
+  });
+
+  const years = [...new Set(allGames.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>a-b);
+  const transitions = [];
+  for(let i=1;i<years.length;i++){
+    const prev = years[i-1], next = years[i];
+    let totalPrev = 0, noLongerCount = 0;
+    const byAge = {};
+    Object.keys(nameYearAge).forEach(name=>{
+      if(!nameYearAge[name][prev]) return;
+      totalPrev++;
+      if(nameYearAge[name][next]) return; // still appears somewhere in the competition next year
+      noLongerCount++;
+      const ages = nameYearAge[name][prev];
+      const primaryAge = Object.entries(ages).sort((a,b)=>b[1]-a[1])[0][0];
+      byAge[primaryAge] = (byAge[primaryAge]||0) + 1;
+    });
+    const byAgeSorted = Object.entries(byAge).sort((a,b)=>b[1]-a[1]).map(([age,count])=>({age,count}));
+    transitions.push({
+      prevYear: prev, nextYear: next, totalPrev, noLongerCount,
+      pct: totalPrev ? Math.round(100*noLongerCount/totalPrev) : null,
+      byAge: byAgeSorted
+    });
+  }
+  return transitions;
 }
 
 function doOpenSquadProgressions(preset, tileGroup){
@@ -17358,18 +17466,32 @@ function renderClubStabilityMulti(wrap, header, modeToggle){
 
 function renderClubChurnView(wrap, header){
   const f = squadProgFilters;
+  const toggleRow = `<div class="controls-row" style="margin-bottom:10px;gap:8px;">
+    <button class="churn-view-toggle" data-view="byClub" style="${f.churnView==='byClub'?'background:var(--gold);color:#1a1a1a;':''}">By club</button>
+    <button class="churn-view-toggle" data-view="trend" style="${f.churnView==='trend'?'background:var(--gold);color:#1a1a1a;':''}">League-wide trend by year</button>
+  </div>`;
+  if(f.churnView==='trend') renderClubChurnTrend(wrap, header, toggleRow);
+  else renderClubChurnByClub(wrap, header, toggleRow);
+}
+function renderClubChurnByClub(wrap, header, toggleRow){
+  const f = squadProgFilters;
   const { teamList } = computeAggregates();
   const ageGroups = [...new Set(teamList.map(t=>t.ageGroup).filter(a=>a && a!=='Other'))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   if(f.churnAge!=='ALL' && f.churnAge!=='JUNIOR' && f.churnAge!=='SENIOR' && !ageGroups.includes(f.churnAge)) f.churnAge = 'ALL';
-  const rows = computeClubChurn(f.churnAge);
+  // Every year any club has churn data for, for the "specific year" dropdown options — sourced
+  // from the same rosters computeClubChurn itself builds from, so the option list can never offer
+  // a year the computation doesn't actually have.
+  const allChurnYears = [...new Set(Object.values(collapseClubYearRosters(computeClubYearRosters(getVisibleGames().filter(g=>g.teamA&&g.teamB)), f.churnAge)).flatMap(byYear=>Object.keys(byYear).map(Number)))].sort((a,b)=>b-a);
+  const rows = computeClubChurn(f.churnAge, f.churnYearMode);
+  const isAverageMode = f.churnYearMode==='all' || f.churnYearMode==='last3' || f.churnYearMode==='last5';
 
   const COLUMNS = [
     { key:'club',          label:'Club',                defaultDir:'asc',  val:r=>r.club.toLowerCase() },
     { key:'retentionPct',  label:'Retention',           defaultDir:'desc', val:r=>r.retentionPct ?? -1 },
-    { key:'prevCount',     label:'Players last season', defaultDir:'desc', val:r=>r.prevCount },
-    { key:'newCount',      label:'New this season',     defaultDir:'desc', val:r=>r.newCount },
-    { key:'movedCount',    label:'Moved clubs',         defaultDir:'desc', val:r=>r.movedCount },
-    { key:'noLongerCount', label:'No longer playing',   defaultDir:'desc', val:r=>r.noLongerCount }
+    { key:'prevCount',     label:isAverageMode?'Avg players/season':'Players last season', defaultDir:'desc', val:r=>r.prevCount },
+    { key:'newCount',      label:isAverageMode?'Avg new/season':'New this season',     defaultDir:'desc', val:r=>r.newCount },
+    { key:'movedCount',    label:isAverageMode?'Avg moved/season':'Moved clubs',         defaultDir:'desc', val:r=>r.movedCount },
+    { key:'noLongerCount', label:isAverageMode?'Avg lapsed/season':'No longer playing',   defaultDir:'desc', val:r=>r.noLongerCount }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.churnSortKey) || COLUMNS[1];
   const dirMul = f.churnSortDir==='asc' ? 1 : -1;
@@ -17385,11 +17507,20 @@ function renderClubChurnView(wrap, header){
   }).join('');
   const pctColor = pct => pct==null?'var(--muted)':pct>=60?'var(--green)':pct>=40?'var(--gold)':'var(--red)';
 
+  const yearModeSelectHtml = `<select id="churnYearModeSel">
+    <option value="latest" ${f.churnYearMode==='latest'?'selected':''}>Most recent season on file</option>
+    ${allChurnYears.map(y=>`<option value="${y}" ${String(f.churnYearMode)===String(y)?'selected':''}>Season ending ${y}</option>`).join('')}
+    <option value="last3" ${f.churnYearMode==='last3'?'selected':''}>Average — last 3 transitions</option>
+    <option value="last5" ${f.churnYearMode==='last5'?'selected':''}>Average — last 5 transitions</option>
+    <option value="all" ${f.churnYearMode==='all'?'selected':''}>Average — all years tracked</option>
+  </select>`;
+
   wrap.innerHTML = `
     ${header}
+    ${toggleRow}
     <p class="hint" style="margin:0 0 12px;">For each club, how much of last season's playing base is still turning out this season — a player aging up or shifting sides still counts as retained. This is the pipeline-health check behind Squad progressions. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(what do "moved" and "left" mean?)</summary> Everyone who left is split into "Moved clubs" (still appears elsewhere in AFL Barwon FNL) and "No longer playing" (doesn't appear anywhere this season). Narrow to one age group / juniors / seniors below — a club can retain juniors well while leaking seniors, or vice versa.</details></p>
     <div class="warn-box" style="margin:0 0 14px;">
-      Compares each club's two most recent seasons on file only (not a multi-year average). Identity is by player NAME across the whole competition — a same-named different person at another club would misread as "Moved clubs" rather than "No longer playing". Joint/merged teams (e.g. "Newcomb / Belmont Power Lions") ARE included — each player on a joint roster is attributed to their actual home club via the same SP-tag mechanism used elsewhere, not skipped or double-counted. When filtered to one age group / juniors / seniors, "Moved clubs" means moved to another club WITHIN that same filter (e.g. under "Juniors only", a junior who moved up into Seniors reads as "No longer playing" for this view, not "Moved clubs").<br><br>
+      ${isAverageMode ? `Averaged across each club's own consecutive year-pairs (a club missing a season just has fewer, shorter transitions counted) — not one specific season, so this shows a TYPICAL pattern rather than what happened in any one year. Switch to a specific season below for the original single-comparison view.` : `Compares each club's two seasons for the transition selected below — not a multi-year average.`} Identity is by player NAME across the whole competition — a same-named different person at another club would misread as "Moved clubs" rather than "No longer playing". Joint/merged teams (e.g. "Newcomb / Belmont Power Lions") ARE included — each player on a joint roster is attributed to their actual home club via the same SP-tag mechanism used elsewhere, not skipped or double-counted. When filtered to one age group / juniors / seniors, "Moved clubs" means moved to another club WITHIN that same filter (e.g. under "Juniors only", a junior who moved up into Seniors reads as "No longer playing" for this view, not "Moved clubs").<br><br>
       <strong>"No longer playing" only means no longer playing in AFL Barwon FNL</strong> (or, when filtered, in that slice of it) — this app only has visibility into this one competition, so that group can include players who've switched to a different league, a different sport, moved away, or genuinely stopped playing altogether. Treat it as "not here anymore", not proof of "gave the sport away".
     </div>
     <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
@@ -17399,11 +17530,12 @@ function renderClubChurnView(wrap, header){
         <option value="SENIOR" ${f.churnAge==='SENIOR'?'selected':''}>Seniors/Reserves only</option>
         ${ageGroups.map(a=>`<option value="${a}" ${f.churnAge===a?'selected':''}>${a} only</option>`).join('')}
       </select>
+      ${yearModeSelectHtml}
     </div>
     ${rows.length===0 ? '<div class="empty">Not enough seasons on file yet for any club under this filter.</div>' : `
     <table><thead><tr>${thHtml}</tr></thead><tbody>
     ${rows.map(r=>`<tr>
-      <td>${r.club} <span style="font-size:11px;color:var(--muted);">(${r.prevYear} → ${r.latestYear})</span></td>
+      <td>${r.club} <span style="font-size:11px;color:var(--muted);">${isAverageMode ? `(${r.transitionCount} transition${r.transitionCount!==1?'s':''}, ${r.prevYear}→${r.latestYear})` : `(${r.prevYear} → ${r.latestYear})`}</span></td>
       <td class="num" style="color:${pctColor(r.retentionPct)};font-weight:600;">${r.retentionPct==null?'—':r.retentionPct+'%'}</td>
       <td class="num">${r.prevCount}</td>
       <td class="num" style="color:var(--green);">${r.newCount}</td>
@@ -17415,8 +17547,11 @@ function renderClubChurnView(wrap, header){
 
   document.getElementById('backToTeamsFromProg').onclick = backToTeamsFromRankings;
   wrap.querySelectorAll('.prog-mode').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.mode = btn.dataset.mode; renderSquadProgressions(); }; });
+  wrap.querySelectorAll('.churn-view-toggle').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.churnView = btn.dataset.view; renderSquadProgressions(); }; });
   const churnAgeSel = document.getElementById('churnAgeSel');
   if(churnAgeSel) churnAgeSel.onchange = e=>{ squadProgFilters.churnAge = e.target.value; renderSquadProgressions(); };
+  const churnYearModeSel = document.getElementById('churnYearModeSel');
+  if(churnYearModeSel) churnYearModeSel.onchange = e=>{ squadProgFilters.churnYearMode = e.target.value; renderSquadProgressions(); };
   wrap.querySelectorAll('.churn-sort-th').forEach(th=>{
     th.onclick = ()=>{
       const key = th.dataset.sortKey;
@@ -17427,9 +17562,70 @@ function renderClubChurnView(wrap, header){
   });
 }
 
-// Same treatment as the player "Every stat" comparison — the winning number sized up and
-// coloured per side, losing number greyed, a tie shown plain. Takes raw values directly (teams
-// don't have a shared "key" like players do for a generic mirrorRow). colorA/colorB default to
+// League-wide "no longer playing" trend, across every consecutive year-pair on file — answers a
+// different question than the by-club view: not "which club retains best", but "which SEASON
+// loses the most players competition-wide, and at what age does that drop-off concentrate". A
+// player who moved clubs is correctly excluded (computeLeagueWideAttrition already only counts
+// someone as gone if they don't appear ANYWHERE in the competition the following year), so this
+// is a genuine "gone from the sport" signal, not clubs shuffling players between each other.
+function renderClubChurnTrend(wrap, header, toggleRow){
+  if(window._churnTrendChartInstance){ window._churnTrendChartInstance.destroy(); window._churnTrendChartInstance = null; }
+  const transitions = computeLeagueWideAttrition();
+  const AGE_ORDER = ['U9','U10','U12','U14','U16','U18','Seniors','Reserves'];
+  const palette = ['#3F8556','#4A7FB5','#C08A3F','#8A5FA8','#C0473F','#4FA3A0','#94A34F','#B5658F'];
+  const AXIS = { ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+  const AXIS_N = { beginAtZero:true, stacked:true, ticks:{ color:'#8FA0A3', precision:0 }, grid:{ color:'#2E3A3E' } };
+
+  wrap.innerHTML = `
+    ${header}
+    ${toggleRow}
+    <p class="hint" style="margin:0 0 12px;">For each season-to-season transition, everyone who appeared anywhere in the competition one year but nowhere the next — league-wide, across every club — broken down by whichever age group was their primary one when last seen. A player who switched clubs is NOT counted here (they're still playing, just for someone else); this is only genuine departures from the whole competition.</p>
+    <div class="warn-box" style="margin:0 0 14px;">
+      <strong>"No longer playing" only means no longer appearing in this competition</strong> — it can include players who moved to a different league or comp entirely (a nearby league, a different sport), not only players who stopped playing football altogether. A U18 who ages into Seniors/Reserves at the SAME club is correctly counted as retained, not lost — this only flags players who genuinely don't turn up anywhere on file the following year.
+    </div>
+    <div style="height:340px;margin-bottom:20px;"><canvas id="churnTrendChart"></canvas></div>
+    <table><thead><tr><th>Season transition</th><th class="num">Total players (prev season)</th><th class="num">No longer playing</th><th class="num">Rate</th><th>Top age group lost</th></tr></thead>
+    <tbody>
+    ${transitions.map((t,i)=>{
+      const topAge = t.byAge[0];
+      const detailId = `churnTrendDetail${i}`;
+      return `<tr>
+        <td>${t.prevYear} → ${t.nextYear}</td>
+        <td class="num">${t.totalPrev}</td>
+        <td class="num" style="color:var(--red);font-weight:600;">${t.noLongerCount}</td>
+        <td class="num">${t.pct==null?'—':t.pct+'%'}</td>
+        <td>${topAge ? `${topAge.age} (${topAge.count})` : '—'}</td>
+      </tr>
+      <tr><td colspan="5" style="padding-top:0;padding-bottom:10px;">
+        <details id="${detailId}"><summary style="cursor:pointer;color:var(--gold);font-size:12px;">Full breakdown by age group</summary>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">${t.byAge.map(a=>`${a.age}: ${a.count}`).join(' · ')}</div>
+        </details>
+      </td></tr>`;
+    }).join('')}
+    </tbody></table>
+  `;
+
+  document.getElementById('backToTeamsFromProg').onclick = backToTeamsFromRankings;
+  wrap.querySelectorAll('.churn-view-toggle').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.churnView = btn.dataset.view; renderSquadProgressions(); }; });
+
+  const canvas = document.getElementById('churnTrendChart');
+  if(canvas && transitions.length){
+    const labels = transitions.map(t=>`${t.prevYear}→${t.nextYear}`);
+    const datasets = AGE_ORDER.map((age,i)=>({
+      label: age, backgroundColor: palette[i%palette.length],
+      data: transitions.map(t=>{ const found = t.byAge.find(a=>a.age===age); return found ? found.count : 0; })
+    }));
+    window._churnTrendChartInstance = new Chart(canvas.getContext('2d'), {
+      type:'bar',
+      data:{ labels, datasets },
+      options:{ responsive:true, maintainAspectRatio:false,
+        scales:{ x:{ stacked:true, ...AXIS }, y:AXIS_N },
+        plugins:{ legend:{ labels:{ color:'#EDF1F0' } },
+          title:{ display:true, text:'"No longer playing" by season and age group', color:'#EDF1F0' } } }
+    });
+  }
+}
+
 // the app's original green/blue when not supplied, so Compare Players (which shares this same
 // visual language but has no club colours) is unaffected.
 function teamMirrorRow(label, tip, a, b, higherBetter=true, colorA, colorB){
