@@ -24,6 +24,7 @@
     --blue:#4B7BA8;
     --blue-soft:#233240;
     --purple:#8B6DB8;
+    --teal:#3AA6A6;
   }
   *{box-sizing:border-box;}
   body{
@@ -55,6 +56,7 @@
   nav.tabs button.active{ color:var(--text); border-bottom-color:var(--text); }
   nav.tabs button[data-tab="players"].active{ border-bottom-color:var(--green); }
   nav.tabs button[data-tab="teams"].active{ border-bottom-color:var(--blue); }
+  nav.tabs button[data-tab="clubs"].active{ border-bottom-color:var(--teal); }
   nav.tabs button[data-tab="games"].active{ border-bottom-color:var(--gold); }
   nav.tabs button[data-tab="tools"].active{ border-bottom-color:var(--purple); }
   nav.tabs button:hover{ color:var(--text); }
@@ -92,6 +94,8 @@
   .tool-tile.tool-tile-green:hover{ border-color:var(--green); }
   .tool-tile.tool-tile-purple .tool-tile-title{ color:var(--purple); }
   .tool-tile.tool-tile-purple:hover{ border-color:var(--purple); }
+  .tool-tile.tool-tile-teal .tool-tile-title{ color:var(--teal); }
+  .tool-tile.tool-tile-teal:hover{ border-color:var(--teal); }
   /* Data & admin tools (Merge players, Suggest divisions, Manage clubs) are cleanup/config
      utilities, not things to reach for often — deliberately plain so they don't compete for
      attention with the tools people actually use week to week. */
@@ -259,6 +263,7 @@
   .cmp-group{ text-align:center; font-family:'Oswald',sans-serif; font-size:14px; font-weight:700;
               text-transform:uppercase; letter-spacing:0.08em; color:var(--gold);
               padding:22px 0 9px; border-bottom:1px solid var(--line); margin-bottom:2px; }
+  #compareClubsWrap .cmp-group{ color:var(--teal); }
   .cmp-row{ display:grid; grid-template-columns:1fr 150px 1fr; align-items:center;
             padding:9px 0; border-bottom:1px solid var(--line); gap:10px; }
   .cmp-side{ display:flex; align-items:center; }
@@ -363,6 +368,7 @@
   .home-card-title{ font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:26px; letter-spacing:0.03em; margin-bottom:10px; }
   #homeCardPlayers .home-card-title{ color:var(--green); }
   #homeCardTeams .home-card-title{ color:var(--blue); }
+  #homeCardClubs .home-card-title{ color:var(--teal); }
   #homeCardGames .home-card-title{ color:var(--gold); }
   #homeCardTools .home-card-title{ color:var(--purple); }
   /* Hover outline matches each card's own title colour, not a single fixed colour for all of
@@ -370,6 +376,7 @@
      pages. #gamesCardCompleted/#gamesCardUpcoming reuse .home-card too, so covered here as well. */
   #homeCardPlayers:hover, #gamesCardCompleted:hover{ border-color:var(--green); }
   #homeCardTeams:hover, #gamesCardUpcoming:hover{ border-color:var(--blue); }
+  #homeCardClubs:hover{ border-color:var(--teal); }
   #homeCardGames:hover{ border-color:var(--gold); }
   #homeCardTools:hover{ border-color:var(--purple); }
   #gamesCardCompleted.active-choice{ border-color:var(--green); }
@@ -437,6 +444,7 @@
   <button data-tab="home" class="active">Home</button>
   <button data-tab="players">Players</button>
   <button data-tab="teams">Teams</button>
+  <button data-tab="clubs">Clubs</button>
   <button data-tab="games">Games</button>
   <button data-tab="tools">Tools</button>
 </nav>
@@ -473,6 +481,7 @@
     <div id="homeSnapshot" class="home-snapshot">
       <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">15,543</div><div class="label">Players with stats tracked</div></div>
       <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">1,897</div><div class="label">Teams</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--teal);"><div class="value">42</div><div class="label">Clubs</div></div>
       <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">15,387</div><div class="label">Games tracked (all-time)</div></div>
       <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">110,963</div><div class="label">Goals scored</div></div>
     </div>
@@ -485,6 +494,10 @@
       <div class="home-card" id="homeCardTeams">
         <div class="home-card-title">Teams</div>
         <div class="home-card-desc">Team records, form, and quarter-by-quarter trends. Check the team rankings to see how every team stacks up regardless of division, or compare two teams' squads head-to-head.</div>
+      </div>
+      <div class="home-card" id="homeCardClubs">
+        <div class="home-card-title">Clubs</div>
+        <div class="home-card-desc">How each club develops its own juniors, their pathway into Seniors/Reserves, year-on-year retention, and a head-to-head compare between any two clubs.</div>
       </div>
       <div class="home-card" id="homeCardGames">
         <div class="home-card-title">Games</div>
@@ -611,6 +624,17 @@
     </div>
   </section>
 
+  <!-- CLUBS -->
+  <section class="panel" id="panel-clubs">
+    <p class="hint" style="text-align:center;margin:0 0 16px;">Every club-level view in one place — how a club develops its own juniors, its pathway into Seniors/Reserves, and how well it retains players year to year.</p>
+    <div class="tools-grid" style="max-width:700px;margin:0 auto;">
+      <div class="tool-tile tool-tile-teal" id="toolTileClubsHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileClubsJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileClubsPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileCompareClubs"><div class="tool-tile-title">Compare clubs</div><div class="tool-tile-desc">Head-to-head: players, home-grown %, junior pathway, retention and Grand Final record.</div></div>
+    </div>
+  </section>
+
   <!-- TOOLS -->
   <section class="panel" id="panel-tools">
     <p class="hint" style="text-align:center;margin:0 0 18px;">Every deeper analysis tool in one place — the same tools also live as shortcuts on the Players and Teams pages, so use whichever is quicker for you.</p>
@@ -628,14 +652,18 @@
       <div class="tool-tile tool-tile-blue" id="toolTileFinalsChances"><div class="tool-tile-title">Finals chances</div><div class="tool-tile-desc">Simulated % chance to make finals, plus what's still up for grabs on the cusp.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileCompareTeams"><div class="tool-tile-title">Compare teams</div><div class="tool-tile-desc">Head-to-head record and squad overlap for two teams.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileSquadProgressions"><div class="tool-tile-title">Squad progressions</div><div class="tool-tile-desc">Compare every squad in the league at once — trends, most improved, leaderboards.</div></div>
-      <div class="tool-tile tool-tile-blue" id="toolTileClubPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileStabilityImprovement"><div class="tool-tile-title">Stability vs improvement</div><div class="tool-tile-desc">Do squads that keep their roster together actually improve more?</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileCohortTrajectory"><div class="tool-tile-title">Cohort trajectory</div><div class="tool-tile-desc">One team's own story — the real split-and-reunite cycle as players age up, not a league comparison.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileStandoutStats"><div class="tool-tile-title">Standout stats</div><div class="tool-tile-desc">Every division's leader in goals, defence, percentage, win rate and more.</div></div>
-      <div class="tool-tile tool-tile-blue" id="toolTileHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileAbsenceLeaderboard"><div class="tool-tile-title">Missing games</div><div class="tool-tile-desc">Which teams have the most roster absence this season.</div></div>
-      <div class="tool-tile tool-tile-blue" id="toolTileJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
       <div class="tool-tile tool-tile-blue" id="toolTileSuggestNextSeason"><div class="tool-tile-title">Suggest next season</div><div class="tool-tile-desc">Projected club strength one grade up, for early division planning.</div></div>
+    </div>
+    <div class="tools-section-label">Clubs</div>
+    <div class="tools-grid">
+      <div class="tool-tile tool-tile-teal" id="toolTileToolsHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileToolsJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileToolsPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileToolsCompareClubs"><div class="tool-tile-title">Compare clubs</div><div class="tool-tile-desc">Head-to-head: players, home-grown %, junior pathway, retention and Grand Final record.</div></div>
     </div>
     <div class="tools-section-label">Games &amp; fixtures</div>
     <div class="tools-grid">
@@ -737,6 +765,11 @@
   <!-- COMPARE TEAMS -->
   <section class="panel" id="panel-compare-teams">
     <div id="compareTeamsWrap"></div>
+  </section>
+
+  <!-- COMPARE CLUBS -->
+  <section class="panel" id="panel-compare-clubs">
+    <div id="compareClubsWrap"></div>
   </section>
 
   <!-- GAMES -->
@@ -8943,11 +8976,13 @@ function renderPrivacyBanner(){
 
 // Home snapshot tiles — the numbers are baked into HTML as static text (correct at build time,
 // zero data dependency) and the animation counts up purely from the constant below. No
-// computeAggregates(), no load wait. Update the 4 numbers in HOME_SNAPSHOT_BASELINE AND the
+// computeAggregates(), no load wait. Update the numbers in HOME_SNAPSHOT_BASELINE AND the
 // static HTML tiles (search for id="homeSnapshot") whenever a meaningful batch of new data is
 // scraped — ask Claude to run the harness, or just read the numbers off the live page.
-// Recomputed 2026-08-25 from the real dataset via the app's own computeAggregates().
-const HOME_SNAPSHOT_BASELINE = { games: 15387, teams: 1897, players: 15543, goals: 110963 };
+// Recomputed 2026-08-25 from the real dataset via the app's own computeAggregates(); clubs count
+// (via computeHomeGrown — clubs with real player data, not the raw knownClubs registry) added
+// 2026-09-23 without refreshing the other four, so it reflects the same underlying dataset.
+const HOME_SNAPSHOT_BASELINE = { games: 15387, teams: 1897, players: 15543, goals: 110963, clubs: 42 };
 
 function animateCountUp(el, target, duration=800){
   if(!el) return;
@@ -8974,7 +9009,9 @@ function startHomeSnapshotBaseline(){
   // this executes the script has parsed and we can give the user the count-up flourish.
   document.querySelectorAll('#homeSnapshot .home-snapshot-item .value').forEach(el => el.textContent = '0');
   const els = document.querySelectorAll('#homeSnapshot .home-snapshot-item .value');
-  const targets = [HOME_SNAPSHOT_BASELINE.players, HOME_SNAPSHOT_BASELINE.teams, HOME_SNAPSHOT_BASELINE.games, HOME_SNAPSHOT_BASELINE.goals];
+  // Positional — MUST match the static HTML tiles' actual DOM order exactly (players, teams,
+  // clubs, games, goals), not just include the right numbers somewhere in the array.
+  const targets = [HOME_SNAPSHOT_BASELINE.players, HOME_SNAPSHOT_BASELINE.teams, HOME_SNAPSHOT_BASELINE.clubs, HOME_SNAPSHOT_BASELINE.games, HOME_SNAPSHOT_BASELINE.goals];
   els.forEach((el,i)=> animateCountUp(el, targets[i] ?? 0));
 }
 
@@ -14409,6 +14446,204 @@ function openCompareTeams(presetKey){
 }
 function backToTeamsFromCompare(){ navBack(); }
 
+let compareClubsSelected = [null, null];
+let compareClubsSearch = ['', ''];
+function doOpenCompareClubs(presetClub){
+  compareClubsSelected = [presetClub || null, null];
+  compareClubsSearch = ['', ''];
+  showPanel('compare-clubs');
+  renderCompareClubs();
+}
+function openCompareClubs(presetClub){
+  doOpenCompareClubs(presetClub);
+  navPush('compare-clubs', 'Compare Clubs', 'clubs/compare-clubs', ()=>doOpenCompareClubs(presetClub));
+}
+function backToClubsFromCompare(){ navBack(); }
+
+let compareClubsView = 'h2h'; // 'h2h' or 'all'
+let compareClubsAllFilters = { metric:'players', year:'ALL', ageScope:'ALL', league:'ALL' };
+
+function renderCompareClubs(){
+  const wrap = document.getElementById('compareClubsWrap');
+  const toggleRow = `<div class="controls-row" style="margin-bottom:14px;gap:8px;">
+    <button class="churn-view-toggle" data-view="h2h" style="${compareClubsView==='h2h'?'background:var(--gold);color:#1a1a1a;':''}">Head-to-head</button>
+    <button class="churn-view-toggle" data-view="all" style="${compareClubsView==='all'?'background:var(--gold);color:#1a1a1a;':''}">All clubs</button>
+  </div>`;
+  if(compareClubsView==='all') renderCompareClubsAll(wrap, toggleRow);
+  else renderCompareClubsHeadToHead(wrap, toggleRow);
+}
+
+function renderCompareClubsHeadToHead(wrap, toggleRow){
+  const sortedClubs = [...knownClubs].sort((a,b)=>a.localeCompare(b));
+  const findMatches = (query, excludeClub) => sortedClubs
+    .filter(c=>c!==excludeClub)
+    .filter(c=> !query || c.toLowerCase().includes(query.toLowerCase()))
+    .slice(0,8)
+    .map(c=>({ value:c, label:c }));
+
+  const clubA = compareClubsSelected[0], clubB = compareClubsSelected[1];
+  const { colorA: pickerColorA, colorB: pickerColorB } = pickCompareTeamColors(clubA, clubB);
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToClubsFromCompare">&larr; Back to clubs</span>
+    <h2 style="font-size:20px;color:var(--teal);">Compare clubs</h2>
+    ${toggleRow}
+    <p class="hint">Search and pick 2 clubs to compare — every number here is career-wide, not scoped to any particular year.</p>
+    <div class="picker-row">
+      ${pickerSlotHtml(0, clubA, compareClubsSearch[0], findMatches(compareClubsSearch[0], clubB), c=>c, null, clubA ? pickerColorA : null)}
+      <div class="picker-vs">vs</div>
+      ${pickerSlotHtml(1, clubB, compareClubsSearch[1], findMatches(compareClubsSearch[1], clubA), c=>c, null, clubB ? pickerColorB : null)}
+    </div>
+    <div id="compareClubsResult"></div>
+  `;
+  document.getElementById('backToClubsFromCompare').onclick = backToClubsFromCompare;
+  wrap.querySelectorAll('.churn-view-toggle').forEach(btn=>{
+    btn.onclick = ()=>{ compareClubsView = btn.dataset.view; renderCompareClubs(); };
+  });
+
+  wrap.querySelectorAll('.picker-search').forEach(input=>{
+    input.oninput = ()=>{
+      const slot = +input.dataset.slot;
+      const cursorPos = input.selectionStart;
+      compareClubsSearch[slot] = input.value;
+      renderCompareClubs();
+      const newInput = document.querySelector(`#compareClubsWrap .picker-search[data-slot="${slot}"]`);
+      if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+    };
+  });
+  wrap.querySelectorAll('.picker-result').forEach(row=>{
+    row.onclick = ()=>{
+      const slot = +row.dataset.slot;
+      compareClubsSelected[slot] = row.dataset.value;
+      compareClubsSearch[slot] = '';
+      renderCompareClubs();
+    };
+  });
+  wrap.querySelectorAll('[data-action="clear"]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const slot = +btn.dataset.slot;
+      compareClubsSelected[slot] = null;
+      renderCompareClubs();
+    };
+  });
+
+  if(clubA && clubB) renderClubComparisonResult(clubA, clubB, pickerColorA, pickerColorB);
+}
+
+// "All clubs" view — every club at once for one chosen metric, as a bar chart, with a metric
+// dropdown covering every stat Compare Clubs already tracks head-to-head (so switching views
+// never introduces a number the head-to-head side doesn't already stand behind) plus year/age-
+// scope/league filters. Only "Players" is genuinely re-filterable by year/age-scope — every other
+// metric keeps the same career-wide definition Home Grown/Junior Pathway/Club Retention use
+// elsewhere, since redefining what "retention" or "home-grown %" means per-metric here would let
+// this view quietly disagree with those pages. The league filter narrows which clubs are SHOWN
+// (by their current senior/reserves league) for every metric, including the non-filterable ones.
+if(window._compareClubsChartInstance === undefined) window._compareClubsChartInstance = null;
+function renderCompareClubsAll(wrap, toggleRow){
+  if(window._compareClubsChartInstance){ window._compareClubsChartInstance.destroy(); window._compareClubsChartInstance = null; }
+  const f = compareClubsAllFilters;
+  const metric = CLUB_COMPARE_METRICS.find(m=>m.key===f.metric) || CLUB_COMPARE_METRICS[0];
+  const { teamList } = computeAggregates();
+  const allYears = [...new Set(teamList.map(t=>t.year).filter(y=>y!=null))].sort((a,b)=>b-a);
+  const data = computeAllClubsCompareData(f);
+
+  const fmtVal = v => metric.isPct ? Math.round(v*100)+'%' : metric.isWholePct ? v+'%' : (typeof v==='number' && !Number.isInteger(v) ? v.toFixed(1) : v);
+
+  wrap.innerHTML = `
+    <span class="back-link" id="backToClubsFromCompare">&larr; Back to clubs</span>
+    <h2 style="font-size:20px;color:var(--teal);">Compare clubs</h2>
+    ${toggleRow}
+    <p class="hint">Every club at once, for one metric — pick what to show below.</p>
+    <div class="controls-row" style="margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+      <select id="ccAllMetricSel">${CLUB_COMPARE_METRICS.map(m=>`<option value="${m.key}" ${f.metric===m.key?'selected':''}>${m.label}</option>`).join('')}</select>
+      <select id="ccAllYearSel" ${metric.filterable?'':'disabled title="Only Players can be scoped to a specific year — every other metric here is always career-wide, same as Home Grown/Junior Pathway/Club Retention."'}>
+        <option value="ALL" ${f.year==='ALL'?'selected':''}>All years</option>
+        ${allYears.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y} only</option>`).join('')}
+      </select>
+      <select id="ccAllAgeSel" ${metric.filterable?'':'disabled title="Only Players can be scoped by age group — every other metric here already has its own fixed definition."'}>
+        <option value="ALL" ${f.ageScope==='ALL'?'selected':''}>All age groups</option>
+        <option value="JUNIOR" ${f.ageScope==='JUNIOR'?'selected':''}>Juniors only</option>
+        <option value="SENIOR" ${f.ageScope==='SENIOR'?'selected':''}>Seniors/Reserves only</option>
+      </select>
+      <select id="ccAllLeagueSel">
+        <option value="ALL" ${f.league==='ALL'?'selected':''}>All leagues</option>
+        ${Object.entries(LEAGUE_FULL_NAMES).map(([code,name])=>`<option value="${code}" ${f.league===code?'selected':''}>${name} only</option>`).join('')}
+      </select>
+    </div>
+    ${!metric.filterable ? `<p class="hint" style="margin:0 0 12px;">${metric.label} is always career-wide — the year/age-group filters above only apply to Players.</p>` : ''}
+    <div style="height:${Math.max(340, data.rows.length*22)}px;margin-bottom:16px;"><canvas id="ccAllChart"></canvas></div>
+    <table><thead><tr><th>#</th><th>Club</th><th class="num">${metric.label}</th></tr></thead>
+    <tbody>${data.rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.club}</td><td class="num">${fmtVal(r.value)}</td></tr>`).join('')}</tbody></table>
+  `;
+  document.getElementById('backToClubsFromCompare').onclick = backToClubsFromCompare;
+  wrap.querySelectorAll('.churn-view-toggle').forEach(btn=>{
+    btn.onclick = ()=>{ compareClubsView = btn.dataset.view; renderCompareClubs(); };
+  });
+  document.getElementById('ccAllMetricSel').onchange = e=>{ compareClubsAllFilters.metric = e.target.value; renderCompareClubs(); };
+  document.getElementById('ccAllYearSel').onchange = e=>{ compareClubsAllFilters.year = e.target.value; renderCompareClubs(); };
+  document.getElementById('ccAllAgeSel').onchange = e=>{ compareClubsAllFilters.ageScope = e.target.value; renderCompareClubs(); };
+  document.getElementById('ccAllLeagueSel').onchange = e=>{ compareClubsAllFilters.league = e.target.value; renderCompareClubs(); };
+
+  const canvas = document.getElementById('ccAllChart');
+  if(canvas && data.rows.length){
+    const AXIS = { ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+    const AXIS_N = { beginAtZero:true, ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+    window._compareClubsChartInstance = new Chart(canvas.getContext('2d'), {
+      type:'bar',
+      data:{ labels: data.rows.map(r=>r.club), datasets:[{ label: metric.label, data: data.rows.map(r=> metric.isPct ? +(r.value*100).toFixed(1) : r.value), backgroundColor:'#C9A227' }] },
+      options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        scales:{ x:AXIS_N, y:AXIS },
+        plugins:{ legend:{ display:false }, title:{ display:true, text: metric.label + (data.rows.length ? ` — ${data.rows.length} clubs` : ''), color:'#EDF1F0' } } }
+    });
+  }
+}
+
+function pctOrDash(v){ return v==null ? '—' : Math.round(v*100)+'%'; }
+function renderClubComparisonResult(clubA, clubB, colorA, colorB){
+  const el = document.getElementById('compareClubsResult');
+  const sA = computeClubCompareStats(clubA);
+  const sB = computeClubCompareStats(clubB);
+
+  const ageRows = (()=>{
+    const ages = [...new Set([...sA.playersByAgeGroup, ...sB.playersByAgeGroup].map(r=>r.age))]
+      .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+    return ages.map(age=>{
+      const cA = sA.playersByAgeGroup.find(r=>r.age===age);
+      const cB = sB.playersByAgeGroup.find(r=>r.age===age);
+      return teamMirrorRow(age, `Career-wide distinct players who've appeared for this club at ${age}.`, cA?cA.count:0, cB?cB.count:0, true, colorA, colorB);
+    }).join('');
+  })();
+
+  const divisionLine = s => {
+    const entries = Object.entries(s.currentDivisionsByAge);
+    if(!entries.length) return '—';
+    return entries.sort((a,b)=>gradeDisplayRank(a[0])-gradeDisplayRank(b[0])).map(([age,div])=>`${age}: ${div}`).join(', ');
+  };
+
+  el.innerHTML = `
+    <div class="cmp-group">Squad size &amp; development</div>
+      ${teamMirrorRow('Total players (career-wide)', 'Every distinct player who has ever appeared for this club, at any grade.', sA.totalPlayers ?? '—', sB.totalPlayers ?? '—', true, colorA, colorB)}
+      ${teamMirrorRow('Home-grown %', "Share of this club's players who have ONLY ever played for this one club.", pctOrDash(sA.homeGrownPct), pctOrDash(sB.homeGrownPct), true, colorA, colorB)}
+      ${teamMirrorRow('Avg junior debuts/season (own club)', 'Average per season: players whose very first-ever junior game anywhere was at this club.', sA.ownClubJuniorDebutsAvg!=null?sA.ownClubJuniorDebutsAvg.toFixed(1):'—', sB.ownClubJuniorDebutsAvg!=null?sB.ownClubJuniorDebutsAvg.toFixed(1):'—', true, colorA, colorB)}
+      ${teamMirrorRow('Avg junior debuts/season (any club)', 'Average per season: anyone appearing for this club for the first time at a junior grade, including recruits from elsewhere.', sA.allClubJuniorDebutsAvg!=null?sA.allClubJuniorDebutsAvg.toFixed(1):'—', sB.allClubJuniorDebutsAvg!=null?sB.allClubJuniorDebutsAvg.toFixed(1):'—', true, colorA, colorB)}
+      ${teamMirrorRow('Avg Seniors/Reserves debuts/season (own-club juniors)', "Average per season: players getting their first-ever Seniors/Reserves game at this club, whose known junior history includes THIS club — genuinely developed start to finish.", sA.ownClubSeniorDebutsAvg!=null?sA.ownClubSeniorDebutsAvg.toFixed(1):'—', sB.ownClubSeniorDebutsAvg!=null?sB.ownClubSeniorDebutsAvg.toFixed(1):'—', true, colorA, colorB)}
+      ${teamMirrorRow('Avg Seniors/Reserves debuts/season (any-club juniors)', 'Average per season: players getting their first-ever Seniors/Reserves game at this club with ANY known junior history, whether at this club or elsewhere.', sA.anyClubSeniorDebutsAvg!=null?sA.anyClubSeniorDebutsAvg.toFixed(1):'—', sB.anyClubSeniorDebutsAvg!=null?sB.anyClubSeniorDebutsAvg.toFixed(1):'—', true, colorA, colorB)}
+      ${teamMirrorRow('Junior pathway % (any club)', "Of this club's current Seniors/Reserves players, how many have known junior history on file — anywhere, not necessarily at this club.", pctOrDash(sA.juniorPathwayPct), pctOrDash(sB.juniorPathwayPct), true, colorA, colorB)}
+      ${teamMirrorRow('Junior pathway % (own club)', "Narrows that to junior history AT THIS CLUB specifically — genuinely developed start to finish, not just known to have played juniors somewhere.", pctOrDash(sA.juniorPathwayOwnClubPct), pctOrDash(sB.juniorPathwayOwnClubPct), true, colorA, colorB)}
+      ${teamMirrorRow("Junior pathway % (recruited, another club's juniors)", "Known junior history exists, but only at a DIFFERENT club — i.e. recruited in after their junior years elsewhere, not grown from this club's own junior program.", pctOrDash(sA.juniorPathwayOtherClubPct), pctOrDash(sB.juniorPathwayOtherClubPct), true, colorA, colorB)}
+    <div class="cmp-group">Retention</div>
+      ${teamMirrorRow('Retention — most recent season', "How much of last season's playing base is still turning out this season.", sA.retentionLatestPct!=null?sA.retentionLatestPct+'%':'—', sB.retentionLatestPct!=null?sB.retentionLatestPct+'%':'—', true, colorA, colorB)}
+      ${teamMirrorRow('Retention — all-time average', 'Averaged across every consecutive year-pair this club has on file.', sA.retentionAllTimePct!=null?sA.retentionAllTimePct+'%':'—', sB.retentionAllTimePct!=null?sB.retentionAllTimePct+'%':'—', true, colorA, colorB)}
+    <div class="cmp-group">Grand Finals</div>
+      ${teamMirrorRow('Grand Final appearances', 'Every graded Grand Final this club has played in, across every age group and year.', sA.gfAppearances, sB.gfAppearances, true, colorA, colorB)}
+      ${teamMirrorRow('Grand Final wins', 'Premierships, across every age group and year.', sA.gfWins, sB.gfWins, true, colorA, colorB)}
+    <div class="cmp-group">Players by age group (career-wide)</div>
+      ${ageRows}
+    <div class="cmp-group">Current divisions (${sA.latestYear||'—'} / ${sB.latestYear||'—'})</div>
+      <div class="cmp-row"><div class="cmp-side left"><span class="cmp-num" style="font-size:13px;text-align:left;">${divisionLine(sA)}</span></div><div class="cmp-label"></div><div class="cmp-side"><span class="cmp-num" style="font-size:13px;text-align:left;">${divisionLine(sB)}</span></div></div>
+  `;
+}
+
 function renderCompareTeams(){
   const { teamList } = computeAggregates();
   const wrap = document.getElementById('compareTeamsWrap');
@@ -16255,6 +16490,191 @@ function computeLeagueWideAttritionUncached(){
   return transitions;
 }
 
+// League-wide, ALL-clubs version of the same numbers Compare Clubs already shows head-to-head —
+// backs the "All clubs" chart view. Most metrics reuse computeClubCompareStats' own career-wide
+// definitions directly (so a home-grown % or retention rate here can never disagree with what
+// Home Grown/Junior Pathway/Club Retention show elsewhere for that same club) — "Players" is the
+// one exception, genuinely re-filterable by year/age-scope/league, since "how many players did
+// this club have" is meaningfully different for "2026 juniors only" vs "career-wide, everyone".
+const CLUB_COMPARE_METRICS = [
+  { key:'players', label:'Players', filterable:true },
+  { key:'homeGrownPct', label:'Home-grown %', isPct:true },
+  { key:'ownClubJuniorDebutsAvg', label:'Avg junior debuts/season (own club)' },
+  { key:'allClubJuniorDebutsAvg', label:'Avg junior debuts/season (any club)' },
+  { key:'ownClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (own-club juniors)' },
+  { key:'anyClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (any-club juniors)' },
+  { key:'juniorPathwayPct', label:'Junior pathway % (any club)', isPct:true },
+  { key:'juniorPathwayOwnClubPct', label:'Junior pathway % (own club)', isPct:true },
+  { key:'juniorPathwayOtherClubPct', label:"Junior pathway % (recruited, another club's juniors)", isPct:true },
+  { key:'retentionLatestPct', label:'Retention — most recent season', isWholePct:true },
+  { key:'retentionAllTimePct', label:'Retention — all-time average', isWholePct:true },
+  { key:'gfAppearances', label:'Grand Final appearances' },
+  { key:'gfWins', label:'Grand Final wins' }
+];
+const _clubPlayerCountsCache = new Map();
+function computeClubPlayerCounts(year, ageScope){
+  const cacheKey = `${year}|${ageScope}|${_aggVersion}`;
+  if(_clubPlayerCountsCache.has(cacheKey)) return _clubPlayerCountsCache.get(cacheKey);
+  const { playerList } = computeAggregates();
+  const byClub = {}; // club -> Set of player keys
+  playerList.forEach(p=>{
+    p.timeline.forEach(t=>{
+      if(year!=='ALL'){
+        const y = t.date ? new Date(t.date).getFullYear() : null;
+        if(String(y)!==String(year)) return;
+      }
+      const grade = getAgeGroupLabel(t.team);
+      if(ageScope==='JUNIOR' && !isJuniorGrade(grade)) return;
+      if(ageScope==='SENIOR' && grade!=='Seniors' && grade!=='Reserves') return;
+      const club = homeGrownClubKey(t.team);
+      if(!club) return;
+      (byClub[club] = byClub[club] || new Set()).add(p.key);
+    });
+  });
+  const result = {};
+  Object.entries(byClub).forEach(([club,set])=>{ result[club] = set.size; });
+  _clubPlayerCountsCache.set(cacheKey, result);
+  return result;
+}
+// Which league a club's CURRENT (most recent year on file) senior/reserves side plays in, for the
+// league filter — a club with no senior/reserves presence at all (junior-only, e.g. Bellbrae
+// Dolphins) has no league and is only ever shown under "All leagues".
+const _clubLeagueCache = new Map();
+function computeClubCurrentLeague(clubName){
+  const cacheKey = `${clubName}|${_aggVersion}`;
+  if(_clubLeagueCache.has(cacheKey)) return _clubLeagueCache.get(cacheKey);
+  const { teamList } = computeAggregates();
+  const clubTeams = teamList.filter(t=> homeGrownClubKey(t.name)===clubName && (t.ageGroup==='Seniors'||t.ageGroup==='Reserves'));
+  let league = null;
+  if(clubTeams.length){
+    const latestYear = Math.max(...clubTeams.map(t=>t.year||0));
+    const latestTeam = clubTeams.find(t=>t.year===latestYear);
+    if(latestTeam) league = getTeamLeagueMap(latestYear)[latestTeam.name] || null;
+  }
+  _clubLeagueCache.set(cacheKey, league);
+  return league;
+}
+function computeAllClubsCompareData(filters){
+  const { metric: metricKey, year, ageScope, league } = filters;
+  const metric = CLUB_COMPARE_METRICS.find(m=>m.key===metricKey) || CLUB_COMPARE_METRICS[0];
+  const playerCounts = metric.filterable ? computeClubPlayerCounts(year, ageScope) : null;
+  const rows = knownClubs
+    .filter(club=> league==='ALL' || computeClubCurrentLeague(club)===league)
+    .map(club=>{
+      let value;
+      if(metric.filterable){
+        value = playerCounts[club] ?? 0;
+      } else {
+        const s = computeClubCompareStats(club);
+        value = s[metricKey];
+      }
+      return { club, value };
+    })
+    .filter(r=> r.value!=null && (metric.filterable ? r.value>0 : true));
+  rows.sort((a,b)=> b.value-a.value);
+  return { metric, rows };
+}
+
+
+// Everything Compare Clubs needs about ONE club, career-wide — reuses the same underlying
+// computations as Home Grown, Junior Pathway and Club Retention rather than recomputing anything,
+// so this tool can never disagree with those pages about what a club's numbers actually are.
+// homeGrownFilters is global UI state (unlike computeClubChurn/computeJuniorPathwayByClub, which
+// take filters as plain parameters) — saved and restored around the one call that needs it, so
+// this never disturbs whatever the Home Grown page's own filters happen to be set to elsewhere.
+const _clubCompareStatsCache = new Map();
+function computeClubCompareStats(clubName){
+  const cacheKey = `${clubName}|${_aggVersion}`;
+  if(_clubCompareStatsCache.has(cacheKey)) return _clubCompareStatsCache.get(cacheKey);
+
+  const { teamList, playerList } = computeAggregates();
+
+  const savedHomeGrownFilters = homeGrownFilters;
+  homeGrownFilters = { mode:'clubs', minPlayers:1, minRoster:1, search:'', year:'ALL', ageGroup:'ALL', division:'ALL', club:'ALL' };
+  const hg = computeHomeGrown();
+  homeGrownFilters = savedHomeGrownFilters;
+  const hgRow = hg.clubs.find(c=>c.club===clubName);
+
+  // "any" = of this club's current Seniors/Reserves, how many have SOME known junior history,
+  // anywhere in the competition (the original, broader question). "same" = narrows that to junior
+  // history AT THIS SAME CLUB specifically — this club developed them start to finish. The
+  // difference between the two (same total, since both share the identical Seniors/Reserves
+  // roster) is exactly "known junior history, but only at ANOTHER club" — i.e. recruited in after
+  // their junior years, not grown from this club's own junior program.
+  const jp = computeJuniorPathwayByClub(playerList, { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL', juniorYear:null });
+  const jpRow = jp.find(r=>r.club===clubName);
+  const jpSame = computeJuniorPathwayByClub(playerList, { gradeScope:'both', juniorScope:'same', currentYear:null, league:'ALL', juniorYear:null });
+  const jpSameRow = jpSame.find(r=>r.club===clubName);
+
+  const churnLatest = computeClubChurn('ALL', 'latest').find(r=>r.club===clubName);
+  const churnAll = computeClubChurn('ALL', 'all').find(r=>r.club===clubName);
+
+  // Player count by age group, and current (most recent year on file) divisions per age group —
+  // both straightforward direct passes over teamList for this one club, not worth a shared cache.
+  const byAgeGroupPlayers = {}; // ageGroup -> Set of player keys, career-wide
+  const clubTeams = teamList.filter(t=> homeGrownClubKey(t.name)===clubName);
+  const latestYearForClub = clubTeams.length ? Math.max(...clubTeams.map(t=>t.year||0)) : null;
+  const currentDivisionsByAge = {}; // ageGroup -> division/league label, for latestYearForClub only
+  clubTeams.forEach(t=>{
+    const grade = t.ageGroup;
+    if(t.year === latestYearForClub){
+      const isSenior = (grade==='Seniors' || grade==='Reserves');
+      const label = isSenior ? getTeamLeagueMap(t.year)[t.name] : getTeamDivisionMap(t.year)[t.name];
+      if(label!=null) currentDivisionsByAge[grade] = isSenior ? (LEAGUE_FULL_NAMES[label]||label) : `Division ${label}`;
+    }
+  });
+  playerList.forEach(p=>{
+    p.timeline.forEach(t=>{
+      if(homeGrownClubKey(t.team)!==clubName) return;
+      const grade = getAgeGroupLabel(t.team);
+      (byAgeGroupPlayers[grade] = byAgeGroupPlayers[grade] || new Set()).add(p.key);
+    });
+  });
+  const playersByAgeGroup = Object.entries(byAgeGroupPlayers)
+    .map(([age,set])=>({ age, count:set.size }))
+    .sort((a,b)=> gradeDisplayRank(a.age)-gradeDisplayRank(b.age));
+
+  // Grand Final appearances/wins for this club, across every team-season and age group on file.
+  let gfWins = 0, gfAppearances = 0;
+  getVisibleGames().forEach(g=>{
+    if(!isGrandFinalGame(g) || !g.teamA || !g.teamB) return;
+    const aIsClub = homeGrownClubKey(g.teamA.name)===clubName;
+    const bIsClub = homeGrownClubKey(g.teamB.name)===clubName;
+    if(!aIsClub && !bIsClub) return;
+    gfAppearances++;
+    if(g.winner && homeGrownClubKey(g.winner)===clubName) gfWins++;
+  });
+
+  const result = {
+    club: clubName,
+    totalPlayers: hgRow ? hgRow.players : null,
+    homeGrownPct: hgRow ? Math.min(1, hgRow.pct) : null,
+    ownClubJuniorDebutsAvg: hgRow ? hgRow.ownClubJuniorDebutsAvg : null,
+    allClubJuniorDebutsAvg: hgRow ? hgRow.allClubJuniorDebutsAvg : null,
+    ownClubSeniorDebutsAvg: hgRow ? hgRow.ownClubSeniorDebutsAvg : null,
+    anyClubSeniorDebutsAvg: hgRow ? hgRow.anyClubSeniorDebutsAvg : null,
+    // Clamped to [0,1] as a safety net — withJuniors should never structurally exceed total (both
+    // are incremented at most once per player in computeJuniorPathwayByClubUncached's own loop),
+    // but a percentage above 100% is nonsensical for what this represents regardless of cause, so
+    // this guards the display even if an edge case in the underlying data ever produces one.
+    juniorPathwayPct: (jpRow && jpRow.total) ? Math.min(1, jpRow.withJuniors/jpRow.total) : null,
+    // Own-club: narrows the same question to junior history at THIS club specifically.
+    juniorPathwayOwnClubPct: (jpSameRow && jpSameRow.total) ? Math.min(1, jpSameRow.withJuniors/jpSameRow.total) : null,
+    // Other-club: known junior history exists, but only elsewhere — the "any" count minus the
+    // "same" count, both counted against the identical roster (jpRow.total === jpSameRow.total),
+    // so the two subtract cleanly without needing a third pass over the player list.
+    juniorPathwayOtherClubPct: (jpRow && jpRow.total && jpSameRow) ? Math.max(0, Math.min(1, (jpRow.withJuniors - jpSameRow.withJuniors)/jpRow.total)) : null,
+    retentionLatestPct: churnLatest ? churnLatest.retentionPct : null,
+    retentionAllTimePct: churnAll ? churnAll.retentionPct : null,
+    gfWins, gfAppearances,
+    playersByAgeGroup,
+    currentDivisionsByAge,
+    latestYear: latestYearForClub
+  };
+  _clubCompareStatsCache.set(cacheKey, result);
+  return result;
+}
+
 function doOpenSquadProgressions(preset, tileGroup){
   squadProgFilters.tileGroup = tileGroup || squadProgFilters.tileGroup || 'trend';
   const groupModes = TILE_GROUP_MODES[squadProgFilters.tileGroup] || TILE_GROUP_MODES.trend;
@@ -16453,6 +16873,126 @@ function computeHomeGrownUncached(){
       return { club, players, home, pct: players ? home/players : 0 };
     }).filter(c=> c.players > 0);
 
+    // Junior debuts per season, career-wide (not scoped by the current age/year/division filter,
+    // same reasoning as home-grown status itself — a "typical season" figure should mean the same
+    // thing regardless of which year happens to be selected). Two different questions:
+    // "own club" = players whose very FIRST EVER junior game anywhere in the competition was at
+    // THIS club (genuine grassroots intake); "all club" = anyone appearing for THIS club for the
+    // first time at a junior grade, whether or not they'd played juniors elsewhere already (total
+    // new junior faces, including those arriving from another club's junior program). "All club"
+    // is always >= "own club" for the same reason a home-grown count is always <= a total count.
+    // The earliest year on file is excluded from both averages — every player who already existed
+    // when records began necessarily reads as a "debut" that year (there's no earlier season to
+    // compare against), which would inflate a "typical season" average well above what any real
+    // season looks like.
+    const allJuniorYears = [...new Set(allGames.flatMap(g=>{
+      const y = getGameYear(g);
+      if(!y) return [];
+      return [g.teamA,g.teamB].some(t=>isJuniorGrade(getAgeGroupLabel(t.name))) ? [y] : [];
+    }))].sort((a,b)=>a-b);
+    const earliestJuniorYear = allJuniorYears[0];
+    const nameEarliestJuniorEver = {}, nameEarliestJuniorAtClub = {};
+    // Every year each club actually fielded a JUNIOR team, regardless of whether that year had any
+    // new debutants — the correct denominator for a "per season" average. Using only years that
+    // happen to have a nonzero debut count (Object.values(byYear).length) would silently drop any
+    // season with zero debuts from the divisor, inflating the average — worse for a club that
+    // joined the competition partway through, since years before they existed must ALSO be
+    // excluded rather than counted as a genuine zero.
+    const clubActiveJuniorYears = {}; // club -> Set(years), excluding earliestJuniorYear
+    allGames.forEach(g=>{
+      const year = getGameYear(g);
+      if(!year) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t) return;
+        const grade = getAgeGroupLabel(t.name);
+        if(!isJuniorGrade(grade)) return;
+        const club = homeGrownClubKey(t.name);
+        if(!club) return;
+        (t.players||[]).forEach(row=>{
+          if(!row.name || isPlaceholderPlayerName(row.name)) return;
+          const key = resolveNameClubsKey(row.name, row.playhqId, grade);
+          if(!nameEarliestJuniorEver[key] || year < nameEarliestJuniorEver[key].year) nameEarliestJuniorEver[key] = { year, club };
+          nameEarliestJuniorAtClub[key] = nameEarliestJuniorAtClub[key] || {};
+          if(nameEarliestJuniorAtClub[key][club]==null || year < nameEarliestJuniorAtClub[key][club]) nameEarliestJuniorAtClub[key][club] = year;
+        });
+        if(year!==earliestJuniorYear) (clubActiveJuniorYears[club] = clubActiveJuniorYears[club] || new Set()).add(year);
+      });
+    });
+    const ownClubDebutsByClubYear = {}, allClubDebutsByClubYear = {};
+    Object.values(nameEarliestJuniorEver).forEach(({year,club})=>{
+      if(year===earliestJuniorYear) return;
+      (ownClubDebutsByClubYear[club] = ownClubDebutsByClubYear[club]||{})[year] = (ownClubDebutsByClubYear[club][year]||0)+1;
+    });
+    Object.entries(nameEarliestJuniorAtClub).forEach(([key, byClub])=>{
+      Object.entries(byClub).forEach(([club,year])=>{
+        if(year===earliestJuniorYear) return;
+        (allClubDebutsByClubYear[club] = allClubDebutsByClubYear[club]||{})[year] = (allClubDebutsByClubYear[club][year]||0)+1;
+      });
+    });
+    // Denominator is the club's own count of ACTIVE junior seasons (from clubActiveJuniorYears),
+    // not just Object.keys(byYear).length — a season with zero debuts still counts as a real
+    // season, so it must still divide the average down, not vanish from it.
+    function avgDebuts(byYear, activeYears){
+      if(!activeYears || !activeYears.size) return null;
+      const vals = [...activeYears].map(y => (byYear && byYear[y]) || 0);
+      return vals.reduce((s,v)=>s+v,0)/vals.length;
+    }
+    clubs.forEach(c=>{
+      const activeYears = clubActiveJuniorYears[c.club];
+      c.ownClubJuniorDebutsAvg = avgDebuts(ownClubDebutsByClubYear[c.club], activeYears);
+      c.allClubJuniorDebutsAvg = avgDebuts(allClubDebutsByClubYear[c.club], activeYears);
+    });
+
+    // Senior/Reserves debuts per season — the flip side of junior debuts: not "who's new to
+    // juniors" but "who's graduating FROM juniors INTO seniors/reserves". "Own club" = their
+    // known junior history includes a game at THIS SAME club (this club developed them all the
+    // way through); "any club" = they have ANY known junior history at all, anywhere, before
+    // their senior debut (they came through SOME junior pathway, not necessarily this club's).
+    // A senior debutant with no known junior history whatsoever (an adult new to the sport, or
+    // whose junior years predate this tracker's 2022 start) counts toward neither.
+    const allSeniorYears = [...new Set(allGames.flatMap(g=>{
+      const y = getGameYear(g);
+      if(!y) return [];
+      return [g.teamA,g.teamB].some(t=>{ const ag=getAgeGroupLabel(t.name); return ag==='Seniors'||ag==='Reserves'; }) ? [y] : [];
+    }))].sort((a,b)=>a-b);
+    const earliestSeniorYear = allSeniorYears[0];
+    const nameFirstSenior = {}, nameJuniorClubs = {};
+    const clubActiveSeniorYears = {};
+    allGames.forEach(g=>{
+      const year = getGameYear(g);
+      if(!year) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t) return;
+        const grade = getAgeGroupLabel(t.name);
+        const club = homeGrownClubKey(t.name);
+        if(!club) return;
+        (t.players||[]).forEach(row=>{
+          if(!row.name || isPlaceholderPlayerName(row.name)) return;
+          const key = resolveNameClubsKey(row.name, row.playhqId, grade);
+          if(grade==='Seniors' || grade==='Reserves'){
+            if(!nameFirstSenior[key] || year < nameFirstSenior[key].year) nameFirstSenior[key] = { year, club };
+          }
+          if(isJuniorGrade(grade)){
+            (nameJuniorClubs[key] = nameJuniorClubs[key] || new Set()).add(club);
+          }
+        });
+        if((grade==='Seniors'||grade==='Reserves') && year!==earliestSeniorYear) (clubActiveSeniorYears[club] = clubActiveSeniorYears[club] || new Set()).add(year);
+      });
+    });
+    const ownClubSeniorDebutsByClubYear = {}, anyClubSeniorDebutsByClubYear = {};
+    Object.entries(nameFirstSenior).forEach(([key,{year,club}])=>{
+      if(year===earliestSeniorYear) return;
+      const juniorClubs = nameJuniorClubs[key];
+      if(!juniorClubs || !juniorClubs.size) return; // no known junior history at all -- not a "graduate"
+      (anyClubSeniorDebutsByClubYear[club] = anyClubSeniorDebutsByClubYear[club]||{})[year] = (anyClubSeniorDebutsByClubYear[club][year]||0)+1;
+      if(juniorClubs.has(club)) (ownClubSeniorDebutsByClubYear[club] = ownClubSeniorDebutsByClubYear[club]||{})[year] = (ownClubSeniorDebutsByClubYear[club][year]||0)+1;
+    });
+    clubs.forEach(c=>{
+      const activeYears = clubActiveSeniorYears[c.club];
+      c.ownClubSeniorDebutsAvg = avgDebuts(ownClubSeniorDebutsByClubYear[c.club], activeYears);
+      c.anyClubSeniorDebutsAvg = avgDebuts(anyClubSeniorDebutsByClubYear[c.club], activeYears);
+    });
+
     const teams = Object.values(teamRosters).map(r=>{
       let roster=0, home=0;
       r.players.forEach(k=>{ const c = nameClubs[k]; if(!c) return; roster++; if(c.size===1) home++; });
@@ -16608,8 +17148,8 @@ function renderHomeGrown(){
     rows.sort((a,b)=> b.pct-a.pct || b.players-a.players);
     searchPlaceholder = 'Search club name...';
     subtitle = 'Clubs ranked by the share of their players who are one-club loyalists.';
-    body = `<table><thead><tr><th>#</th><th>Club</th><th class="num">Players</th><th class="num">One-club</th><th class="num">Home-grown %</th></tr></thead><tbody>
-      ${rows.length ? rows.map((c,i)=>`<tr class="hg-club-row" data-club="${c.club.replace(/"/g,'&quot;')}" style="cursor:pointer;"><td>${i+1}</td><td style="color:var(--gold);text-decoration:underline;">${c.club}</td><td class="num">${c.players}</td><td class="num">${c.home}</td><td class="num" style="color:var(--gold);font-weight:600;">${pctStr(c.pct)}</td></tr>`).join('') : `<tr><td colspan="5" class="empty">${search?'No clubs match that search.':'No clubs match these filters.'}</td></tr>`}
+    body = `<table><thead><tr><th>#</th><th>Club</th><th class="num">Players</th><th class="num">One-club</th><th class="num">Home-grown %</th><th class="num" title="Average per season, across every season on file — players whose very first-ever junior game anywhere in the competition was at this club (the earliest season on file is excluded, since everyone reads as a 'debut' that year with no earlier data to compare against).">Avg junior debuts/season (own club)</th><th class="num" title="Average per season — anyone appearing for THIS club for the first time at a junior grade, including players arriving from another club's junior program (always ≥ the own-club figure). Same earliest-season exclusion as own-club.">Avg junior debuts/season (any club)</th></tr></thead><tbody>
+      ${rows.length ? rows.map((c,i)=>`<tr class="hg-club-row" data-club="${c.club.replace(/"/g,'&quot;')}" style="cursor:pointer;"><td>${i+1}</td><td style="color:var(--gold);text-decoration:underline;">${c.club}</td><td class="num">${c.players}</td><td class="num">${c.home}</td><td class="num" style="color:var(--gold);font-weight:600;">${pctStr(c.pct)}</td><td class="num">${c.ownClubJuniorDebutsAvg!=null?c.ownClubJuniorDebutsAvg.toFixed(1):'—'}</td><td class="num">${c.allClubJuniorDebutsAvg!=null?c.allClubJuniorDebutsAvg.toFixed(1):'—'}</td></tr>`).join('') : `<tr><td colspan="7" class="empty">${search?'No clubs match that search.':'No clubs match these filters.'}</td></tr>`}
       </tbody></table>`;
   } else {
     let rows = teams.filter(t=> t.roster >= f.minRoster);
@@ -18208,7 +18748,7 @@ function navEsc(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-const TAB_LABELS = { home:'Home', players:'Players', teams:'Teams', games:'Games', tools:'Tools' };
+const TAB_LABELS = { home:'Home', players:'Players', teams:'Teams', clubs:'Clubs', games:'Games', tools:'Tools' };
 
 function navRenderBreadcrumb(){
   const bar = document.getElementById('breadcrumbBar');
@@ -18397,13 +18937,19 @@ function activateTab(tabId){
 const PANEL_OWNER_TAB = {
   'add':'games', 'team-detail':'teams', 'player-detail':'players', 'game-detail':'games', 'fixture-preview':'games',
   'power-rankings':'tools', 'ladder':'tools', 'compare-players':'tools', 'compare-teams':'tools', 'squad-progressions':'tools',
-  'home-grown':'tools', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools', 'find-players':'players',
-  'suggest-divisions':'tools', 'top-players': 'tools', 'suggest-next-season':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'tools', 'quarter-comebacks':'tools'
+  'home-grown':'clubs', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools', 'find-players':'players',
+  'suggest-divisions':'tools', 'top-players': 'tools', 'suggest-next-season':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'clubs', 'quarter-comebacks':'tools', 'compare-clubs':'clubs'
 };
+// squad-progressions is shared by both team-level modes (trend/improvement/club/stability) and
+// club-level ones (pathway/churn) — a static PANEL_OWNER_TAB entry can't tell those apart, since
+// it's keyed by panel id, not mode. Checked here instead: whichever mode is active when this
+// panel is shown decides whether the Clubs or Tools tab should read as active.
+const SQUAD_PROGRESSIONS_CLUB_MODES = new Set(['pathway', 'churn']);
 function showPanel(panelId){
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  const owner = PANEL_OWNER_TAB[panelId] || panelId;
+  let owner = PANEL_OWNER_TAB[panelId] || panelId;
+  if(panelId==='squad-progressions' && SQUAD_PROGRESSIONS_CLUB_MODES.has(squadProgFilters.mode)) owner = 'clubs';
   const btn = document.querySelector(`nav.tabs button[data-tab="${owner}"]`);
   if(btn) btn.classList.add('active');
   const panelEl = document.getElementById('panel-' + panelId);
@@ -18655,14 +19201,19 @@ document.getElementById('toolTileMergePlayers').onclick = ()=> openMergePlayers(
 document.getElementById('toolTilePowerRankings').onclick = ()=> openPowerRankings();
 document.getElementById('toolTileCompareTeams').onclick = ()=> openCompareTeams();
 document.getElementById('toolTileSquadProgressions').onclick = ()=> openSquadProgressions(null,'trend');
-document.getElementById('toolTileClubPathwayRetention').onclick = ()=> openSquadProgressions(null,'pathway');
 document.getElementById('toolTileStabilityImprovement').onclick = ()=> openSquadProgressions(null,'stability');
 document.getElementById('toolTileCohortTrajectory').onclick = ()=> openCohortTrajectory();
 document.getElementById('toolTileStandoutStats').onclick = ()=> openStandoutStats();
 document.getElementById('toolTileOnFirePlayers').onclick = ()=> openOnFirePlayers();
-document.getElementById('toolTileHomeGrown').onclick = ()=> openHomeGrown();
 document.getElementById('toolTileAbsenceLeaderboard').onclick = ()=> openAbsenceLeaderboard();
-document.getElementById('toolTileJuniorPathway').onclick = ()=> openJuniorPathway();
+document.getElementById('toolTileClubsHomeGrown').onclick = ()=> openHomeGrown();
+document.getElementById('toolTileClubsJuniorPathway').onclick = ()=> openJuniorPathway();
+document.getElementById('toolTileClubsPathwayRetention').onclick = ()=> openSquadProgressions(null,'pathway');
+document.getElementById('toolTileCompareClubs').onclick = ()=> openCompareClubs();
+document.getElementById('toolTileToolsHomeGrown').onclick = ()=> openHomeGrown();
+document.getElementById('toolTileToolsJuniorPathway').onclick = ()=> openJuniorPathway();
+document.getElementById('toolTileToolsPathwayRetention').onclick = ()=> openSquadProgressions(null,'pathway');
+document.getElementById('toolTileToolsCompareClubs').onclick = ()=> openCompareClubs();
 document.getElementById('toolTileQuarterComebacks').onclick = ()=> openQuarterComebacks();
 document.getElementById('toolTilePredictionAccuracy').onclick = ()=> openPredictionAccuracy();
 document.getElementById('toolTileSuggestDivisions').onclick = ()=> openSuggestDivisions();
@@ -18679,6 +19230,7 @@ function goToTab(tabName){
 }
 document.getElementById('homeCardPlayers').onclick = ()=> goToTab('players');
 document.getElementById('homeCardTeams').onclick = ()=> goToTab('teams');
+document.getElementById('homeCardClubs').onclick = ()=> goToTab('clubs');
 document.getElementById('homeCardGames').onclick = ()=> goToTab('games');
 document.getElementById('homeCardTools').onclick = ()=> goToTab('tools');
 document.getElementById('gamesCardCompleted').onclick = ()=>{ gamesSubView = 'completed'; retroCheckOpen = false; renderGamesLanding(); };
