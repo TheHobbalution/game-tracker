@@ -425,7 +425,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 17092026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 23092026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -12067,6 +12067,10 @@ function backToToolsFromJuniorPathway(){ navBack(); }
 function renderJuniorPathway(){
   const wrap = document.getElementById('juniorPathwayWrap');
   if(!wrap) return;
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading junior pathway data…</p></div>`;
+    return;
+  }
 
   // This tool's whole point is career-spanning history (a player's current level PLUS whatever
   // junior years they had, however long ago) — the same reason Home Grown and the ladder ignore
@@ -14465,6 +14469,14 @@ let compareClubsAllFilters = { metric:'players', year:'ALL', ageScope:'ALL', lea
 
 function renderCompareClubs(){
   const wrap = document.getElementById('compareClubsWrap');
+  // Compare Clubs needs the full games array (quarterScores, captaincy, junior history — not just
+  // the instant-paint summaries.json) — without this guard, opening the page before that finishes
+  // loading silently renders an empty chart/table with no explanation, since every underlying
+  // computation just returns nothing for an empty games array rather than erroring.
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading club data…</p></div>`;
+    return;
+  }
   const toggleRow = `<div class="controls-row" style="margin-bottom:14px;gap:8px;">
     <button class="churn-view-toggle" data-view="h2h" style="${compareClubsView==='h2h'?'background:var(--gold);color:#1a1a1a;':''}">Head-to-head</button>
     <button class="churn-view-toggle" data-view="all" style="${compareClubsView==='all'?'background:var(--gold);color:#1a1a1a;':''}">All clubs</button>
@@ -14543,6 +14555,15 @@ function renderCompareClubsAll(wrap, toggleRow){
   if(window._compareClubsChartInstance){ window._compareClubsChartInstance.destroy(); window._compareClubsChartInstance = null; }
   const f = compareClubsAllFilters;
   const metric = CLUB_COMPARE_METRICS.find(m=>m.key===f.metric) || CLUB_COMPARE_METRICS[0];
+  // Pre-warm BOTH of this tool's expensive per-club computations together, whichever metric
+  // happens to be viewed first — computeClubCompareStats backs every non-Players metric and
+  // computeClubPlayerCounts backs Players specifically; each is a full pass over every club and
+  // every game, and each has its own cache, so without this the *second* one only warms up the
+  // first time a user actually switches to whichever metric wasn't shown initially — most visibly
+  // Players, since it's the default. Doing both up front means only one slow load total, not a
+  // second unexplained pause the first time you switch metrics.
+  knownClubs.forEach(club => computeClubCompareStats(club));
+  computeClubPlayerCounts('ALL', 'ALL');
   const { teamList } = computeAggregates();
   const allYears = [...new Set(teamList.map(t=>t.year).filter(y=>y!=null))].sort((a,b)=>b-a);
   const data = computeAllClubsCompareData(f);
@@ -14556,11 +14577,11 @@ function renderCompareClubsAll(wrap, toggleRow){
     <p class="hint">Every club at once, for one metric — pick what to show below.</p>
     <div class="controls-row" style="margin-bottom:8px;gap:8px;flex-wrap:wrap;">
       <select id="ccAllMetricSel">${CLUB_COMPARE_METRICS.map(m=>`<option value="${m.key}" ${f.metric===m.key?'selected':''}>${m.label}</option>`).join('')}</select>
-      <select id="ccAllYearSel" ${metric.filterable?'':'disabled title="Only Players can be scoped to a specific year — every other metric here is always career-wide, same as Home Grown/Junior Pathway/Club Retention."'}>
+      <select id="ccAllYearSel" ${metric.filterable?'':'disabled title="Only Players and Retention can be scoped to a specific year — every other metric here is always career-wide, same as Home Grown/Junior Pathway."'}>
         <option value="ALL" ${f.year==='ALL'?'selected':''}>All years</option>
         ${allYears.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y} only</option>`).join('')}
       </select>
-      <select id="ccAllAgeSel" ${metric.filterable?'':'disabled title="Only Players can be scoped by age group — every other metric here already has its own fixed definition."'}>
+      <select id="ccAllAgeSel" ${metric.filterable?'':'disabled title="Only Players and Retention can be scoped by age group — every other metric here already has its own fixed definition."'}>
         <option value="ALL" ${f.ageScope==='ALL'?'selected':''}>All age groups</option>
         <option value="JUNIOR" ${f.ageScope==='JUNIOR'?'selected':''}>Juniors only</option>
         <option value="SENIOR" ${f.ageScope==='SENIOR'?'selected':''}>Seniors/Reserves only</option>
@@ -14570,7 +14591,8 @@ function renderCompareClubsAll(wrap, toggleRow){
         ${Object.entries(LEAGUE_FULL_NAMES).map(([code,name])=>`<option value="${code}" ${f.league===code?'selected':''}>${name} only</option>`).join('')}
       </select>
     </div>
-    ${!metric.filterable ? `<p class="hint" style="margin:0 0 12px;">${metric.label} is always career-wide — the year/age-group filters above only apply to Players.</p>` : ''}
+    ${!metric.filterable ? `<p class="hint" style="margin:0 0 12px;">${metric.label} is always career-wide — the year/age-group filters above only apply to Players and Retention.</p>` : ''}
+    ${metric.key==='retention' && f.year==='ALL' ? `<p class="hint" style="margin:0 0 12px;">"All years" averages each club's own retention across every consecutive year-pair it has on file — not one specific season.</p>` : ''}
     <div style="height:${Math.max(340, data.rows.length*22)}px;margin-bottom:16px;"><canvas id="ccAllChart"></canvas></div>
     <table><thead><tr><th>#</th><th>Club</th><th class="num">${metric.label}</th></tr></thead>
     <tbody>${data.rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.club}</td><td class="num">${fmtVal(r.value)}</td></tr>`).join('')}</tbody></table>
@@ -16497,7 +16519,7 @@ function computeLeagueWideAttritionUncached(){
 // one exception, genuinely re-filterable by year/age-scope/league, since "how many players did
 // this club have" is meaningfully different for "2026 juniors only" vs "career-wide, everyone".
 const CLUB_COMPARE_METRICS = [
-  { key:'players', label:'Players', filterable:true },
+  { key:'players', label:'Players', filterable:true, filterFn: (year,ageScope) => computeClubPlayerCounts(year, ageScope) },
   { key:'homeGrownPct', label:'Home-grown %', isPct:true },
   { key:'ownClubJuniorDebutsAvg', label:'Avg junior debuts/season (own club)' },
   { key:'allClubJuniorDebutsAvg', label:'Avg junior debuts/season (any club)' },
@@ -16506,8 +16528,17 @@ const CLUB_COMPARE_METRICS = [
   { key:'juniorPathwayPct', label:'Junior pathway % (any club)', isPct:true },
   { key:'juniorPathwayOwnClubPct', label:'Junior pathway % (own club)', isPct:true },
   { key:'juniorPathwayOtherClubPct', label:"Junior pathway % (recruited, another club's juniors)", isPct:true },
-  { key:'retentionLatestPct', label:'Retention — most recent season', isWholePct:true },
-  { key:'retentionAllTimePct', label:'Retention — all-time average', isWholePct:true },
+  // One metric, driven entirely by the shared year/age-group dropdowns rather than two fixed
+  // presets — "All years" maps to computeClubChurn's own all-time-average mode, a specific year
+  // to its single-transition mode (both already built for the Club Retention tool itself, reused
+  // here rather than reimplemented).
+  { key:'retention', label:'Retention', filterable:true, isWholePct:true,
+    filterFn: (year,ageScope) => {
+      const rows = computeClubChurn(ageScope, year==='ALL' ? 'all' : Number(year));
+      const out = {};
+      rows.forEach(r=>{ if(r.retentionPct!=null) out[r.club] = r.retentionPct; });
+      return out;
+    } },
   { key:'gfAppearances', label:'Grand Final appearances' },
   { key:'gfWins', label:'Grand Final wins' }
 ];
@@ -16523,6 +16554,10 @@ function computeClubPlayerCounts(year, ageScope){
         const y = t.date ? new Date(t.date).getFullYear() : null;
         if(String(y)!==String(year)) return;
       }
+      // Excludes joint/merged teams (e.g. "Modewarre/Inverleigh"), matching computeHomeGrownUncached's
+      // own convention exactly — a joint program's roster isn't attributable to either home club
+      // alone, so it must not inflate either one's own player count here either.
+      if(isMergedTeam(t.team, t.date ? new Date(t.date).getFullYear() : null)) return;
       const grade = getAgeGroupLabel(t.team);
       if(ageScope==='JUNIOR' && !isJuniorGrade(grade)) return;
       if(ageScope==='SENIOR' && grade!=='Seniors' && grade!=='Reserves') return;
@@ -16557,20 +16592,20 @@ function computeClubCurrentLeague(clubName){
 function computeAllClubsCompareData(filters){
   const { metric: metricKey, year, ageScope, league } = filters;
   const metric = CLUB_COMPARE_METRICS.find(m=>m.key===metricKey) || CLUB_COMPARE_METRICS[0];
-  const playerCounts = metric.filterable ? computeClubPlayerCounts(year, ageScope) : null;
+  const filteredValues = metric.filterable ? metric.filterFn(year, ageScope) : null;
   const rows = knownClubs
     .filter(club=> league==='ALL' || computeClubCurrentLeague(club)===league)
     .map(club=>{
       let value;
       if(metric.filterable){
-        value = playerCounts[club] ?? 0;
+        value = filteredValues[club] ?? null;
       } else {
         const s = computeClubCompareStats(club);
         value = s[metricKey];
       }
       return { club, value };
     })
-    .filter(r=> r.value!=null && (metric.filterable ? r.value>0 : true));
+    .filter(r=> r.value!=null && (metric.key==='players' ? r.value>0 : true));
   rows.sort((a,b)=> b.value-a.value);
   return { metric, rows };
 }
@@ -17123,6 +17158,10 @@ function renderHomeGrownDetail(){
 function renderHomeGrown(){
   if(homeGrownDetail) return renderHomeGrownDetail();
   const wrap = document.getElementById('homeGrownWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading club data…</p></div>`;
+    return;
+  }
   const f = homeGrownFilters;
   const { clubs, teams, totalPlayers, totalHome, years, ageGroups, divisions, clubList } = computeHomeGrown();
   const pctStr = v => (v*100).toFixed(0)+'%';
@@ -17220,6 +17259,10 @@ const MODE_LABELS = {
 
 function renderSquadProgressions(){
   const wrap = document.getElementById('squadProgressionsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading squad data…</p></div>`;
+    return;
+  }
   const { teamList } = computeAggregates();
   const f = squadProgFilters;
 
