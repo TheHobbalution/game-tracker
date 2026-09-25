@@ -479,11 +479,11 @@
     <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across the AFL Barwon FNL, all pulled together in one place — goals, records, form trends, head-to-head history, and team rankings, updated as results come in.</p>
     <div id="privacyBanner" class="warn-box" style="max-width:760px;margin-bottom:18px;"><strong>This is your own copy.</strong> Anything you add, edit or delete here changes only what <em>you</em> see — it isn't shared with anyone else, and it doesn't alter the real results.</div>
     <div id="homeSnapshot" class="home-snapshot">
-      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">15,543</div><div class="label">Players with stats tracked</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">1,897</div><div class="label">Teams</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--teal);"><div class="value">42</div><div class="label">Clubs</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">15,387</div><div class="label">Games tracked (all-time)</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">110,963</div><div class="label">Goals scored</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">16,987</div><div class="label">Players with stats tracked</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">1,968</div><div class="label">Teams</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--teal);"><div class="value">41</div><div class="label">Clubs</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">16,388</div><div class="label">Games tracked (all-time)</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">138,984</div><div class="label">Goals scored</div></div>
     </div>
     <p class="hint" style="margin:22px 0 14px;">Pick where you want to go:</p>
     <div class="home-grid">
@@ -3386,6 +3386,10 @@ function backToTeamsFromRankings(){ navBack(); }
 
 function renderPowerRankings(){
   const wrap = document.getElementById('powerRankingsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading rankings…</p></div>`;
+    return;
+  }
   const { teamList } = computeAggregates();
 
   // A preset only applies to this one render — read it, then clear it immediately.
@@ -4422,6 +4426,10 @@ let nextSeasonSort = { key: 'blended', dir: 'desc' };
 let nextSeasonExpandedRows = new Set(); // keys of "club__teamIndex" currently showing their player list
 function renderSuggestNextSeason(){
   const wrap = document.getElementById('suggestNextSeasonWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading team data…</p></div>`;
+    return;
+  }
   const { teamList } = computeAggregates();
   // Only grades that actually have real divisions make sense as a target — U9/U10/U12 in this
   // competition are ungraded (confirmed on real data: never a numbered division), so there's
@@ -4636,6 +4644,10 @@ function backToTeamsFromDivisions(){ navBack(); }
 
 function renderSuggestDivisions(){
   const wrap = document.getElementById('suggestDivisionsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading team data…</p></div>`;
+    return;
+  }
   const { teamList } = computeAggregates();
   const ageGroups = [...new Set(teamList.map(t=>t.ageGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   const years = [...new Set(games.map(g=>getGameYear(g)).filter(Boolean))].sort((a,b)=>b-a);
@@ -6058,10 +6070,10 @@ function renderLapsedPlayers(wrap){
     { key:'club', label:'Last club', numeric:false, defaultDir:'asc' },
     { key:'teamsLabel', label:'Team(s)', numeric:false, defaultDir:'asc' },
     { key:'divisionRank', label:'Division', numeric:false, defaultDir:'asc' },
-    ...(f.lapsedYear==='ALL' ? [{ key:'lastYear', label:'Last played', numeric:true, defaultDir:'desc' }] : []),
-    { key:'games', label:'Games that season', numeric:true, defaultDir:'desc' },
-    { key:'goals', label:'Goals', numeric:true, defaultDir:'desc' },
-    { key:'bestCount', label:'Bests', numeric:true, defaultDir:'desc' }
+    ...(f.lapsedYear==='ALL' ? [{ key:'lastYear', label:'Last played', numeric:true, defaultDir:'desc', tooltip:'The most recent year this player has a game on file.' }] : []),
+    { key:'games', label:'Games that season', numeric:true, defaultDir:'desc', tooltip:'Games played in the last season they appeared.' },
+    { key:'goals', label:'Goals', numeric:true, defaultDir:'desc', tooltip:'Goals scored in that same season.' },
+    { key:'bestCount', label:'Bests', numeric:true, defaultDir:'desc', tooltip:'Times named among the best players that season.' }
   ];
   const sortable = results.map(r=>({ ...r, teamsLabel: r.teams.join(', ') }));
   const { lapsedSortKey, lapsedSortDir } = f;
@@ -6074,7 +6086,8 @@ function renderLapsedPlayers(wrap){
   const thHtml = COLUMNS.map(c=>{
     const active = lapsedSortKey === c.key;
     const arrow = active ? (lapsedSortDir==='asc' ? ' ▲' : ' ▼') : '';
-    return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
 
   wrap.innerHTML = `
@@ -6216,6 +6229,10 @@ function renderPlayerLinks(wrap){
 
 function renderPlayerMovement(){
   const wrap = document.getElementById('playerMovementWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
   if(movementFilters.mode === 'lapsed'){ renderLapsedPlayers(wrap); return; }
   if(movementFilters.mode === 'links'){ renderPlayerLinks(wrap); return; }
   const { moves, trailFor } = computePlayerMovement();
@@ -7465,9 +7482,20 @@ function showToast(msg){
 // manually deletes it via the ✕ on that fixture. Runs whenever new completed games are saved
 // (single-game paste and round paste both call this), and once on startup to retroactively clear
 // anything that went stale before this existed. Returns how many fixtures were removed.
+//
+// Round-fulfilment alone leaves a real gap: if a fixture's own specific round never gets a matching
+// completed game on file at all — a bye, a cancellation, the season ending early, or a scraper gap
+// for that one round — that fixture waits forever for a game that's never coming, even once the
+// entire season it belongs to is long over. Confirmed on real data: a 2025 fixture for "Round 11"
+// between two teams who did play each other, but only in Rounds 3 and 5 — Round 11 itself was never
+// completed, so the exact-round match never fires and the fixture is stuck in "Upcoming" permanently.
+// The second rule below catches exactly that case: once ANY completed game exists for a LATER year
+// than the fixture's own, the fixture's whole season has clearly already been superseded, so it's
+// stale regardless of whether its specific round ever matched.
 function pruneFixturesForGames(newGames){
   if(!fixtures.length || !newGames.length) return 0;
   const before = fixtures.length;
+  const latestCompletedYear = Math.max(...newGames.map(g=>Number(g.year)||0), ...games.map(g=>Number(g.year)||0));
   fixtures = fixtures.filter(f=>{
     const fulfilled = newGames.some(g=>
       String(f.year||'') === String(g.year||'') &&
@@ -7475,7 +7503,10 @@ function pruneFixturesForGames(newGames){
       (f.roundLabel||'') === (g.roundLabel||'') &&
       ((f.teamA===g.teamA?.name && f.teamB===g.teamB?.name) || (f.teamA===g.teamB?.name && f.teamB===g.teamA?.name))
     );
-    return !fulfilled;
+    if(fulfilled) return false;
+    const fixtureYear = Number(f.year);
+    const supersededBySeasonEnd = fixtureYear && fixtureYear < latestCompletedYear;
+    return !supersededBySeasonEnd;
   });
   return before - fixtures.length;
 }
@@ -8979,10 +9010,11 @@ function renderPrivacyBanner(){
 // computeAggregates(), no load wait. Update the numbers in HOME_SNAPSHOT_BASELINE AND the
 // static HTML tiles (search for id="homeSnapshot") whenever a meaningful batch of new data is
 // scraped — ask Claude to run the harness, or just read the numbers off the live page.
-// Recomputed 2026-08-25 from the real dataset via the app's own computeAggregates(); clubs count
-// (via computeHomeGrown — clubs with real player data, not the raw knownClubs registry) added
-// 2026-09-23 without refreshing the other four, so it reflects the same underlying dataset.
-const HOME_SNAPSHOT_BASELINE = { games: 15387, teams: 1897, players: 15543, goals: 110963, clubs: 42 };
+// Recomputed 2026-09-25 from the real, fully-merged dataset (post GDFL-gap fix and the latest
+// 2026 scrapes) via the app's own computeAggregates()/computeHomeGrown() — all five numbers now
+// reflect the same underlying dataset again, after clubs alone had drifted out of sync with the
+// other four for a period.
+const HOME_SNAPSHOT_BASELINE = { games: 16388, teams: 1968, players: 16987, goals: 138984, clubs: 41 };
 
 function animateCountUp(el, target, duration=800){
   if(!el) return;
@@ -9784,15 +9816,15 @@ function renderTeamPossibleLinks(teamObj, playerList){
     ? `${r.bestGradeLabel}${r.bestDivisionRank!=null ? ` (Div ${r.bestDivisionRank})` : ''}`
     : '<span style="color:var(--muted);">—</span>';
   const COLUMNS = [
-    { key:'strength', label:'Strength', defaultDir:'desc', val:r=> r.strengthScore },
+    { key:'strength', label:'Strength', defaultDir:'desc', val:r=> r.strengthScore, tooltip:'Combines games, goals and bests, weighted for the highest grade/division reached — a real, established player ranks above a one-off game from years back.' },
     { key:'name',    label:'Player',          defaultDir:'asc',  val:r=> (r.name||'').toLowerCase() },
     { key:'grade',   label:'Highest level',   defaultDir:'desc', val:r=> (r.bestGradeLabel ? (99-gradeDisplayRank(r.bestGradeLabel))*1000 - (r.bestDivisionRank||0) : -1) },
     { key:'games',   label:'Games',           defaultDir:'desc', val:r=> r.gamesPlayed },
     { key:'goals',   label:'Goals',           defaultDir:'desc', val:r=> r.totalGoals },
-    { key:'bests',   label:'Bests',           defaultDir:'desc', val:r=> r.bestCount },
+    { key:'bests',   label:'Bests',           defaultDir:'desc', val:r=> r.bestCount, tooltip:'Times named among the best players.' },
     { key:'recency', label:'Status',          defaultDir:'desc', val:r=> statusRank(r)*10000 + (r.mostRecentYear||0) },
     { key:'team',    label:'Team / Division',  defaultDir:'asc',  val:r=> (r.currentTeamLabel||'').toLowerCase() },
-    { key:'links',   label:'Connected via',    defaultDir:'desc', val:r=> r.connections.length }
+    { key:'links',   label:'Connected via',    defaultDir:'desc', val:r=> r.connections.length, tooltip:'How many current players on this team they share a past season with.' }
   ];
   const sortCol = COLUMNS.find(c=>c.key===teamPossibleLinksSort.key) || COLUMNS[0];
   const dirMul = teamPossibleLinksSort.dir==='asc' ? 1 : -1;
@@ -9805,7 +9837,8 @@ function renderTeamPossibleLinks(teamObj, playerList){
   const thHtml = COLUMNS.map(c=>{
     const active = teamPossibleLinksSort.key === c.key;
     const arrow = active ? (teamPossibleLinksSort.dir==='asc' ? ' ▲' : ' ▼') : '';
-    return `<th class="sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
 
   wrap.innerHTML = `
@@ -9977,6 +10010,10 @@ function openStandoutStats(){
 
 function renderStandoutStats(){
   const wrap = document.getElementById('standoutStatsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading team data…</p></div>`;
+    return;
+  }
   const header = `<span class="back-link" id="backFromStandoutStats">&larr; Back to tools</span><h2 style="font-size:20px;">Standout stats</h2>`;
   const { groupResults } = computeStandoutTeamStats();
   const f = standoutStatsFilters;
@@ -10267,6 +10304,10 @@ function openOnFirePlayers(){
 
 function renderOnFirePlayers(){
   const wrap = document.getElementById('onFirePlayersWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
   const rows = computeOnFirePlayers();
   wrap.innerHTML = `
     <span class="back-link" id="backFromOnFirePlayers">&larr; Back to tools</span>
@@ -11009,6 +11050,10 @@ let predictionAccuracyFilters = { year:'ALL', ageGroup:'ALL', round:'ALL' };
 
 function renderPredictionAccuracy(){
   const wrap = document.getElementById('predictionAccuracyWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading game data…</p></div>`;
+    return;
+  }
 
   const years = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
   const ageGroups = [...new Set(games.map(getAgeGroup))].sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
@@ -12089,9 +12134,9 @@ function renderJuniorPathway(){
   const COLUMNS = [
     { key:'club', label:'Club', numeric:false, defaultDir:'asc', val:r=>r.club.toLowerCase() },
     { key:'league', label:'League', numeric:false, defaultDir:'asc', val:r=>r.leagues.join(',') },
-    { key:'total', label:`${gradeLabel} players`, numeric:true, defaultDir:'desc', val:r=>r.total },
-    { key:'withJuniors', label:'Known junior history', numeric:true, defaultDir:'desc', val:r=>r.withJuniors },
-    { key:'pct', label:'% known', numeric:true, defaultDir:'desc', val:r=>r.pct },
+    { key:'total', label:`${gradeLabel} players`, numeric:true, defaultDir:'desc', val:r=>r.total, tooltip:`Total current ${gradeLabel} players on file for this club.` },
+    { key:'withJuniors', label:'Known junior history', numeric:true, defaultDir:'desc', val:r=>r.withJuniors, tooltip:'Of those, how many have a junior game on file (per the scope selected above).' },
+    { key:'pct', label:'% known', numeric:true, defaultDir:'desc', val:r=>r.pct, tooltip:'Known junior history divided by total players.' },
   ];
   const sortCol = COLUMNS.find(c=>c.key===juniorPathwaySort.key) || COLUMNS.find(c=>c.key==='pct');
   const dirMul = juniorPathwaySort.dir==='asc' ? 1 : -1;
@@ -12104,7 +12149,8 @@ function renderJuniorPathway(){
   const thHtml = COLUMNS.map(c=>{
     const active = juniorPathwaySort.key === c.key;
     const arrow = active ? (juniorPathwaySort.dir==='asc' ? ' ▲' : ' ▼') : '';
-    return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
 
   const rowHtml = r => {
@@ -12264,6 +12310,10 @@ function backToToolsFromQuarterComebacks(){ navBack(); }
 function renderQuarterComebacks(){
   const wrap = document.getElementById('quarterComebacksWrap');
   if(!wrap) return;
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading game data…</p></div>`;
+    return;
+  }
 
   const years = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
   if(quarterComebacksYear == null || !years.includes(quarterComebacksYear)){
@@ -12355,6 +12405,10 @@ function renderQuarterComebacks(){
 function renderAbsenceLeaderboard(){
   const wrap = document.getElementById('absenceLeaderboardWrap');
   if(!wrap) return;
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
 
   const years = [...new Set(games.map(g=>getGameYear(g)).filter(y=>y!=null))].sort((a,b)=>b-a);
   if(absenceLeaderboardYear == null || !years.includes(absenceLeaderboardYear)){
@@ -12446,13 +12500,13 @@ function renderAbsenceLeaderboard(){
       { key:'name', label:'Player', numeric:false, defaultDir:'asc', val:r=>r.name.toLowerCase() },
       { key:'teamName', label:'Team', numeric:false, defaultDir:'asc', val:r=>r.teamName.toLowerCase() },
       ...(showGradeColumn ? [{ key:'ageGroup', label:'Grade', numeric:false, defaultDir:'asc', val:r=>r.ageGroup||'' }] : []),
-      { key:'currentStreak', label:'Currently out', numeric:true, defaultDir:'desc', val:r=>r.currentStreak },
-      { key:'missedCount', label:'Total missed', numeric:true, defaultDir:'desc', val:r=>r.missedCount },
+      { key:'currentStreak', label:'Currently out', numeric:true, defaultDir:'desc', val:r=>r.currentStreak, tooltip:'Consecutive rounds missed right now, including the most recent round — 0 if they played last time out.' },
+      { key:'missedCount', label:'Total missed', numeric:true, defaultDir:'desc', val:r=>r.missedCount, tooltip:'Every round missed this season, not just the current run.' },
       ...(showMovedColumns ? [
-        { key:'movedCount', label:'Rounds moved', numeric:true, defaultDir:'desc', val:r=>r.movedCount },
+        { key:'movedCount', label:'Rounds moved', numeric:true, defaultDir:'desc', val:r=>r.movedCount, tooltip:'Rounds played for a different team instead of this one — a real move, not a missed game.' },
         { key:'movedTeams', label:'Moved to', numeric:false, defaultDir:'asc', val:r=>(r.movedTeams||[]).join(', ').toLowerCase() },
       ] : []),
-      { key:'gamesPlayedTotal', label:'Games played', numeric:true, defaultDir:'desc', val:r=>r.gamesPlayedTotal },
+      { key:'gamesPlayedTotal', label:'Games played', numeric:true, defaultDir:'desc', val:r=>r.gamesPlayedTotal, tooltip:'Total games played for any team this season.' },
     ];
     const sortCol = COLUMNS.find(c=>c.key===absenceLeaderboardPlayerSort.key) || COLUMNS.find(c=>c.key==='currentStreak');
     const dirMul = absenceLeaderboardPlayerSort.dir==='asc' ? 1 : -1;
@@ -12464,7 +12518,8 @@ function renderAbsenceLeaderboard(){
     const thHtml = COLUMNS.map(c=>{
       const active = absenceLeaderboardPlayerSort.key === c.key;
       const arrow = active ? (absenceLeaderboardPlayerSort.dir==='asc' ? ' ▲' : ' ▼') : '';
-      return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+      const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+      return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
     }).join('');
     const rowHtml = r => `<tr>
       <td><span class="player-link" data-key="${r.key}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span></td>
@@ -12495,11 +12550,11 @@ function renderAbsenceLeaderboard(){
     const COLUMNS = [
       { key:'teamName', label:'Team', numeric:false, defaultDir:'asc', val:r=>r.teamName.toLowerCase() },
       ...(showGradeColumn ? [{ key:'ageGroup', label:'Grade', numeric:false, defaultDir:'asc', val:r=>r.ageGroup||'' }] : []),
-      { key:'rosterSize', label:'Squad size', numeric:true, defaultDir:'desc', val:r=>r.rosterSize },
-      { key:'totalMissedRounds', label:'Total missed rounds', numeric:true, defaultDir:'desc', val:r=>r.totalMissedRounds },
-      { key:'playersWithAnyMiss', label:'Players w/ a miss', numeric:true, defaultDir:'desc', val:r=>r.playersWithAnyMiss },
-      { key:'currentlyOut', label:'Currently out', numeric:true, defaultDir:'desc', val:r=>r.playersCurrentlyOut.length },
-      { key:'playersWithMoves', label:'Players moved', numeric:true, defaultDir:'desc', val:r=>r.playersWithMoves },
+      { key:'rosterSize', label:'Squad size', numeric:true, defaultDir:'desc', val:r=>r.rosterSize, tooltip:'Distinct players who have appeared for this team this season.' },
+      { key:'totalMissedRounds', label:'Total missed rounds', numeric:true, defaultDir:'desc', val:r=>r.totalMissedRounds, tooltip:'Summed across every player on this team — every round any of them missed.' },
+      { key:'playersWithAnyMiss', label:'Players w/ a miss', numeric:true, defaultDir:'desc', val:r=>r.playersWithAnyMiss, tooltip:'How many distinct players have missed at least one round.' },
+      { key:'currentlyOut', label:'Currently out', numeric:true, defaultDir:'desc', val:r=>r.playersCurrentlyOut.length, tooltip:'Players on an active missed streak right now.' },
+      { key:'playersWithMoves', label:'Players moved', numeric:true, defaultDir:'desc', val:r=>r.playersWithMoves, tooltip:'Players who played for a different team at least once this season instead of this one.' },
     ];
     const sortCol = COLUMNS.find(c=>c.key===absenceLeaderboardSort.key) || COLUMNS.find(c=>c.key==='totalMissedRounds');
     const dirMul = absenceLeaderboardSort.dir==='asc' ? 1 : -1;
@@ -12512,7 +12567,8 @@ function renderAbsenceLeaderboard(){
     const thHtml = COLUMNS.map(c=>{
       const active = absenceLeaderboardSort.key === c.key;
       const arrow = active ? (absenceLeaderboardSort.dir==='asc' ? ' ▲' : ' ▼') : '';
-      return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+      const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+      return `<th class="${c.numeric?'num ':''}sortable-th" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
     }).join('');
 
     const rowHtml = r => {
@@ -13067,8 +13123,12 @@ function openMergePlayers(){
 function backToPlayersFromMerge(){ navBack(); }
 
 function renderMergePlayers(){
-  const { playerList } = computeAggregates();
   const wrap = document.getElementById('mergePlayersWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
+  const { playerList } = computeAggregates();
   // Previously always sorted + rendered the FULL player list (thousands of entries) the moment
   // this page opened, and rebuilt that entire list on every keystroke since typing re-runs this
   // whole render — same "search or filter to narrow" gate already used on the Players/Teams tabs,
@@ -13636,6 +13696,10 @@ function backToTeamsFromManageClubs(){ navBack(); }
 
 function renderManageClubs(){
   const wrap = document.getElementById('manageClubsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading club data…</p></div>`;
+    return;
+  }
   const { teamList } = computeAggregates();
   // Group team overrides by which club they resolve to, so it's easy to spot ones pointing
   // to something that's no longer needed now that generic matching handles it correctly.
@@ -13806,6 +13870,10 @@ function backFromFindPlayers(){ navBack(); }
 function renderFindPlayers(){
   const wrap = document.getElementById('findPlayersWrap');
   if(!wrap) return;
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
   const { playerList } = computeAggregates();
   const f = findPlayersFilters;
 
@@ -13836,21 +13904,26 @@ function renderFindPlayers(){
   // the old inline table always showed everyone, now opt-in via a toggle instead of the default.
   // A 5th tuple element (displayKey) covers the two "bests" columns, where the field sorted on
   // (rolling3Best/rolling5Best) differs from the field actually shown (...Label variants).
+  // Core = the handful of stats most people actually want at a glance. Full = the same 21 columns
+  // the old inline table always showed everyone, now opt-in via a toggle instead of the default.
+  // The 4th tuple element is a hover explanation (shown alongside "Click to sort"); the 5th
+  // (displayKey) covers the two "bests" columns, where the field sorted on (rolling3Best/
+  // rolling5Best) differs from the field actually shown (...Label variants).
   const coreCols = [
     ['name','Player','',''], ['team','Team','',''],
-    ['gamesPlayed','GP','num',''], ['totalGoals','Goals','num',''],
-    ['bestCount','Bests','num',''], ['avgGoals','Avg/gm','num','']
+    ['gamesPlayed','GP','num','Games played.'], ['totalGoals','Goals','num','Total goals scored.'],
+    ['bestCount','Bests','num','Times named among the best players.'], ['avgGoals','Avg/gm','num','Goals per game played.']
   ];
   const fullCols = [
     ['name','Player','',''], ['team','Team','',''],
-    ['gamesPlayed','GP','num',''], ['totalGoals','Goals','num',''], ['avgGoals','Avg/gm','num',''],
-    ['rolling3','L3 avg','num',''], ['rolling5','L5 avg','num',''],
-    ['goalsInWins','Goals (W)','num',''], ['goalsInLosses','Goals (L)','num',''],
-    ['scoringShare','Share %','num',''],
-    ['multiGoal2','2+ gm','num',''], ['multiGoal3','3+ gm','num',''], ['multiGoal5','5+ gm','num',''],
-    ['bestCount','Bests','num',''], ['bestsPerGame','Bests/gm','num',''], ['weightedBest','Best pts','num',''], ['bestStreak','Best streak','num',''],
-    ['rolling3Best','L3 bests','num','','rolling3BestLabel'], ['rolling5Best','L5 bests','num','','rolling5BestLabel'],
-    ['mvpScore','MVP pts','num',''], ['formScore','Form score','num','']
+    ['gamesPlayed','GP','num','Games played.'], ['totalGoals','Goals','num','Total goals scored.'], ['avgGoals','Avg/gm','num','Goals per game played.'],
+    ['rolling3','L3 avg','num','Average goals per game over their last 3 games.'], ['rolling5','L5 avg','num','Average goals per game over their last 5 games.'],
+    ['goalsInWins','Goals (W)','num','Goals scored in games their team won.'], ['goalsInLosses','Goals (L)','num','Goals scored in games their team lost.'],
+    ['scoringShare','Share %','num',"Share of their team's total goals that were scored by this player."],
+    ['multiGoal2','2+ gm','num','Games with 2 or more goals.'], ['multiGoal3','3+ gm','num','Games with 3 or more goals.'], ['multiGoal5','5+ gm','num','Games with 5 or more goals.'],
+    ['bestCount','Bests','num','Times named among the best players.'], ['bestsPerGame','Bests/gm','num','Bests as a share of games played.'], ['weightedBest','Best pts','num','Best-player mentions weighted by rank (1st mention worth more than 5th).'], ['bestStreak','Best streak','num','Longest run of consecutive games named among the best.'],
+    ['rolling3Best','L3 bests','num','Bests in their last 3 games.','rolling3BestLabel'], ['rolling5Best','L5 bests','num','Bests in their last 5 games.','rolling5BestLabel'],
+    ['mvpScore','MVP pts','num','Combined scoring + best-player rating used to rank Most Valuable Player.'], ['formScore','Form score','num','Recent form, weighted toward their most recent games.']
   ];
   const cols = f.showAllColumns ? fullCols : coreCols;
 
@@ -13860,11 +13933,11 @@ function renderFindPlayers(){
       <p class="hint" style="margin:14px 0 10px;">${filtered.length} player${filtered.length===1?'':'s'} found. <span id="fpToggleColumns" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${f.showAllColumns?'Show fewer columns':'Show all columns'}</span></p>
       ${filtered.length===0 ? '<div class="empty">No players match.</div>' : `
       <table>
-        <thead><tr>${cols.map(([key,label,cls])=>`<th class="${cls} sortable fp-sort-th" data-key="${key}">${label}${f.sortKey===key?(f.sortDir==='asc'?' ▲':' ▼'):''}</th>`).join('')}</tr></thead>
+        <thead><tr>${cols.map(([key,label,cls,tooltip])=>`<th class="${cls} sortable fp-sort-th" data-key="${key}" title="${tooltip ? tooltip+' (Click to sort)' : 'Click to sort'}">${label}${f.sortKey===key?(f.sortDir==='asc'?' ▲':' ▼'):''}</th>`).join('')}</tr></thead>
         <tbody>${filtered.map(p=>`<tr>
           ${cols.map(([key,,,,displayKey])=> key==='name'
             ? `<td><span class="player-link" data-key="${p.key}">${p.name}</span></td>`
-            : key==='team' ? `<td>${p.team}</td>` : `<td class="num">${p[displayKey||key]}</td>`
+            : key==='team' ? `<td>${p.team}</td>` : `<td class="num">${key==='weightedBest' ? fmtWeightedBest(p[displayKey||key]) : p[displayKey||key]}</td>`
           ).join('')}
         </tr>`).join('')}</tbody>
       </table>`}
@@ -13917,8 +13990,12 @@ function renderFindPlayers(){
 }
 
 function renderTopPlayers(){
-  const { playerList } = computeAggregates();
   const wrap = document.getElementById('topPlayersWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
+  const { playerList } = computeAggregates();
 
   const modeSel = document.getElementById('topModeFilter');
   const ageSel = document.getElementById('topAgeGroupFilter');
@@ -14140,8 +14217,12 @@ function pickerSlotHtml(slotIndex, item, searchValue, matches, itemLabelFn, item
 }
 
 function renderComparePlayers(){
-  const { playerList } = computeAggregates();
   const wrap = document.getElementById('comparePlayersWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
+    return;
+  }
+  const { playerList } = computeAggregates();
   const sorted = [...playerList].sort((a,b)=> a.name.localeCompare(b.name));
   const findMatches = (query, excludeKey) => sorted
     .filter(p=>p.key!==excludeKey)
@@ -14466,6 +14547,10 @@ function backToClubsFromCompare(){ navBack(); }
 
 let compareClubsView = 'h2h'; // 'h2h' or 'all'
 let compareClubsAllFilters = { metric:'players', year:'ALL', ageScope:'ALL', league:'ALL' };
+// Which club's row is currently expanded in the "All clubs" table (null = none). Reset whenever
+// the metric changes, since a different metric's expanded detail wouldn't make sense to carry
+// over — e.g. leaving Torquay's GF-wins list open while switching to Home-grown %.
+let compareClubsExpandedRow = null;
 
 function renderCompareClubs(){
   const wrap = document.getElementById('compareClubsWrap');
@@ -14567,8 +14652,36 @@ function renderCompareClubsAll(wrap, toggleRow){
   const { teamList } = computeAggregates();
   const allYears = [...new Set(teamList.map(t=>t.year).filter(y=>y!=null))].sort((a,b)=>b-a);
   const data = computeAllClubsCompareData(f);
+  const displayLabel = data.effectiveLabel;
 
   const fmtVal = v => metric.isPct ? Math.round(v*100)+'%' : metric.isWholePct ? v+'%' : (typeof v==='number' && !Number.isInteger(v) ? v.toFixed(1) : v);
+
+  // Every count-based metric (Players, GF/Finals appearances & wins) gets an age-group breakdown,
+  // both as stacked bar segments and as extra table columns — which sub-groups appear depends
+  // entirely on the age-scope filter already selected, so this never introduces a NEW control,
+  // just makes the existing one also shape the chart's colour split. "All age groups" collapses to
+  // exactly 2 segments (Seniors/Reserves vs every junior grade combined) rather than every
+  // individual age group, since mixing 8 age-group colours with 40 clubs would be unreadable — the
+  // finer split only shows once you've actually narrowed to Juniors-only or Seniors/Reserves-only.
+  // Only Players needs a "played across multiple groups" catch-all (one person, several games,
+  // possibly several grades over the years) — a single Grand Final or Finals game belongs to
+  // exactly one age group, so gf/finals breakdowns never have that ambiguity to resolve.
+  const isPlayersMetric = metric.key==='players';
+  const hasBreakdown = !!metric.hasBreakdown;
+  let subGroups = null, breakdown = null;
+  if(hasBreakdown){
+    breakdown = isPlayersMetric ? computeClubPlayerCountsBreakdown(f.year, f.ageScope) : metric.breakdownFn(f.year, f.ageScope);
+    const multiTail = isPlayersMetric ? [MULTI_GROUP_LABEL] : [];
+    if(f.ageScope==='JUNIOR') subGroups = ['U9','U10','U12','U14','U16','U18',...multiTail];
+    else if(f.ageScope==='SENIOR') subGroups = ['Seniors','Reserves',...multiTail];
+    else subGroups = ['Seniors/Reserves','Juniors',...multiTail];
+    // Only keep sub-groups that actually have at least one club with a nonzero count, so a filter
+    // combination with no seniors at all (say) doesn't add an empty, colour-wasting legend entry.
+    subGroups = subGroups.filter(sg => Object.values(breakdown).some(clubBreakdown => (clubBreakdown[sg]||0) > 0));
+  }
+  const SUBGROUP_PALETTE = { 'Seniors/Reserves':'#4B7BA8', 'Juniors':'#3F8556', 'Seniors':'#4B7BA8', 'Reserves':'#8A5FA8',
+    'U9':'#3F8556', 'U10':'#4A7FB5', 'U12':'#C08A3F', 'U14':'#8A5FA8', 'U16':'#C0473F', 'U18':'#4FA3A0',
+    [MULTI_GROUP_LABEL]:'#8FA0A3' };
 
   wrap.innerHTML = `
     <span class="back-link" id="backToClubsFromCompare">&larr; Back to clubs</span>
@@ -14577,11 +14690,11 @@ function renderCompareClubsAll(wrap, toggleRow){
     <p class="hint">Every club at once, for one metric — pick what to show below.</p>
     <div class="controls-row" style="margin-bottom:8px;gap:8px;flex-wrap:wrap;">
       <select id="ccAllMetricSel">${CLUB_COMPARE_METRICS.map(m=>`<option value="${m.key}" ${f.metric===m.key?'selected':''}>${m.label}</option>`).join('')}</select>
-      <select id="ccAllYearSel" ${metric.filterable?'':'disabled title="Only Players and Retention can be scoped to a specific year — every other metric here is always career-wide, same as Home Grown/Junior Pathway."'}>
+      <select id="ccAllYearSel" ${metric.filterable?'':'disabled title="This metric is always career-wide."'}>
         <option value="ALL" ${f.year==='ALL'?'selected':''}>All years</option>
         ${allYears.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y} only</option>`).join('')}
       </select>
-      <select id="ccAllAgeSel" ${metric.filterable?'':'disabled title="Only Players and Retention can be scoped by age group — every other metric here already has its own fixed definition."'}>
+      <select id="ccAllAgeSel" ${(metric.filterable && !metric.noAgeScope)?'':'disabled title="This metric is already fixed to Seniors/Reserves by definition — an age-group scope would ask a different, contradictory question."'}>
         <option value="ALL" ${f.ageScope==='ALL'?'selected':''}>All age groups</option>
         <option value="JUNIOR" ${f.ageScope==='JUNIOR'?'selected':''}>Juniors only</option>
         <option value="SENIOR" ${f.ageScope==='SENIOR'?'selected':''}>Seniors/Reserves only</option>
@@ -14591,17 +14704,41 @@ function renderCompareClubsAll(wrap, toggleRow){
         ${Object.entries(LEAGUE_FULL_NAMES).map(([code,name])=>`<option value="${code}" ${f.league===code?'selected':''}>${name} only</option>`).join('')}
       </select>
     </div>
-    ${!metric.filterable ? `<p class="hint" style="margin:0 0 12px;">${metric.label} is always career-wide — the year/age-group filters above only apply to Players and Retention.</p>` : ''}
+    ${!metric.filterable ? `<p class="hint" style="margin:0 0 12px;">${metric.label} is always career-wide.</p>` : ''}
+    ${metric.noAgeScope ? `<p class="hint" style="margin:0 0 12px;">This metric always covers Seniors/Reserves — the age-group filter above doesn't apply here.</p>` : ''}
     ${metric.key==='retention' && f.year==='ALL' ? `<p class="hint" style="margin:0 0 12px;">"All years" averages each club's own retention across every consecutive year-pair it has on file — not one specific season.</p>` : ''}
+    ${metric.explainer ? `<p class="hint" style="margin:0 0 12px;">${metric.explainer}</p>` : ''}
+    ${data.isSingleYearCount ? `<p class="hint" style="margin:0 0 12px;">Showing ${f.year}'s own real count, not a multi-season average — pick "All years" to see the usual per-season average instead.</p>` : ''}
     <div style="height:${Math.max(340, data.rows.length*22)}px;margin-bottom:16px;"><canvas id="ccAllChart"></canvas></div>
-    <table><thead><tr><th>#</th><th>Club</th><th class="num">${metric.label}</th></tr></thead>
-    <tbody>${data.rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.club}</td><td class="num">${fmtVal(r.value)}</td></tr>`).join('')}</tbody></table>
+    <table><thead><tr>${metric.expandable ? '<th></th>' : ''}<th>#</th><th>Club</th><th class="num">${displayLabel}</th>${hasBreakdown ? subGroups.map(sg=>`<th class="num">${sg}</th>`).join('') : ''}</tr></thead>
+    <tbody>${data.rows.map((r,i)=>{
+      const colCount = 3 + (metric.expandable?1:0) + (hasBreakdown?subGroups.length:0);
+      const isOpen = metric.expandable && compareClubsExpandedRow===r.club;
+      const rowHtml = `<tr class="${metric.expandable?'cc-expandable-row':''}" ${metric.expandable?`data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;"`:''}>${metric.expandable?`<td>${isOpen?'▼':'▶'}</td>`:''}<td>${i+1}</td><td>${r.club}</td><td class="num">${fmtVal(r.value)}</td>${hasBreakdown ? subGroups.map(sg=>`<td class="num">${(breakdown[r.club]&&breakdown[r.club][sg])||0}</td>`).join('') : ''}</tr>`;
+      if(!isOpen) return rowHtml;
+      const detailRows = metric.detailFn(r.club, f.year, f.ageScope);
+      const detailHtml = `<tr><td colspan="${colCount}" style="padding:10px 12px;background:rgba(255,255,255,0.02);">
+        ${detailRows.length ? `<table style="width:100%;"><thead><tr><th>Year</th><th>Age group</th><th>Opponent</th><th>Round</th><th>Result</th></tr></thead>
+        <tbody>${detailRows.map(d=>`<tr><td>${d.year}</td><td>${d.grade}</td><td>${d.opponent}</td><td>${d.roundLabel||'—'}</td><td>${d.won?'Won':'Lost'}</td></tr>`).join('')}</tbody></table>`
+        : `<p class="hint" style="margin:0;">No games matching this filter.</p>`}
+      </td></tr>`;
+      return rowHtml + detailHtml;
+    }).join('')}</tbody></table>
   `;
   document.getElementById('backToClubsFromCompare').onclick = backToClubsFromCompare;
   wrap.querySelectorAll('.churn-view-toggle').forEach(btn=>{
     btn.onclick = ()=>{ compareClubsView = btn.dataset.view; renderCompareClubs(); };
   });
-  document.getElementById('ccAllMetricSel').onchange = e=>{ compareClubsAllFilters.metric = e.target.value; renderCompareClubs(); };
+  if(metric.expandable){
+    wrap.querySelectorAll('.cc-expandable-row').forEach(row=>{
+      row.onclick = ()=>{
+        const club = row.dataset.club;
+        compareClubsExpandedRow = compareClubsExpandedRow===club ? null : club;
+        renderCompareClubs();
+      };
+    });
+  }
+  document.getElementById('ccAllMetricSel').onchange = e=>{ compareClubsAllFilters.metric = e.target.value; compareClubsExpandedRow = null; renderCompareClubs(); };
   document.getElementById('ccAllYearSel').onchange = e=>{ compareClubsAllFilters.year = e.target.value; renderCompareClubs(); };
   document.getElementById('ccAllAgeSel').onchange = e=>{ compareClubsAllFilters.ageScope = e.target.value; renderCompareClubs(); };
   document.getElementById('ccAllLeagueSel').onchange = e=>{ compareClubsAllFilters.league = e.target.value; renderCompareClubs(); };
@@ -14610,12 +14747,35 @@ function renderCompareClubsAll(wrap, toggleRow){
   if(canvas && data.rows.length){
     const AXIS = { ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
     const AXIS_N = { beginAtZero:true, ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+    const labels = data.rows.map(r=>r.club);
+    // Per-club TOTAL, keyed by label — the same value already shown in the table's own column —
+    // so a hover on any one stacked segment can show both "how many of THIS colour" (the segment
+    // Chart.js already highlights) and "how many altogether" right below it, rather than leaving
+    // the total to be inferred by eye from the rest of the bar.
+    const totalByClub = {}; data.rows.forEach(r=>{ totalByClub[r.club] = r.value; });
+    let datasets;
+    if(hasBreakdown){
+      datasets = subGroups.map(sg => ({
+        label: sg,
+        data: labels.map(club => (breakdown[club] && breakdown[club][sg]) || 0),
+        backgroundColor: SUBGROUP_PALETTE[sg] || '#C9A227'
+      }));
+    } else {
+      datasets = [{ label: displayLabel, data: data.rows.map(r=> metric.isPct ? +(r.value*100).toFixed(1) : r.value), backgroundColor:'#C9A227' }];
+    }
+    const plugins = { legend:{ display: hasBreakdown, labels:{ color:'#EDF1F0' } }, title:{ display:true, text: displayLabel + (data.rows.length ? ` — ${data.rows.length} clubs` : ''), color:'#EDF1F0' } };
+    if(hasBreakdown){
+      plugins.tooltip = { callbacks: {
+        label: ctx => `${ctx.dataset.label}: ${ctx.parsed.x}`,
+        afterBody: ctx => ctx.length ? [`Total: ${totalByClub[ctx[0].label] ?? '—'}`] : []
+      } };
+    }
     window._compareClubsChartInstance = new Chart(canvas.getContext('2d'), {
       type:'bar',
-      data:{ labels: data.rows.map(r=>r.club), datasets:[{ label: metric.label, data: data.rows.map(r=> metric.isPct ? +(r.value*100).toFixed(1) : r.value), backgroundColor:'#C9A227' }] },
+      data:{ labels, datasets },
       options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
-        scales:{ x:AXIS_N, y:AXIS },
-        plugins:{ legend:{ display:false }, title:{ display:true, text: metric.label + (data.rows.length ? ` — ${data.rows.length} clubs` : ''), color:'#EDF1F0' } } }
+        scales:{ x:{ ...AXIS_N, stacked: hasBreakdown }, y:{ ...AXIS, stacked: hasBreakdown } },
+        plugins }
     });
   }
 }
@@ -14667,8 +14827,12 @@ function renderClubComparisonResult(clubA, clubB, colorA, colorB){
 }
 
 function renderCompareTeams(){
-  const { teamList } = computeAggregates();
   const wrap = document.getElementById('compareTeamsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading team data…</p></div>`;
+    return;
+  }
+  const { teamList } = computeAggregates();
   const sorted = [...teamList].sort((a,b)=> a.name.localeCompare(b.name) || (b.year||0)-(a.year||0));
   const findMatches = (query, excludeKey) => sorted
     .filter(t=>t.key!==excludeKey)
@@ -15348,6 +15512,10 @@ function doOpenCohortTrajectory(preset){
 function renderCohortTrajectory(){
   const wrap = document.getElementById('cohortTrajectoryWrap');
   const header = `<span class="back-link" id="backFromCohortTraj">&larr; Back</span><h2 style="font-size:20px;">Cohort trajectory</h2>`;
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `${header}<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading game data…</p></div>`;
+    return;
+  }
   // Tracing even one cohort touches computeLadder for several distinct years, and each NEW year
   // seen this session pays a real, one-time cost the first time anything needs it (confirmed on
   // real data at up to several seconds per year) — a loading indicator here means that cost reads
@@ -16518,16 +16686,67 @@ function computeLeagueWideAttritionUncached(){
 // Home Grown/Junior Pathway/Club Retention show elsewhere for that same club) — "Players" is the
 // one exception, genuinely re-filterable by year/age-scope/league, since "how many players did
 // this club have" is meaningfully different for "2026 juniors only" vs "career-wide, everyone".
+// League-wide, ALL-clubs version of the same numbers Compare Clubs already shows head-to-head —
+// backs the "All clubs" chart view. Every metric is now genuinely re-filterable by year, and by
+// age-scope where that combination has an unambiguous meaning. A metric with no natural notion of
+// "just this one year" (the junior/senior debut AVERAGES, inherently multi-season by definition)
+// instead reports that one year's own real count when a specific year is picked — the label
+// itself switches between the averaged and single-year wording so the number is never mislabeled.
+// noAgeScope metrics (the Junior Pathway trio) are already fixed to Seniors/Reserves by
+// definition — "Juniors only" would ask a different, contradictory question — so their age
+// dropdown stays disabled even though the year one works.
 const CLUB_COMPARE_METRICS = [
-  { key:'players', label:'Players', filterable:true, filterFn: (year,ageScope) => computeClubPlayerCounts(year, ageScope) },
-  { key:'homeGrownPct', label:'Home-grown %', isPct:true },
-  { key:'ownClubJuniorDebutsAvg', label:'Avg junior debuts/season (own club)' },
-  { key:'allClubJuniorDebutsAvg', label:'Avg junior debuts/season (any club)' },
-  { key:'ownClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (own-club juniors)' },
-  { key:'anyClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (any-club juniors)' },
-  { key:'juniorPathwayPct', label:'Junior pathway % (any club)', isPct:true },
-  { key:'juniorPathwayOwnClubPct', label:'Junior pathway % (own club)', isPct:true },
-  { key:'juniorPathwayOtherClubPct', label:"Junior pathway % (recruited, another club's juniors)", isPct:true },
+  { key:'players', label:'Players', filterable:true, hasBreakdown:true, filterFn: (year,ageScope) => computeClubPlayerCounts(year, ageScope) },
+  { key:'homeGrownPct', label:'Home-grown %', isPct:true, filterable:true, filterFn: (year,ageScope) => {
+      const saved = homeGrownFilters;
+      homeGrownFilters = { mode:'clubs', minPlayers:1, minRoster:1, search:'', year, ageGroup: ageScope==='JUNIOR'?'ALL_JUNIORS':ageScope==='SENIOR'?'SENIORS_RESERVES':'ALL', division:'ALL', club:'ALL' };
+      const hg = computeHomeGrown();
+      homeGrownFilters = saved;
+      const out = {};
+      hg.clubs.forEach(r=>{ out[r.club] = r.pct; });
+      return out;
+    } },
+  { key:'ownClubJuniorDebutsAvg', label:'Avg junior debuts/season (own club)', yearLabel:'Junior debuts (own club)', filterable:true, yearOnly:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('ownClubJunior', year) },
+  { key:'allClubJuniorDebutsAvg', label:'Avg junior debuts/season (any club)', yearLabel:'Junior debuts (any club)', filterable:true, yearOnly:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('allClubJunior', year) },
+  { key:'ownClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (own-club juniors)', yearLabel:'Seniors/Reserves debuts (own-club juniors)', filterable:true, yearOnly:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('ownClubSenior', year) },
+  { key:'anyClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (any-club juniors)', yearLabel:'Seniors/Reserves debuts (any-club juniors)', filterable:true, yearOnly:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('anyClubSenior', year) },
+  { key:'juniorPathwayPct', label:'Junior pathway % (any club)', isPct:true, filterable:true, noAgeScope:true,
+    explainer:"Of each club's current Seniors/Reserves players, how many played juniors somewhere \u2014 at this club or any other. The broadest measure of \"came up through a junior pathway, wherever it was.\"",
+    filterFn: (year) => {
+      const { playerList } = computeAggregates();
+      const rows = computeJuniorPathwayByClub(playerList, { gradeScope:'both', juniorScope:'any', currentYear: year==='ALL'?null:Number(year), league:'ALL', juniorYear:null });
+      const out = {}; rows.forEach(r=>{ if(r.total) out[r.club] = Math.min(1, r.withJuniors/r.total); });
+      return out;
+    } },
+  { key:'juniorPathwayOwnClubPct', label:'Junior pathway % (own club)', isPct:true, filterable:true, noAgeScope:true,
+    explainer:"Narrows that to players whose junior years were specifically at THIS club \u2014 genuinely home-grown all the way through, not just known to have played juniors somewhere.",
+    filterFn: (year) => {
+      const { playerList } = computeAggregates();
+      const rows = computeJuniorPathwayByClub(playerList, { gradeScope:'both', juniorScope:'same', currentYear: year==='ALL'?null:Number(year), league:'ALL', juniorYear:null });
+      const out = {}; rows.forEach(r=>{ if(r.total) out[r.club] = Math.min(1, r.withJuniors/r.total); });
+      return out;
+    } },
+  { key:'juniorPathwayOtherClubPct', label:"Junior pathway % (recruited, another club's juniors)", isPct:true, filterable:true, noAgeScope:true,
+    explainer:"The flip side of \"own club\" \u2014 players who did play juniors somewhere, but not here. A high number means a club recruiting seniors who were developed elsewhere, rather than growing its own.",
+    filterFn: (year) => {
+      const { playerList } = computeAggregates();
+      const yr = year==='ALL'?null:Number(year);
+      const anyRows = computeJuniorPathwayByClub(playerList, { gradeScope:'both', juniorScope:'any', currentYear:yr, league:'ALL', juniorYear:null });
+      const sameRows = computeJuniorPathwayByClub(playerList, { gradeScope:'both', juniorScope:'same', currentYear:yr, league:'ALL', juniorYear:null });
+      const sameByClub = {}; sameRows.forEach(r=>{ sameByClub[r.club] = r; });
+      const out = {};
+      anyRows.forEach(r=>{
+        if(!r.total) return;
+        const sameRow = sameByClub[r.club];
+        const sameWith = sameRow ? sameRow.withJuniors : 0;
+        out[r.club] = Math.max(0, Math.min(1, (r.withJuniors - sameWith)/r.total));
+      });
+      return out;
+    } },
   // One metric, driven entirely by the shared year/age-group dropdowns rather than two fixed
   // presets — "All years" maps to computeClubChurn's own all-time-average mode, a specific year
   // to its single-transition mode (both already built for the Club Retention tool itself, reused
@@ -16539,8 +16758,24 @@ const CLUB_COMPARE_METRICS = [
       rows.forEach(r=>{ if(r.retentionPct!=null) out[r.club] = r.retentionPct; });
       return out;
     } },
-  { key:'gfAppearances', label:'Grand Final appearances' },
-  { key:'gfWins', label:'Grand Final wins' }
+  { key:'gfAppearances', label:'Grand Final appearances', filterable:true, hasBreakdown:true,
+    expandable:true, detailFn: (club,year,ageScope) => computeClubEventDetail(club, true, false, year, ageScope),
+    filterFn: (year,ageScope) => computeClubGFCounts(year,ageScope).appearances,
+    breakdownFn: (year,ageScope) => computeClubGFCounts(year,ageScope).appearancesBySub },
+  { key:'gfWins', label:'Grand Final wins', filterable:true, hasBreakdown:true,
+    expandable:true, detailFn: (club,year,ageScope) => computeClubEventDetail(club, true, true, year, ageScope),
+    filterFn: (year,ageScope) => computeClubGFCounts(year,ageScope).wins,
+    breakdownFn: (year,ageScope) => computeClubGFCounts(year,ageScope).winsBySub },
+  { key:'finalsAppearances', label:'Finals appearances', filterable:true, hasBreakdown:true,
+    expandable:true, detailFn: (club,year,ageScope) => computeClubEventDetail(club, false, false, year, ageScope),
+    explainer:"Any game in the finals series \u2014 qualifying, elimination, semi, preliminary or grand final \u2014 not just the Grand Final itself. Surfaces clubs that are genuinely competitive most years, even ones that rarely go all the way.",
+    filterFn: (year,ageScope) => computeClubFinalsCounts(year,ageScope).appearances,
+    breakdownFn: (year,ageScope) => computeClubFinalsCounts(year,ageScope).appearancesBySub },
+  { key:'finalsWins', label:'Finals wins', filterable:true, hasBreakdown:true,
+    expandable:true, detailFn: (club,year,ageScope) => computeClubEventDetail(club, false, true, year, ageScope),
+    explainer:"Won ANY finals-series game \u2014 not specifically a premiership. A club that keeps winning qualifying or semi finals but can't quite get past the Preliminary Final still shows up strongly here.",
+    filterFn: (year,ageScope) => computeClubFinalsCounts(year,ageScope).wins,
+    breakdownFn: (year,ageScope) => computeClubFinalsCounts(year,ageScope).winsBySub },
 ];
 const _clubPlayerCountsCache = new Map();
 function computeClubPlayerCounts(year, ageScope){
@@ -16571,6 +16806,63 @@ function computeClubPlayerCounts(year, ageScope){
   _clubPlayerCountsCache.set(cacheKey, result);
   return result;
 }
+
+// Same player-counting rules as computeClubPlayerCounts (identical exclusions, identical
+// definition of "this club's player") but split into sub-groups instead of one total, for the
+// stacked bar in the "All clubs" chart. Which sub-groups exist depends on ageScope: "ALL" splits
+// into Seniors/Reserves vs every junior grade combined; "SENIOR" splits Seniors from Reserves
+// specifically; "JUNIOR" splits into each individual junior age group. Every player is tracked by
+// the FULL SET of sub-groups they appeared in — someone who only ever played one sub-group is
+// counted there; someone who genuinely appeared in 2+ (e.g. both Reserves and Seniors over the
+// years, or both U14 and U16 as they aged up) is counted once in a separate "Played across
+// multiple groups" segment rather than being arbitrarily assigned to just one of them, or counted
+// twice and inflating the bar's total length. Either way the segments always sum to exactly the
+// same total computeClubPlayerCounts reports for this same (year, ageScope) — nobody is double-
+// counted, and nobody's genuine cross-group history gets silently dropped to force a single label.
+const MULTI_GROUP_LABEL = 'Played across multiple groups';
+const _clubPlayerBreakdownCache = new Map();
+function computeClubPlayerCountsBreakdown(year, ageScope){
+  const cacheKey = `${year}|${ageScope}|${_aggVersion}`;
+  if(_clubPlayerBreakdownCache.has(cacheKey)) return _clubPlayerBreakdownCache.get(cacheKey);
+  const { playerList } = computeAggregates();
+  const subGroupFor = grade => {
+    if(ageScope==='JUNIOR') return isJuniorGrade(grade) ? grade : null;
+    if(ageScope==='SENIOR') return (grade==='Seniors'||grade==='Reserves') ? grade : null;
+    if(grade==='Seniors'||grade==='Reserves') return 'Seniors/Reserves';
+    if(isJuniorGrade(grade)) return 'Juniors';
+    return null;
+  };
+  // club -> player key -> Set of every distinct sub-group this player appeared in at this club.
+  const subsByClub = {};
+  playerList.forEach(p=>{
+    p.timeline.forEach(t=>{
+      if(year!=='ALL'){
+        const y = t.date ? new Date(t.date).getFullYear() : null;
+        if(String(y)!==String(year)) return;
+      }
+      if(isMergedTeam(t.team, t.date ? new Date(t.date).getFullYear() : null)) return;
+      const grade = getAgeGroupLabel(t.team);
+      if(ageScope==='JUNIOR' && !isJuniorGrade(grade)) return;
+      if(ageScope==='SENIOR' && grade!=='Seniors' && grade!=='Reserves') return;
+      const sub = subGroupFor(grade);
+      if(!sub) return;
+      const club = homeGrownClubKey(t.team);
+      if(!club) return;
+      subsByClub[club] = subsByClub[club] || {};
+      (subsByClub[club][p.key] = subsByClub[club][p.key] || new Set()).add(sub);
+    });
+  });
+  const result = {};
+  Object.entries(subsByClub).forEach(([club, byPlayer])=>{
+    result[club] = {};
+    Object.values(byPlayer).forEach(subsSet=>{
+      const key = subsSet.size === 1 ? [...subsSet][0] : MULTI_GROUP_LABEL;
+      result[club][key] = (result[club][key]||0) + 1;
+    });
+  });
+  _clubPlayerBreakdownCache.set(cacheKey, result);
+  return result;
+}
 // Which league a club's CURRENT (most recent year on file) senior/reserves side plays in, for the
 // league filter — a club with no senior/reserves presence at all (junior-only, e.g. Bellbrae
 // Dolphins) has no league and is only ever shown under "All leagues".
@@ -16589,15 +16881,226 @@ function computeClubCurrentLeague(clubName){
   _clubLeagueCache.set(cacheKey, league);
   return league;
 }
+
+// All-clubs, year/age-filterable Grand Final appearances & wins — the same underlying definition
+// computeClubCompareStats already uses (career-wide), but computed for every club at once and
+// narrowable to one specific year and/or one age-group scope, so this can genuinely answer "how
+// many Grand Finals has this club been in during 2024" or "...at junior level only", not just
+// "ever, across everything".
+const _clubGFCountsCache = new Map();
+function computeClubGFCounts(year, ageScope){
+  const cacheKey = `${year}|${ageScope}|${_aggVersion}`;
+  if(_clubGFCountsCache.has(cacheKey)) return _clubGFCountsCache.get(cacheKey);
+  const appearances = {}, wins = {}, appearancesBySub = {}, winsBySub = {};
+  getVisibleGames().forEach(g=>{
+    if(!isGrandFinalGame(g) || !g.teamA || !g.teamB) return;
+    if(year!=='ALL' && String(getGameYear(g))!==String(year)) return;
+    const grade = getAgeGroupLabel(g.teamA.name);
+    if(ageScope==='JUNIOR' && !isJuniorGrade(grade)) return;
+    if(ageScope==='SENIOR' && grade!=='Seniors' && grade!=='Reserves') return;
+    const sub = clubCountsSubGroupFor(grade, ageScope);
+    [g.teamA.name, g.teamB.name].forEach(name=>{
+      const club = homeGrownClubKey(name);
+      if(!club) return;
+      appearances[club] = (appearances[club]||0) + 1;
+      if(sub){ appearancesBySub[club] = appearancesBySub[club] || {}; appearancesBySub[club][sub] = (appearancesBySub[club][sub]||0) + 1; }
+    });
+    if(g.winner){
+      const club = homeGrownClubKey(g.winner);
+      if(club){
+        wins[club] = (wins[club]||0) + 1;
+        if(sub){ winsBySub[club] = winsBySub[club] || {}; winsBySub[club][sub] = (winsBySub[club][sub]||0) + 1; }
+      }
+    }
+  });
+  const result = { appearances, wins, appearancesBySub, winsBySub };
+  _clubGFCountsCache.set(cacheKey, result);
+  return result;
+}
+
+// Same 3-way (ALL/SENIOR/JUNIOR) sub-group split used for the Players breakdown, reused here for
+// any count-based metric where a single event (a game, an appearance) belongs to exactly one age
+// group — unlike Players, nobody needs a "multiple groups" catch-all, since one Grand Final game
+// can't itself be both a junior and a senior game.
+function clubCountsSubGroupFor(grade, ageScope){
+  if(ageScope==='JUNIOR') return isJuniorGrade(grade) ? grade : null;
+  if(ageScope==='SENIOR') return (grade==='Seniors'||grade==='Reserves') ? grade : null;
+  if(grade==='Seniors'||grade==='Reserves') return 'Seniors/Reserves';
+  if(isJuniorGrade(grade)) return 'Juniors';
+  return null;
+}
+
+// Same shape as computeClubGFCounts, but for the FULL finals period (isFinalsGame — every
+// qualifying/elimination/semi/preliminary/grand final game), not just the Grand Final itself.
+// "Wins" here means won ANY finals-period game, not specifically the premiership — deliberately
+// broader, so a club that's competitive enough to reach and win a qualifying or semi final, but
+// never quite gets to (or wins) the Grand Final, still shows up here rather than reading as if
+// they never achieved anything in finals at all.
+const _clubFinalsCountsCache = new Map();
+function computeClubFinalsCounts(year, ageScope){
+  const cacheKey = `${year}|${ageScope}|${_aggVersion}`;
+  if(_clubFinalsCountsCache.has(cacheKey)) return _clubFinalsCountsCache.get(cacheKey);
+  const appearances = {}, wins = {}, appearancesBySub = {}, winsBySub = {};
+  getVisibleGames().forEach(g=>{
+    if(!isFinalsGame(g) || !g.teamA || !g.teamB) return;
+    if(year!=='ALL' && String(getGameYear(g))!==String(year)) return;
+    const grade = getAgeGroupLabel(g.teamA.name);
+    if(ageScope==='JUNIOR' && !isJuniorGrade(grade)) return;
+    if(ageScope==='SENIOR' && grade!=='Seniors' && grade!=='Reserves') return;
+    const sub = clubCountsSubGroupFor(grade, ageScope);
+    [g.teamA.name, g.teamB.name].forEach(name=>{
+      const club = homeGrownClubKey(name);
+      if(!club) return;
+      appearances[club] = (appearances[club]||0) + 1;
+      if(sub){ appearancesBySub[club] = appearancesBySub[club] || {}; appearancesBySub[club][sub] = (appearancesBySub[club][sub]||0) + 1; }
+    });
+    if(g.winner){
+      const club = homeGrownClubKey(g.winner);
+      if(club){
+        wins[club] = (wins[club]||0) + 1;
+        if(sub){ winsBySub[club] = winsBySub[club] || {}; winsBySub[club][sub] = (winsBySub[club][sub]||0) + 1; }
+      }
+    }
+  });
+  const result = { appearances, wins, appearancesBySub, winsBySub };
+  _clubFinalsCountsCache.set(cacheKey, result);
+  return result;
+}
+
+// The individual games behind one club's GF/Finals appearance or win count — what a table row
+// expands to show. "won" restricts to games this club actually won; otherwise every appearance is
+// listed. Same isGrandFinalGame/isFinalsGame + year/ageScope filtering as the count functions
+// above, so the list a row expands to always matches the number shown in that row exactly.
+function computeClubEventDetail(club, isGrandFinalOnly, wonOnly, year, ageScope){
+  const rows = [];
+  getVisibleGames().forEach(g=>{
+    const isFinalsType = isGrandFinalOnly ? isGrandFinalGame(g) : isFinalsGame(g);
+    if(!isFinalsType || !g.teamA || !g.teamB) return;
+    if(year!=='ALL' && String(getGameYear(g))!==String(year)) return;
+    const grade = getAgeGroupLabel(g.teamA.name);
+    if(ageScope==='JUNIOR' && !isJuniorGrade(grade)) return;
+    if(ageScope==='SENIOR' && grade!=='Seniors' && grade!=='Reserves') return;
+    const aIsClub = homeGrownClubKey(g.teamA.name)===club;
+    const bIsClub = homeGrownClubKey(g.teamB.name)===club;
+    if(!aIsClub && !bIsClub) return;
+    const won = g.winner && homeGrownClubKey(g.winner)===club;
+    if(wonOnly && !won) return;
+    const opponent = aIsClub ? g.teamB.name : g.teamA.name;
+    rows.push({ year: getGameYear(g), grade, opponent, won, roundLabel: g.roundLabel||'', gameId: g.id });
+  });
+  rows.sort((a,b)=> (b.year-a.year) || gradeDisplayRank(a.grade)-gradeDisplayRank(b.grade));
+  return rows;
+}
+
+// A single year's actual debut count for one of the 4 junior/senior debut-average metrics — "All
+// years" still shows the multi-season AVERAGE (computeClubCompareStats' own definition, so it
+// never disagrees with the head-to-head view), but picking one specific year switches to what
+// actually happened THAT year, since "average" isn't a meaningful idea for a single season. kind
+// is one of 'ownClubJunior' | 'allClubJunior' | 'ownClubSenior' | 'anyClubSenior', matching which
+// of the 4 metrics is asking.
+const _clubDebutsForYearCache = new Map();
+function computeClubDebutsForYear(kind, year){
+  const cacheKey = `${kind}|${year}|${_aggVersion}`;
+  if(_clubDebutsForYearCache.has(cacheKey)) return _clubDebutsForYearCache.get(cacheKey);
+  const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
+  const { resolveNameClubsKey } = computeNameClubsWithResolver(allGames, homeGrownClubKey, 'homeGrown');
+  const isJuniorKind = kind==='ownClubJunior' || kind==='allClubJunior';
+  const wantOwnClubOnly = kind==='ownClubJunior' || kind==='ownClubSenior';
+  const result = {};
+
+  if(isJuniorKind){
+    // Same debut definition as computeHomeGrownUncached: a player's very first-ever junior game
+    // anywhere counts as their debut, in whichever year and at whichever club that first game was.
+    const nameEarliestJuniorEver = {}, nameEarliestJuniorAtClub = {};
+    allGames.forEach(g=>{
+      const y = getGameYear(g);
+      if(!y) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t) return;
+        const grade = getAgeGroupLabel(t.name);
+        if(!isJuniorGrade(grade)) return;
+        const club = homeGrownClubKey(t.name);
+        if(!club) return;
+        (t.players||[]).forEach(row=>{
+          if(!row.name || isPlaceholderPlayerName(row.name)) return;
+          const key = resolveNameClubsKey(row.name, row.playhqId, grade);
+          if(!nameEarliestJuniorEver[key] || y < nameEarliestJuniorEver[key].year) nameEarliestJuniorEver[key] = { year:y, club };
+          nameEarliestJuniorAtClub[key] = nameEarliestJuniorAtClub[key] || {};
+          if(nameEarliestJuniorAtClub[key][club]==null || y < nameEarliestJuniorAtClub[key][club]) nameEarliestJuniorAtClub[key][club] = y;
+        });
+      });
+    });
+    if(wantOwnClubOnly){
+      Object.values(nameEarliestJuniorEver).forEach(({year:y,club})=>{
+        if(String(y)!==String(year)) return;
+        result[club] = (result[club]||0) + 1;
+      });
+    } else {
+      Object.values(nameEarliestJuniorAtClub).forEach(byClub=>{
+        Object.entries(byClub).forEach(([club,y])=>{
+          if(String(y)!==String(year)) return;
+          result[club] = (result[club]||0) + 1;
+        });
+      });
+    }
+  } else {
+    // Senior/Reserves debut = first-ever Seniors/Reserves game, only counted if that same player
+    // ALSO has known junior history — someone with no junior record on file is a genuine adult
+    // newcomer, not a graduate of any pathway. "Own club" narrows to junior history at the SAME
+    // club; "any club" accepts junior history anywhere.
+    const nameFirstSenior = {}, nameJuniorClubs = {};
+    allGames.forEach(g=>{
+      const y = getGameYear(g);
+      if(!y) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t) return;
+        const grade = getAgeGroupLabel(t.name);
+        const club = homeGrownClubKey(t.name);
+        if(!club) return;
+        (t.players||[]).forEach(row=>{
+          if(!row.name || isPlaceholderPlayerName(row.name)) return;
+          const key = resolveNameClubsKey(row.name, row.playhqId, grade);
+          if(grade==='Seniors' || grade==='Reserves'){
+            if(!nameFirstSenior[key] || y < nameFirstSenior[key].year) nameFirstSenior[key] = { year:y, club };
+          }
+          if(isJuniorGrade(grade)) (nameJuniorClubs[key] = nameJuniorClubs[key] || new Set()).add(club);
+        });
+      });
+    });
+    Object.entries(nameFirstSenior).forEach(([key,{year:y,club}])=>{
+      if(String(y)!==String(year)) return;
+      const juniorClubs = nameJuniorClubs[key];
+      if(!juniorClubs || !juniorClubs.size) return;
+      if(wantOwnClubOnly){
+        if(juniorClubs.has(club)) result[club] = (result[club]||0) + 1;
+      } else {
+        result[club] = (result[club]||0) + 1;
+      }
+    });
+  }
+  _clubDebutsForYearCache.set(cacheKey, result);
+  return result;
+}
+
 function computeAllClubsCompareData(filters){
   const { metric: metricKey, year, ageScope, league } = filters;
   const metric = CLUB_COMPARE_METRICS.find(m=>m.key===metricKey) || CLUB_COMPARE_METRICS[0];
+  // yearOnly metrics (the 4 junior/senior debut counts) return null from their own filterFn when
+  // year is 'ALL', since "average" is what career-wide already means for them — falls back to
+  // computeClubCompareStats' own multi-season average in that case, same number the head-to-head
+  // view shows. A specific year instead uses that year's own real filterFn result directly.
   const filteredValues = metric.filterable ? metric.filterFn(year, ageScope) : null;
+  const usingCareerWideFallback = metric.filterable && filteredValues==null;
+  // Which wording applies: yearOnly metrics swap to their single-year label once a specific year
+  // is picked, since "Avg ... /season" would misdescribe a single season's real count.
+  const effectiveLabel = (metric.yearLabel && year!=='ALL') ? metric.yearLabel : metric.label;
   const rows = knownClubs
     .filter(club=> league==='ALL' || computeClubCurrentLeague(club)===league)
     .map(club=>{
       let value;
-      if(metric.filterable){
+      if(usingCareerWideFallback){
+        value = computeClubCompareStats(club)[metricKey];
+      } else if(metric.filterable){
         value = filteredValues[club] ?? null;
       } else {
         const s = computeClubCompareStats(club);
@@ -16607,7 +17110,7 @@ function computeAllClubsCompareData(filters){
     })
     .filter(r=> r.value!=null && (metric.key==='players' ? r.value>0 : true));
   rows.sort((a,b)=> b.value-a.value);
-  return { metric, rows };
+  return { metric, rows, effectiveLabel, isSingleYearCount: !!(metric.yearLabel && year!=='ALL') };
 }
 
 
@@ -17335,9 +17838,9 @@ function renderSquadProgressions(){
     { key:'squad',    label:'Squad',        defaultDir:'asc',  val:r=> (r.teamLabel||'').toLowerCase() },
     { key:'age',      label:'Age group',    defaultDir:'asc',  val:r=> gradeDisplayRank(r.ageGroup) },
     { key:'division', label:'Division',      defaultDir:'asc',  val:r=> Math.min(...r.divisions.map(d=>divisionRank(d)??99), 99) },
-    { key:'from',     label:'From',          defaultDir:'asc',  val:r=> r.prevDivisions.length ? Math.min(...r.prevDivisions.map(d=>divisionRank(d)??99)) : 999 },
-    { key:'trend',    label:'Trend',         defaultDir:'asc',  val:r=> trendOrder[r.trendKind] ?? 9 },
-    { key:'record',   label:'W-L-D',         defaultDir:'desc', val:r=> r.wins*4 + r.draws*2 }
+    { key:'from',     label:'From',          defaultDir:'asc',  val:r=> r.prevDivisions.length ? Math.min(...r.prevDivisions.map(d=>divisionRank(d)??99)) : 999, tooltip:'The division they played in the previous season, before this one.' },
+    { key:'trend',    label:'Trend',         defaultDir:'asc',  val:r=> trendOrder[r.trendKind] ?? 9, tooltip:'Whether this squad moved up, down, or stayed in the same division from the previous season.' },
+    { key:'record',   label:'W-L-D',         defaultDir:'desc', val:r=> r.wins*4 + r.draws*2, tooltip:'Wins, losses and draws this season.' }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.sortKey) || COLUMNS.find(c=>c.key==='trend');
   const dirMul = f.sortDir==='asc' ? 1 : -1;
@@ -17350,7 +17853,8 @@ function renderSquadProgressions(){
   const thHtml = COLUMNS.map(c=>{
     const active = f.sortKey===c.key;
     const arrow = active ? (f.sortDir==='asc' ? ' ▲' : ' ▼') : '';
-    return `<th class="sortable-th${c.key==='record'?' num':''}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th${c.key==='record'?' num':''}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
 
   const chip = (kind, label) => {
@@ -17606,10 +18110,10 @@ function renderClubLeaderboard(wrap, header){
 
   const COLUMNS = [
     { key:'club',      label:'Club',            defaultDir:'asc',  val:r=>r.club.toLowerCase() },
-    { key:'squads',    label:'Squads tracked',  defaultDir:'desc', val:r=>r.squadCount },
-    { key:'avgScore',  label:'Avg score',        defaultDir:'desc', val:r=>r.avgScore },
-    { key:'improving', label:'Improving',       defaultDir:'desc', val:r=>r.improving },
-    { key:'declining', label:'Declining',       defaultDir:'desc', val:r=>r.declining }
+    { key:'squads',    label:'Squads tracked',  defaultDir:'desc', val:r=>r.squadCount, tooltip:'Distinct squads at this club with enough seasons on file to score.' },
+    { key:'avgScore',  label:'Avg score',        defaultDir:'desc', val:r=>r.avgScore, tooltip:'Average Improvement score across every squad this club has tracked.' },
+    { key:'improving', label:'Improving',       defaultDir:'desc', val:r=>r.improving, tooltip:'Squads whose score is clearly trending up.' },
+    { key:'declining', label:'Declining',       defaultDir:'desc', val:r=>r.declining, tooltip:'Squads whose score is clearly trending down.' }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.clubSortKey) || COLUMNS[2];
   const dirMul = f.clubSortDir==='asc' ? 1 : -1;
@@ -17621,7 +18125,8 @@ function renderClubLeaderboard(wrap, header){
   const thHtml = COLUMNS.map(c=>{
     const active = f.clubSortKey===c.key;
     const arrow = active ? (f.clubSortDir==='asc'?' ▲':' ▼') : '';
-    return `<th class="sortable-th club-sort-th${c.key!=='club'?' num':''}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th club-sort-th${c.key!=='club'?' num':''}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
 
   wrap.innerHTML = `
@@ -17779,11 +18284,11 @@ function renderClubStabilitySingle(wrap, header, modeToggle){
     { key:'season',     label:'Season',             defaultDir:'desc', val:r=>r.toYear },
     { key:'age',        label:'Age group',          defaultDir:'asc',  val:r=>gradeDisplayRank(r.ageGroup) },
     { key:'club',       label:'Club',               defaultDir:'asc',  val:r=>(r.club||'').toLowerCase() },
-    { key:'stability',  label:'Roster stability',   defaultDir:'desc', val:r=>r.stability },
-    { key:'retained',   label:'Retained',           defaultDir:'desc', val:r=>r.retained },
-    { key:'arrivals',   label:'Arrivals',           defaultDir:'desc', val:r=>r.arrivals },
-    { key:'departures', label:'Departures',         defaultDir:'desc', val:r=>r.departures },
-    { key:'score',      label:'Improvement score',  defaultDir:'desc', val:r=>r.score }
+    { key:'stability',  label:'Roster stability',   defaultDir:'desc', val:r=>r.stability, tooltip:"Share of this season's roster who were already at this squad the season before." },
+    { key:'retained',   label:'Retained',           defaultDir:'desc', val:r=>r.retained, tooltip:'Players kept from the previous season.' },
+    { key:'arrivals',   label:'Arrivals',           defaultDir:'desc', val:r=>r.arrivals, tooltip:'Players new to this squad this season.' },
+    { key:'departures', label:'Departures',         defaultDir:'desc', val:r=>r.departures, tooltip:"Players from last season who aren't on this season's roster." },
+    { key:'score',      label:'Improvement score',  defaultDir:'desc', val:r=>r.score, tooltip:'How much this squad\'s grade-relative strength changed from the previous season to this one.' }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.stabSortKey) || COLUMNS[8];
   const dirMul = f.stabSortDir==='asc' ? 1 : -1;
@@ -17796,7 +18301,8 @@ function renderClubStabilitySingle(wrap, header, modeToggle){
     const active = f.stabSortKey===c.key;
     const arrow = active ? (f.stabSortDir==='asc'?' ▲':' ▼') : '';
     const numCls = (c.key==='stability'||c.key==='score'||c.key==='season'||c.key==='retained'||c.key==='arrivals'||c.key==='departures') ? ' num' : '';
-    return `<th class="sortable-th stab-sort-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th stab-sort-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
   const netColor = n => n>0.02?'var(--green)':(n<-0.02?'var(--red)':'var(--muted)');
 
@@ -17913,11 +18419,11 @@ function renderClubStabilityMulti(wrap, header, modeToggle){
 
   const COLUMNS = [
     { key:'squad',    label:'Squad',              defaultDir:'asc',  val:r=>(r.latestName||'').toLowerCase() },
-    { key:'span',     label:'Span',               defaultDir:'desc', val:r=>r.span },
+    { key:'span',     label:'Span',               defaultDir:'desc', val:r=>r.span, tooltip:'Seasons this squad (across its age-group progression) has on file.' },
     { key:'age',      label:'Now at',             defaultDir:'asc',  val:r=>gradeDisplayRank(r.latestAge) },
     { key:'club',     label:'Club',               defaultDir:'asc',  val:r=>(r.club||'').toLowerCase() },
-    { key:'stability',label:'Roster stability',   defaultDir:'desc', val:r=>r.stability ?? -1 },
-    { key:'score',    label:'Improvement score',  defaultDir:'desc', val:r=>r.score }
+    { key:'stability',label:'Roster stability',   defaultDir:'desc', val:r=>r.stability ?? -1, tooltip:"Share of the current roster who were already with this squad the season before." },
+    { key:'score',    label:'Improvement score',  defaultDir:'desc', val:r=>r.score, tooltip:'How much this squad\u2019s grade-relative strength has changed across the full span shown.' }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.stabMultiSortKey) || COLUMNS[5];
   const dirMul = f.stabMultiSortDir==='asc' ? 1 : -1;
@@ -17930,7 +18436,8 @@ function renderClubStabilityMulti(wrap, header, modeToggle){
     const active = f.stabMultiSortKey===c.key;
     const arrow = active ? (f.stabMultiSortDir==='asc'?' ▲':' ▼') : '';
     const numCls = (c.key==='stability'||c.key==='score'||c.key==='span') ? ' num' : '';
-    return `<th class="sortable-th stab-multi-sort-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th stab-multi-sort-th${numCls}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
   const netColor = n => n>0.02?'var(--green)':(n<-0.02?'var(--red)':'var(--muted)');
   const levelColorFrac = f => f>=0.66?'var(--green)':(f>=0.33?'var(--gold)':'var(--red)');
@@ -18070,11 +18577,11 @@ function renderClubChurnByClub(wrap, header, toggleRow){
 
   const COLUMNS = [
     { key:'club',          label:'Club',                defaultDir:'asc',  val:r=>r.club.toLowerCase() },
-    { key:'retentionPct',  label:'Retention',           defaultDir:'desc', val:r=>r.retentionPct ?? -1 },
+    { key:'retentionPct',  label:'Retention',           defaultDir:'desc', val:r=>r.retentionPct ?? -1, tooltip:'Share of last season\u2019s players still turning out this season.' },
     { key:'prevCount',     label:isAverageMode?'Avg players/season':'Players last season', defaultDir:'desc', val:r=>r.prevCount },
-    { key:'newCount',      label:isAverageMode?'Avg new/season':'New this season',     defaultDir:'desc', val:r=>r.newCount },
-    { key:'movedCount',    label:isAverageMode?'Avg moved/season':'Moved clubs',         defaultDir:'desc', val:r=>r.movedCount },
-    { key:'noLongerCount', label:isAverageMode?'Avg lapsed/season':'No longer playing',   defaultDir:'desc', val:r=>r.noLongerCount }
+    { key:'newCount',      label:isAverageMode?'Avg new/season':'New this season',     defaultDir:'desc', val:r=>r.newCount, tooltip:'Players with no game for this club the season before.' },
+    { key:'movedCount',    label:isAverageMode?'Avg moved/season':'Moved clubs',         defaultDir:'desc', val:r=>r.movedCount, tooltip:'Last season\u2019s players who are now playing for a different club.' },
+    { key:'noLongerCount', label:isAverageMode?'Avg lapsed/season':'No longer playing',   defaultDir:'desc', val:r=>r.noLongerCount, tooltip:'Last season\u2019s players with no game on file for ANY club this season.' }
   ];
   const sortCol = COLUMNS.find(c=>c.key===f.churnSortKey) || COLUMNS[1];
   const dirMul = f.churnSortDir==='asc' ? 1 : -1;
@@ -18086,7 +18593,8 @@ function renderClubChurnByClub(wrap, header, toggleRow){
   const thHtml = COLUMNS.map(c=>{
     const active = f.churnSortKey===c.key;
     const arrow = active ? (f.churnSortDir==='asc'?' ▲':' ▼') : '';
-    return `<th class="sortable-th churn-sort-th${c.key!=='club'?' num':''}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="Click to sort">${c.label}${arrow}</th>`;
+    const titleText = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="sortable-th churn-sort-th${c.key!=='club'?' num':''}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${titleText}">${c.label}${arrow}</th>`;
   }).join('');
   const pctColor = pct => pct==null?'var(--muted)':pct>=60?'var(--green)':pct>=40?'var(--gold)':'var(--red)';
 
