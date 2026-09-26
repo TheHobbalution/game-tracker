@@ -14640,15 +14640,18 @@ function renderCompareClubsAll(wrap, toggleRow){
   if(window._compareClubsChartInstance){ window._compareClubsChartInstance.destroy(); window._compareClubsChartInstance = null; }
   const f = compareClubsAllFilters;
   const metric = CLUB_COMPARE_METRICS.find(m=>m.key===f.metric) || CLUB_COMPARE_METRICS[0];
-  // Pre-warm BOTH of this tool's expensive per-club computations together, whichever metric
-  // happens to be viewed first — computeClubCompareStats backs every non-Players metric and
-  // computeClubPlayerCounts backs Players specifically; each is a full pass over every club and
-  // every game, and each has its own cache, so without this the *second* one only warms up the
-  // first time a user actually switches to whichever metric wasn't shown initially — most visibly
-  // Players, since it's the default. Doing both up front means only one slow load total, not a
-  // second unexplained pause the first time you switch metrics.
+  // Pre-warm every expensive per-club computation together, whichever metric happens to be viewed
+  // first — computeClubCompareStats backs every non-Players metric, computeClubPlayerCounts backs
+  // Players' total, and computeClubPlayerCountsBreakdown backs Players' stacked-bar segments (which
+  // the default view always needs too, since Players itself has hasBreakdown:true). Each is a full
+  // pass over every club and every game, each has its own cache, so without this the computation
+  // NOT covered by whichever metric loads first only warms up the first time someone actually
+  // switches to it — most visibly Players' breakdown, since Players is the default metric AND the
+  // one with hasBreakdown, so it was still paying its own uncovered cost even after the original
+  // fix here covered only the two non-breakdown computations.
   knownClubs.forEach(club => computeClubCompareStats(club));
   computeClubPlayerCounts('ALL', 'ALL');
+  computeClubPlayerCountsBreakdown('ALL', 'ALL');
   const { teamList } = computeAggregates();
   const allYears = [...new Set(teamList.map(t=>t.year).filter(y=>y!=null))].sort((a,b)=>b-a);
   const data = computeAllClubsCompareData(f);
@@ -14668,13 +14671,25 @@ function renderCompareClubsAll(wrap, toggleRow){
   // exactly one age group, so gf/finals breakdowns never have that ambiguity to resolve.
   const isPlayersMetric = metric.key==='players';
   const hasBreakdown = !!metric.hasBreakdown;
+  // The 4 debut-average metrics have their own fixed-shape breakdown (specific junior grades, or
+  // Seniors vs Reserves) that doesn't depend on the age-scope filter at all — unlike Players/GF/
+  // Finals, where ageScope genuinely picks which categories apply. Deriving subGroups from the
+  // actual data returned, rather than assuming based on f.ageScope, means this works correctly for
+  // both kinds of breakdown without needing to special-case which metrics use which strategy.
+  const subGroupsFollowAgeScope = isPlayersMetric || (hasBreakdown && !metric.yearOnly);
   let subGroups = null, breakdown = null;
   if(hasBreakdown){
     breakdown = isPlayersMetric ? computeClubPlayerCountsBreakdown(f.year, f.ageScope) : metric.breakdownFn(f.year, f.ageScope);
-    const multiTail = isPlayersMetric ? [MULTI_GROUP_LABEL] : [];
-    if(f.ageScope==='JUNIOR') subGroups = ['U9','U10','U12','U14','U16','U18',...multiTail];
-    else if(f.ageScope==='SENIOR') subGroups = ['Seniors','Reserves',...multiTail];
-    else subGroups = ['Seniors/Reserves','Juniors',...multiTail];
+    if(subGroupsFollowAgeScope){
+      const multiTail = isPlayersMetric ? [MULTI_GROUP_LABEL] : [];
+      if(f.ageScope==='JUNIOR') subGroups = ['U9','U10','U12','U14','U16','U18',...multiTail];
+      else if(f.ageScope==='SENIOR') subGroups = ['Seniors','Reserves',...multiTail];
+      else subGroups = ['Seniors/Reserves','Juniors',...multiTail];
+    } else {
+      const seen = new Set();
+      Object.values(breakdown).forEach(clubBreakdown => Object.keys(clubBreakdown).forEach(k=>seen.add(k)));
+      subGroups = [...seen].sort((a,b)=> gradeDisplayRank(a)-gradeDisplayRank(b));
+    }
     // Only keep sub-groups that actually have at least one club with a nonzero count, so a filter
     // combination with no seniors at all (say) doesn't add an empty, colour-wasting legend entry.
     subGroups = subGroups.filter(sg => Object.values(breakdown).some(clubBreakdown => (clubBreakdown[sg]||0) > 0));
@@ -14761,7 +14776,7 @@ function renderCompareClubsAll(wrap, toggleRow){
         backgroundColor: SUBGROUP_PALETTE[sg] || '#C9A227'
       }));
     } else {
-      datasets = [{ label: displayLabel, data: data.rows.map(r=> metric.isPct ? +(r.value*100).toFixed(1) : r.value), backgroundColor:'#C9A227' }];
+      datasets = [{ label: displayLabel, data: data.rows.map(r=> metric.isPct ? +(r.value*100).toFixed(1) : r.value), backgroundColor:'#3AA6A6' }];
     }
     const plugins = { legend:{ display: hasBreakdown, labels:{ color:'#EDF1F0' } }, title:{ display:true, text: displayLabel + (data.rows.length ? ` — ${data.rows.length} clubs` : ''), color:'#EDF1F0' } };
     if(hasBreakdown){
@@ -16706,14 +16721,18 @@ const CLUB_COMPARE_METRICS = [
       hg.clubs.forEach(r=>{ out[r.club] = r.pct; });
       return out;
     } },
-  { key:'ownClubJuniorDebutsAvg', label:'Avg junior debuts/season (own club)', yearLabel:'Junior debuts (own club)', filterable:true, yearOnly:true,
-    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('ownClubJunior', year) },
-  { key:'allClubJuniorDebutsAvg', label:'Avg junior debuts/season (any club)', yearLabel:'Junior debuts (any club)', filterable:true, yearOnly:true,
-    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('allClubJunior', year) },
-  { key:'ownClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (own-club juniors)', yearLabel:'Seniors/Reserves debuts (own-club juniors)', filterable:true, yearOnly:true,
-    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('ownClubSenior', year) },
-  { key:'anyClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (any-club juniors)', yearLabel:'Seniors/Reserves debuts (any-club juniors)', filterable:true, yearOnly:true,
-    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('anyClubSenior', year) },
+  { key:'ownClubJuniorDebutsAvg', label:'Avg junior debuts/season (own club)', yearLabel:'Junior debuts (own club)', filterable:true, yearOnly:true, hasBreakdown:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('ownClubJunior', year),
+    breakdownFn: (year) => computeClubDebutsBreakdown('ownClubJunior', year) },
+  { key:'allClubJuniorDebutsAvg', label:'Avg junior debuts/season (any club)', yearLabel:'Junior debuts (any club)', filterable:true, yearOnly:true, hasBreakdown:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('allClubJunior', year),
+    breakdownFn: (year) => computeClubDebutsBreakdown('allClubJunior', year) },
+  { key:'ownClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (own-club juniors)', yearLabel:'Seniors/Reserves debuts (own-club juniors)', filterable:true, yearOnly:true, hasBreakdown:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('ownClubSenior', year),
+    breakdownFn: (year) => computeClubDebutsBreakdown('ownClubSenior', year) },
+  { key:'anyClubSeniorDebutsAvg', label:'Avg Seniors/Reserves debuts/season (any-club juniors)', yearLabel:'Seniors/Reserves debuts (any-club juniors)', filterable:true, yearOnly:true, hasBreakdown:true,
+    filterFn: (year) => year==='ALL' ? null : computeClubDebutsForYear('anyClubSenior', year),
+    breakdownFn: (year) => computeClubDebutsBreakdown('anyClubSenior', year) },
   { key:'juniorPathwayPct', label:'Junior pathway % (any club)', isPct:true, filterable:true, noAgeScope:true,
     explainer:"Of each club's current Seniors/Reserves players, how many played juniors somewhere \u2014 at this club or any other. The broadest measure of \"came up through a junior pathway, wherever it was.\"",
     filterFn: (year) => {
@@ -16880,6 +16899,37 @@ function computeClubCurrentLeague(clubName){
   }
   _clubLeagueCache.set(cacheKey, league);
   return league;
+}
+
+// Career-wide distinct-player-count-by-age-group, for EVERY club at once in a single pass over
+// every player's full timeline — used by computeClubCompareStats instead of that same club-scoped
+// scan running separately per club. The scan touches every player-game row on file regardless of
+// which club it's ultimately filtering for (~635,000 rows currently), so doing it once for all 41
+// clubs together, cached, costs about the same as doing it once for a single club — the previous
+// per-club version cost ~250ms x 41 clubs (~10s) for exactly this reason.
+const _clubPlayersByAgeGroupCache = new Map();
+function computeClubPlayersByAgeGroupAllClubs(){
+  const cacheKey = `${_aggVersion}`;
+  if(_clubPlayersByAgeGroupCache.has(cacheKey)) return _clubPlayersByAgeGroupCache.get(cacheKey);
+  const { playerList } = computeAggregates();
+  const byClub = {}; // club -> ageGroup -> Set of player keys
+  playerList.forEach(p=>{
+    p.timeline.forEach(t=>{
+      const club = homeGrownClubKey(t.team);
+      if(!club) return;
+      const grade = getAgeGroupLabel(t.team);
+      byClub[club] = byClub[club] || {};
+      (byClub[club][grade] = byClub[club][grade] || new Set()).add(p.key);
+    });
+  });
+  const result = {};
+  Object.entries(byClub).forEach(([club, byAge])=>{
+    result[club] = Object.entries(byAge)
+      .map(([age,set])=>({ age, count:set.size }))
+      .sort((a,b)=> gradeDisplayRank(a.age)-gradeDisplayRank(b.age));
+  });
+  _clubPlayersByAgeGroupCache.set(cacheKey, result);
+  return result;
 }
 
 // All-clubs, year/age-filterable Grand Final appearances & wins — the same underlying definition
@@ -17082,6 +17132,135 @@ function computeClubDebutsForYear(kind, year){
   return result;
 }
 
+// Age-group breakdown for the 4 junior/senior debut-average metrics — junior kinds split by
+// specific junior grade (U9-U18: which age group did the new debutant actually join at), senior
+// kinds split by Seniors vs Reserves (which grade did the debut game happen at). Handles both
+// modes the metric itself supports: "ALL" returns each grade's own average-per-active-season
+// (same clubActiveJuniorYears/clubActiveSeniorYears denominator computeHomeGrownUncached already
+// uses, so this can never disagree with that career-wide average for the SUM across grades — see
+// the invariant check in this feature's own testing); a specific year returns that year's real
+// per-grade count directly, matching what computeClubDebutsForYear returns as the combined total.
+const _clubDebutsBreakdownCache = new Map();
+function computeClubDebutsBreakdown(kind, year){
+  const cacheKey = `${kind}|${year}|${_aggVersion}`;
+  if(_clubDebutsBreakdownCache.has(cacheKey)) return _clubDebutsBreakdownCache.get(cacheKey);
+  const allGames = getVisibleGames().filter(g=> g.teamA && g.teamB);
+  const { resolveNameClubsKey } = computeNameClubsWithResolver(allGames, homeGrownClubKey, 'homeGrown');
+  const isJuniorKind = kind==='ownClubJunior' || kind==='allClubJunior';
+  const wantOwnClubOnly = kind==='ownClubJunior' || kind==='ownClubSenior';
+
+  // by[club][year][grade] = count — built once per kind, then either summed for one specific year
+  // or averaged across each club's own active seasons, depending on what `year` asks for.
+  const by = {};
+  const bump = (club, y, grade) => {
+    by[club] = by[club] || {};
+    (by[club][y] = by[club][y] || {});
+    by[club][y][grade] = (by[club][y][grade]||0) + 1;
+  };
+
+  if(isJuniorKind){
+    const nameEarliestJuniorEver = {}, nameEarliestJuniorAtClub = {};
+    const clubActiveYears = {}; // club -> Set(years), excluding the dataset's earliest junior year
+    const allJuniorYears = [...new Set(allGames.flatMap(g=>{
+      const y = getGameYear(g);
+      if(!y) return [];
+      return [g.teamA,g.teamB].some(t=>isJuniorGrade(getAgeGroupLabel(t.name))) ? [y] : [];
+    }))].sort((a,b)=>a-b);
+    const earliestYear = allJuniorYears[0];
+    allGames.forEach(g=>{
+      const y = getGameYear(g);
+      if(!y) return;
+      ['teamA','teamB'].forEach(side=>{
+        const t = g[side]; if(!t) return;
+        const grade = getAgeGroupLabel(t.name);
+        if(!isJuniorGrade(grade)) return;
+        const club = homeGrownClubKey(t.name);
+        if(!club) return;
+        (t.players||[]).forEach(row=>{
+          if(!row.name || isPlaceholderPlayerName(row.name)) return;
+          const key = resolveNameClubsKey(row.name, row.playhqId, grade);
+          if(!nameEarliestJuniorEver[key] || y < nameEarliestJuniorEver[key].year) nameEarliestJuniorEver[key] = { year:y, club, grade };
+          nameEarliestJuniorAtClub[key] = nameEarliestJuniorAtClub[key] || {};
+          if(!nameEarliestJuniorAtClub[key][club] || y < nameEarliestJuniorAtClub[key][club].year) nameEarliestJuniorAtClub[key][club] = { year:y, grade };
+        });
+        if(y!==earliestYear) (clubActiveYears[club] = clubActiveYears[club] || new Set()).add(y);
+      });
+    });
+    if(wantOwnClubOnly){
+      Object.values(nameEarliestJuniorEver).forEach(({year:y,club,grade})=>{ if(y!==earliestYear) bump(club,y,grade); });
+    } else {
+      Object.values(nameEarliestJuniorAtClub).forEach(byClub=>{
+        Object.entries(byClub).forEach(([club,{year:y,grade}])=>{ if(y!==earliestYear) bump(club,y,grade); });
+      });
+    }
+    return finishBreakdown(by, clubActiveYears, year);
+  }
+
+  // Senior/Reserves kind
+  const nameFirstSenior = {}, nameJuniorClubs = {};
+  const clubActiveYears = {};
+  const allSeniorYears = [...new Set(allGames.flatMap(g=>{
+    const y = getGameYear(g);
+    if(!y) return [];
+    return [g.teamA,g.teamB].some(t=>{ const ag=getAgeGroupLabel(t.name); return ag==='Seniors'||ag==='Reserves'; }) ? [y] : [];
+  }))].sort((a,b)=>a-b);
+  const earliestSeniorYear = allSeniorYears[0];
+  allGames.forEach(g=>{
+    const y = getGameYear(g);
+    if(!y) return;
+    ['teamA','teamB'].forEach(side=>{
+      const t = g[side]; if(!t) return;
+      const grade = getAgeGroupLabel(t.name);
+      const club = homeGrownClubKey(t.name);
+      if(!club) return;
+      (t.players||[]).forEach(row=>{
+        if(!row.name || isPlaceholderPlayerName(row.name)) return;
+        const key = resolveNameClubsKey(row.name, row.playhqId, grade);
+        if(grade==='Seniors' || grade==='Reserves'){
+          if(!nameFirstSenior[key] || y < nameFirstSenior[key].year) nameFirstSenior[key] = { year:y, club, grade };
+        }
+        if(isJuniorGrade(grade)) (nameJuniorClubs[key] = nameJuniorClubs[key] || new Set()).add(club);
+      });
+      if((grade==='Seniors'||grade==='Reserves') && y!==earliestSeniorYear) (clubActiveYears[club] = clubActiveYears[club] || new Set()).add(y);
+    });
+  });
+  Object.entries(nameFirstSenior).forEach(([key,{year:y,club,grade}])=>{
+    if(y===earliestSeniorYear) return;
+    const juniorClubs = nameJuniorClubs[key];
+    if(!juniorClubs || !juniorClubs.size) return;
+    if(wantOwnClubOnly){ if(juniorClubs.has(club)) bump(club,y,grade); }
+    else bump(club,y,grade);
+  });
+  return finishBreakdown(by, clubActiveYears, year);
+
+  // Shared final step for both kinds: either sum one specific year's per-grade counts directly, or
+  // average each grade across the club's own active seasons (a season with zero debuts of a given
+  // grade still divides the average down for that grade — same principle as the combined-total
+  // average this mirrors).
+  function finishBreakdown(by, clubActiveYears, year){
+    const result = {};
+    if(year!=='ALL'){
+      Object.entries(by).forEach(([club, byYear])=>{
+        if(byYear[year]) result[club] = { ...byYear[year] };
+      });
+      _clubDebutsBreakdownCache.set(cacheKey, result);
+      return result;
+    }
+    Object.entries(clubActiveYears).forEach(([club, yearsSet])=>{
+      const grades = new Set();
+      yearsSet.forEach(y=>{ Object.keys((by[club]&&by[club][y])||{}).forEach(g=>grades.add(g)); });
+      const out = {};
+      grades.forEach(grade=>{
+        const vals = [...yearsSet].map(y => (by[club] && by[club][y] && by[club][y][grade]) || 0);
+        out[grade] = vals.reduce((s,v)=>s+v,0)/vals.length;
+      });
+      if(Object.keys(out).length) result[club] = out;
+    });
+    _clubDebutsBreakdownCache.set(cacheKey, result);
+    return result;
+  }
+}
+
 function computeAllClubsCompareData(filters){
   const { metric: metricKey, year, ageScope, league } = filters;
   const metric = CLUB_COMPARE_METRICS.find(m=>m.key===metricKey) || CLUB_COMPARE_METRICS[0];
@@ -17147,9 +17326,7 @@ function computeClubCompareStats(clubName){
   const churnLatest = computeClubChurn('ALL', 'latest').find(r=>r.club===clubName);
   const churnAll = computeClubChurn('ALL', 'all').find(r=>r.club===clubName);
 
-  // Player count by age group, and current (most recent year on file) divisions per age group —
-  // both straightforward direct passes over teamList for this one club, not worth a shared cache.
-  const byAgeGroupPlayers = {}; // ageGroup -> Set of player keys, career-wide
+  // Player count by age group, and current (most recent year on file) divisions per age group.
   const clubTeams = teamList.filter(t=> homeGrownClubKey(t.name)===clubName);
   const latestYearForClub = clubTeams.length ? Math.max(...clubTeams.map(t=>t.year||0)) : null;
   const currentDivisionsByAge = {}; // ageGroup -> division/league label, for latestYearForClub only
@@ -17161,27 +17338,20 @@ function computeClubCompareStats(clubName){
       if(label!=null) currentDivisionsByAge[grade] = isSenior ? (LEAGUE_FULL_NAMES[label]||label) : `Division ${label}`;
     }
   });
-  playerList.forEach(p=>{
-    p.timeline.forEach(t=>{
-      if(homeGrownClubKey(t.team)!==clubName) return;
-      const grade = getAgeGroupLabel(t.team);
-      (byAgeGroupPlayers[grade] = byAgeGroupPlayers[grade] || new Set()).add(p.key);
-    });
-  });
-  const playersByAgeGroup = Object.entries(byAgeGroupPlayers)
-    .map(([age,set])=>({ age, count:set.size }))
-    .sort((a,b)=> gradeDisplayRank(a.age)-gradeDisplayRank(b.age));
+  // Looks up this one club's row from the all-clubs-at-once computation above, rather than
+  // re-scanning every player's full timeline again just for this club (see that function's own
+  // comment for why the per-club version was a real, measured bottleneck).
+  const playersByAgeGroup = computeClubPlayersByAgeGroupAllClubs()[clubName] || [];
 
   // Grand Final appearances/wins for this club, across every team-season and age group on file.
-  let gfWins = 0, gfAppearances = 0;
-  getVisibleGames().forEach(g=>{
-    if(!isGrandFinalGame(g) || !g.teamA || !g.teamB) return;
-    const aIsClub = homeGrownClubKey(g.teamA.name)===clubName;
-    const bIsClub = homeGrownClubKey(g.teamB.name)===clubName;
-    if(!aIsClub && !bIsClub) return;
-    gfAppearances++;
-    if(g.winner && homeGrownClubKey(g.winner)===clubName) gfWins++;
-  });
+  // Uses computeClubGFCounts('ALL','ALL') — the same cached, all-clubs-at-once computation the
+  // "All clubs" view's own GF metrics already use — rather than a separate inline scan over every
+  // one of the 16,000+ games EVERY time this function runs for EVERY club. That inline version
+  // used to cost ~230-260ms per club with nothing to show for it on repeat calls, since it wasn't
+  // cached at all — 41 clubs meant 41 full re-scans of the entire game list for identical data.
+  const gfCounts = computeClubGFCounts('ALL', 'ALL');
+  const gfAppearances = gfCounts.appearances[clubName] || 0;
+  const gfWins = gfCounts.wins[clubName] || 0;
 
   const result = {
     club: clubName,
@@ -19877,6 +20047,19 @@ async function loadEmbeddedSeedData(){
 //                          dismissedMatchGroups/dismissedBestMismatches/fixtures/byes.
 // Falls back to the older seedFromPublishedData() (single data.json/.gz) below when these aren't
 // present — e.g. a repo that hasn't re-published since this rewrite yet.
+// True the moment this run confirms summaries.json actually exists and is fetchable — set BEFORE
+// the "already seeded this exact version" early-return below, specifically so
+// seedFromPublishedSource can tell "the precomputed files ARE this deployment's real source, just
+// nothing new to fetch this visit" apart from "no precomputed files exist here at all, genuinely
+// fall back to the older data.json.gz path". Without this distinction, seedFromPrecomputedFiles
+// returning false for EITHER reason looked identical from the caller's side — so on every single
+// normal repeat visit (once a version had already been seeded once), seedFromPublishedSource fell
+// through to seedFromPublishedData() regardless, which re-ran unconditionally (its own "already
+// seeded" check uses a completely different stamp value, from data.json.gz's _exportedAt — never
+// the same string as summaries.json's generatedAt, so it can never match and always re-seeds),
+// silently overwriting the correct, fully-merged games array with whatever data.json.gz happened
+// to still contain — confirmed as the actual cause of a live site missing 1,131 real games.
+let _precomputedFilesConfirmedToExist = false;
 async function seedFromPrecomputedFiles(force){
   if(!USING_LOCAL_STORAGE_FALLBACK) return false; // sandbox/artifact — nothing to fetch from here
   let summariesRes;
@@ -19888,36 +20071,57 @@ async function seedFromPrecomputedFiles(force){
     } finally { clearTimeout(timeout); }
   }catch(e){ return false; }
   if(!summariesRes || !summariesRes.ok) return false; // no precomputed publish here — try the old path instead
+  _precomputedFilesConfirmedToExist = true;
 
   const summaries = await parseJsonOffThread(await summariesRes.text());
   const publishedStamp = (summaries.meta && summaries.meta.generatedAt) || 'unknown';
+  // No "already seeded this exact version, skip re-fetching" EARLY RETURN here (unlike
+  // seedFromPublishedData, where that's safe) — games is NEVER persisted anywhere by this
+  // function; it's re-fetched into memory fresh every single visit by design (see the comment
+  // below, at the `games = ...` line, for why). An early return here used to skip that fetch
+  // entirely whenever this exact publishedStamp had been seen before — which, given games is
+  // never saved, meant games was simply never populated for the rest of that visit at all.
+  // Confirmed as the actual cause of a live site missing 1,131 real games: this early return fired
+  // on every normal repeat visit once a version had been seeded once, seedFromPublishedSource then
+  // fell through to the older seedFromPublishedData() path (whose own "already seeded" check
+  // compares a different stamp from a different file, so it can never match and always re-seeds),
+  // which silently overwrote the correct games with whatever data.json.gz still contained.
+  // alreadyUpToDate is still tracked (just no longer used to skip the fetch) — refreshFromPublishedData
+  // needs to distinguish "checked, nothing new" from "found something new" for its own toast
+  // message, and this is the only thing that distinction can safely be based on; it's read only
+  // AFTER games has already been fetched and set below, never before.
+  let alreadyUpToDate = false;
   if(!force){
-    // Same "already running this exact published version" guard as seedFromPublishedData —
-    // isolated in its own try/catch for the same reason (a storage hiccup here must fall through
-    // to seeding, never abort it).
     try{
       const seen = await window.storage.get('publishedDataStamp', false);
-      if(seen && seen.value === publishedStamp) return false;
+      if(seen && seen.value === publishedStamp) alreadyUpToDate = true;
     }catch(checkErr){
-      console.error('Could not check publishedDataStamp — proceeding to seed anyway', checkErr);
+      console.error('Could not check publishedDataStamp — proceeding as normal', checkErr);
     }
   }
-
   // games is now published as one file PER YEAR (games-<year>.json) plus a small
   // games-manifest.json listing which years exist — not one combined games.json — since a single
   // file for a multi-year competition dataset eventually exceeds GitHub's 100MB per-file limit.
   // Every year's file is fetched in parallel and concatenated back into one flat array; nothing
   // downstream needs to know the data ever arrived in pieces.
-  let manifestRes, configRes;
+  let manifestRes, configRes, clubStatsRes;
   try{
-    [manifestRes, configRes] = await Promise.all([
+    [manifestRes, configRes, clubStatsRes] = await Promise.all([
       fetch('games-manifest.json', { cache:'no-store' }),
-      fetch('config.json', { cache:'no-store' })
+      fetch('config.json', { cache:'no-store' }),
+      fetch('club-stats.json', { cache:'no-store' })
     ]);
   }catch(e){ return false; }
   if(!manifestRes || !manifestRes.ok) return false;
   const gamesManifest = await parseJsonOffThread(await manifestRes.text());
   const config = (configRes && configRes.ok) ? await parseJsonOffThread(await configRes.text()) : {};
+  // club-stats.json is genuinely optional — an older publish-out predating this feature, or a
+  // publish.js run where the precompute step itself failed (logged there, not fatal to the rest of
+  // the publish), simply won't have this file. Compare Clubs' own functions already fall back to
+  // computing everything live when nothing's been pre-warmed for a given club, so a missing or
+  // unreadable file here just means paying that cost in-browser instead of skipping it — never a
+  // reason to fail the whole precomputed-data path over.
+  const clubStats = (clubStatsRes && clubStatsRes.ok) ? await parseJsonOffThread(await clubStatsRes.text()) : null;
 
   let rawGames;
   try{
@@ -19994,8 +20198,30 @@ async function seedFromPrecomputedFiles(force){
     if(sig) _aggCache.set(sig, { playerList, teamList, idToKey });
   }catch(e){ console.error('Could not pre-warm aggregate cache from summaries.json', e); }
 
+  // Same idea, for Compare Clubs' own precomputed numbers (club-stats.json) — publish.js already
+  // ran computeClubCompareStats() for every club and computeClubPlayerCountsBreakdown('ALL','ALL')
+  // at publish time (see publish.js's own comment on why — this used to cost up to ~15s of visible
+  // freeze on first opening the "All clubs" view). Seeding those functions' OWN caches here means
+  // the very first render reads this data straight off, instead of redoing that work client-side.
+  // Only covers the career-wide, all-years/all-ages/all-leagues baseline club-stats.json actually
+  // contains — narrowing to one specific year or age-group still computes live, same as before.
+  if(clubStats && clubStats.perClub){
+    try{
+      Object.entries(clubStats.perClub).forEach(([club, stats])=>{
+        _clubCompareStatsCache.set(`${club}|${_aggVersion}`, stats);
+      });
+      if(clubStats.playersBreakdown){
+        _clubPlayerBreakdownCache.set(`ALL|ALL|${_aggVersion}`, clubStats.playersBreakdown);
+      }
+    }catch(e){ console.error('Could not pre-warm Compare Clubs cache from club-stats.json', e); }
+  }
+
   precomputedAliasesAlreadyClean = true;
-  return true;
+  // games has been correctly fetched and set above regardless of alreadyUpToDate — this only
+  // affects what gets reported back to the caller. refreshFromPublishedData relies on false here
+  // to know nothing was actually new; init()'s own startup sequence doesn't consult this at all
+  // (games is what it needs, and that's already populated either way).
+  return !alreadyUpToDate;
 }
 
 // Player timelines are published sharded across N files (details/players-*.json + a manifest
@@ -20186,6 +20412,19 @@ async function seedFromPublishedSource(force){
   }catch(e){
     console.error('seedFromPrecomputedFiles failed — falling back to seedFromPublishedData', e);
   }
+  // Falling through here used to happen whenever seedFromPrecomputedFiles returned false for ANY
+  // reason — including the completely normal "summaries.json exists, but this exact version is
+  // already seeded, nothing new to fetch" case, which is true on every repeat visit once a version
+  // has been seeded once. seedFromPublishedData()'s OWN "already seeded" check can never catch that
+  // redundant run for us — it compares against a different stamp value from a different file
+  // (data.json.gz's _exportedAt vs summaries.json's generatedAt), so those two checks can never
+  // agree, and it always re-seeds from data.json.gz unconditionally. If that file exists at all —
+  // even as a stale leftover from before this deployment switched to the newer precomputed-files
+  // format — it would silently overwrite the correct, fully-merged games array on every single
+  // visit. _precomputedFilesConfirmedToExist distinguishes "this deployment's real source is the
+  // precomputed files, just nothing new to do" from "no precomputed files exist here at all" — only
+  // the latter should ever fall through to the older path.
+  if(_precomputedFilesConfirmedToExist) return false;
   return seedFromPublishedData(force);
 }
 
