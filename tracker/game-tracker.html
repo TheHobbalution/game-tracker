@@ -20040,9 +20040,14 @@ async function loadEmbeddedSeedData(){
 //   summaries.json         { players, teams, meta } — computeAggregates()'s own output, run ONCE
 //                          at publish time instead of by every visitor's browser. Player timelines
 //                          are stripped out here (they're most of the size) — see
-//                          ensurePlayerTimelines() below.
-//   details/players.json  { playerKey: timeline[] } — fetched lazily, only once a player detail
-//                          page is actually opened.
+//                          ensurePlayerTimeline() below.
+//   details/players-*.json { playerKey: timeline[] }, sharded across N files — fetched lazily, one
+//                          shard at a time, only once a player detail page in that shard is opened.
+//                          This is a genuinely one-player-at-a-time mechanism, not a bulk backfill —
+//                          any tool needing every player's timeline at once (Junior Pathway, Compare
+//                          Players, and others) instead gets them the normal way, straight from
+//                          computeAggregates() itself, which already builds full timelines from
+//                          `games` whenever no pre-warmed shortcut short-circuits it.
 //   config.json           playerAliases/knownClubs/clubNicknames/teamClubOverrides/
 //                          dismissedMatchGroups/dismissedBestMismatches/fixtures/byes.
 // Falls back to the older seedFromPublishedData() (single data.json/.gz) below when these aren't
@@ -20181,23 +20186,24 @@ async function seedFromPrecomputedFiles(force){
     return false;
   }
 
-  // Pre-warm the aggregate cache with the precomputed player/team tables so the very first paint
-  // of Players/Teams/Home skips recomputing from scratch client-side. This is only valid for the
-  // DEFAULT filter state (every year, every phase — the same state publish.js aggregated against),
-  // so it's seeded under that exact cache signature; changing any filter naturally falls through
-  // to a real computeAggregates() run instead, which is where timelines get correctly filled in
-  // too if ensurePlayerTimelines() hasn't already backfilled them by then. Must run after the
-  // invalidateAggregateCache() call above, or it would be wiped the instant it's set.
-  try{
-    const playerList = (summaries.players||[]).map(p=>({ ...p, timeline: [] }));
-    const teamList = summaries.teams || [];
-    const idToKey = {};
-    playerList.forEach(p=>{ if(p.playhqId) idToKey[p.playhqId] = p.key; });
-    getVisibleGames(); // lazily initializes yearFilter to "every year on file" before reading the signature below
-    const sig = aggregateCacheSignature();
-    if(sig) _aggCache.set(sig, { playerList, teamList, idToKey });
-  }catch(e){ console.error('Could not pre-warm aggregate cache from summaries.json', e); }
-
+  // No pre-warm of the aggregate cache from summaries.json here — this used to seed a fake
+  // playerList with every player's timeline set to an empty array, on the mistaken assumption that
+  // ensurePlayerTimeline() (see its own definition below) would backfill them all before anything
+  // that needed real timeline data ran. It doesn't work that way: that function only ever loads ONE
+  // player's timeline, lazily, the moment their own detail page is opened — it has no bulk mode and
+  // was never meant to serve a tool that needs EVERY player's timeline at once. Any such tool
+  // (Junior Pathway, Compare Players, and roughly 70 other call sites reading p.timeline directly)
+  // saw every player with zero history under this pre-warmed cache entry, until something else
+  // happened to call invalidateAggregateCache() and force a real computeAggregates() run — which is
+  // exactly why "Reset to published version" (which does call it) fixed the symptom, while a plain
+  // reload (which re-ran this same broken pre-warm) did not. Removed rather than fixed forward:
+  // correctly replicating computeAggregates()'s own per-game timeline-entry construction (date,
+  // goals, opponent, result, margin, finals flags, and more) in a second, separate function risks
+  // the two drifting out of sync later — the existing, already-correct computeAggregates() path now
+  // simply runs itself the first time anything actually needs playerList, same as before this
+  // shortcut existed. The instant-paint benefit this was for (skipping a recompute on the very
+  // first Players/Teams/Home render) is real but much smaller than every tool needing timeline data
+  // silently returning wrong, empty results.
   // Same idea, for Compare Clubs' own precomputed numbers (club-stats.json) — publish.js already
   // ran computeClubCompareStats() for every club and computeClubPlayerCountsBreakdown('ALL','ALL')
   // at publish time (see publish.js's own comment on why — this used to cost up to ~15s of visible
@@ -20452,7 +20458,16 @@ async function refreshFromPublishedData(){
     return;
   }
   try{
-    await loadGames();
+    // Skipped when seedFromPublishedSource just seeded `games` in memory directly (the current
+    // precomputed-files path, which never persists games to storage at all) — same reasoning as
+    // init()'s own use of this flag. Without this check, loadGames() unconditionally overwrote the
+    // correct, just-fetched games with whatever was still sitting in storage from a PREVIOUS
+    // session — which, for anyone who'd used Refresh/Reset before games.json existed, or before an
+    // earlier bug in that path was fixed, could be exactly the stale, incomplete data this button
+    // exists to move someone away from. Confirmed as the cause of a real report: a Reset that
+    // appeared to fix one problem (missing player timelines) while silently reintroducing another
+    // (some clubs' Seniors/Reserves player counts reverting to an old, wrong snapshot).
+    if(!justSeededGamesInMemory) await loadGames();
     await loadFixtures();
     await loadByes();
     await loadPlayerAliases();
@@ -20491,7 +20506,10 @@ async function resetFromPublishedData(){
     return;
   }
   try{
-    await loadGames();
+    // Same justSeededGamesInMemory guard as refreshFromPublishedData above and as init()'s own
+    // startup sequence — see that comment for why an unconditional loadGames() here was actively
+    // dangerous rather than merely redundant.
+    if(!justSeededGamesInMemory) await loadGames();
     await loadFixtures();
     await loadByes();
     await loadPlayerAliases();
