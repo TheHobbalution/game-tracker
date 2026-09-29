@@ -156,6 +156,10 @@
 
   table{ width:100%; border-collapse:collapse; font-size:13.5px; margin-left:auto; margin-right:auto; }
   th,td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  /* Ladder page: the last row inside the finals cut-off (see ladderCutoffLine). Under
+     border-collapse:collapse the wider of two competing borders wins, so this 2px red one replaces
+     the ordinary 1px --line divider between that row and the next. */
+  tr.finals-cutoff td{ border-bottom:2px solid var(--red); }
   th{ font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:11.5px; letter-spacing:0.04em; color:var(--muted); user-select:none; }
   th.sortable{ cursor:pointer; }
   th.sortable:hover{ color:var(--text); }
@@ -209,6 +213,18 @@
     padding:10px 20px; border-radius:6px; font-size:13.5px; opacity:0; transition:opacity 0.25s; pointer-events:none;
   }
   .toast.show{ opacity:1; }
+  .update-banner{
+    position:fixed; top:0; left:0; right:0; z-index:9999; background:var(--gold); color:#1a1a1a;
+    padding:11px 16px; font-size:13.5px; font-weight:600; display:none; align-items:center;
+    justify-content:center; gap:16px; flex-wrap:wrap; box-shadow:0 2px 8px rgba(0,0,0,0.3);
+  }
+  .update-banner.show{ display:flex; }
+  .update-banner button{
+    background:#1a1a1a; color:var(--gold); border:none; padding:6px 16px; border-radius:5px;
+    font-weight:700; font-size:13px; cursor:pointer; font-family:inherit;
+  }
+  .update-banner button:hover{ opacity:0.85; }
+  .update-banner .dismiss{ background:transparent; color:#1a1a1a; text-decoration:underline; padding:6px 4px; font-weight:600; }
   .empty{ color:var(--muted); font-size:13.5px; padding:30px 0; text-align:center; }
   .player-link{ color:var(--text); cursor:pointer; border-bottom:1px dotted var(--muted); }
   .player-link:hover{ color:var(--green); border-bottom-color:var(--green); }
@@ -425,7 +441,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 23092026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 29092026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -819,6 +835,11 @@
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="update-banner" id="updateBanner">
+  <span>A newer version of this app is available — the page you're looking at may be out of date.</span>
+  <button onclick="location.href = location.pathname + '?_v=' + Date.now();">Reload now</button>
+  <button class="dismiss" onclick="document.getElementById('updateBanner').classList.remove('show');">Dismiss</button>
+</div>
 
 <script>
 // NOTE: games are not stored under a single key — see loadGames/saveGames for the chunked
@@ -1844,7 +1865,7 @@ function buildPendingRestore(payload, sourceLabel){
       const existingFixtureSig = new Set(fixtures.map(fixtureSig));
       fixtures = [...fixtures, ...payloadFixtures.filter(f=> !existingFixtureSig.has(fixtureSig(f)))];
 
-      const byeSig = b => `${b.team}||${b.roundLabel}||${b.year||''}`;
+      const byeSig = b => `${b.team}||${b.roundLabel}||${b.year||''}||${b.competitionRaw||''}`; // competition too: a grading bye and a division bye can share a team + round
       const existingByeSig = new Set(byes.map(byeSig));
       byes = [...byes, ...payloadByes.filter(b=> !existingByeSig.has(byeSig(b)))];
 
@@ -2665,7 +2686,7 @@ function isLadderEligibleGrade(grade){
   return r <= ladderMinGradeRank;
 }
 
-let ladderFilters = { year:null, ageGroup:null, division:null, mode:'ladder', finalsSpotsOverride:null, extraGamesPerTeam:0 };
+let ladderFilters = { year:null, ageGroup:null, division:null, pool:null, mode:'ladder', finalsSpotsOverride:null, extraGamesPerTeam:0 };
 // Bumped every time renderLadder starts a fresh render — lets its own deferred Stage 2 (the
 // finals-chances simulation, behind a yield) recognise it's stale and bail instead of overwriting
 // a newer selection with old results, same pattern used for Compare Teams' staged render.
@@ -2700,27 +2721,242 @@ function isGrandFinalGame(g){
 // scratch. Keyed off _aggVersion, the same counter the main cache uses, so this invalidates itself
 // automatically the moment games/fixtures/etc actually change — never goes stale.
 let _ladderTeamListCache = new Map(); // `${_aggVersion}|${year}` -> teamList
-function computeLadder({ year, ageGroup, division }){
-  return withAllDataFilters(()=>{
-    const cacheKey = `${_aggVersion}|${year}`;
-    let teamList = _ladderTeamListCache.get(cacheKey);
-    if(!teamList){
-      const regularSeasonGames = games.filter(g=>
-        g.teamA && g.teamB && String(getGameYear(g))===String(year) &&
-        g.phase !== 'Grading' && !isFinalsGame(g)
-      );
-      teamList = computeAggregates(regularSeasonGames).teamList;
-      _ladderTeamListCache.set(cacheKey, teamList);
-    }
-    let rows = teamList.filter(t=> t.ageGroup===ageGroup && t.gamesPlayed>0);
-    if(division && division!=='ALL') rows = rows.filter(t=> t.divisions.includes(division));
-    rows = rows.map(t=>{
-      const byeCount = byes.filter(b=> b.team===t.name && String(b.year)===String(year) && (b.phase||'Regular Season')==='Regular Season').length;
-      return { ...t, points: t.wins*4 + t.draws*2, byeCount };
+// Which divisions genuinely have a ladder for a given year + age group — built from the same
+// rule the ladder itself counts by (isLadderCompetitionGame), regular-season games only, so every
+// entry offered is guaranteed to open onto a real, non-empty ladder. Cached until the data changes.
+const _ladderDivisionsCache = new Map(); // _aggVersion -> Map('year|ageGroup' -> Set of division labels)
+function getLadderDivisions(year, ageGroup){
+  if(!_ladderDivisionsCache.has(_aggVersion)){
+    _ladderDivisionsCache.clear();
+    const acc = new Map();
+    games.forEach(g=>{
+      if(!g.teamA || !g.teamB || g.phase==='Grading' || isFinalsGame(g) || !isLadderCompetitionGame(g)) return;
+      const key = `${getGameYear(g)}|${getAgeGroupLabel(g.teamA.name)}`;
+      if(!acc.has(key)) acc.set(key, new Set());
+      acc.get(key).add(getDivision(g));
     });
-    rows.sort((a,b)=> b.points-a.points || b.percentage-a.percentage || b.pointsFor-a.pointsFor);
+    _ladderDivisionsCache.set(_aggVersion, acc);
+  }
+  return [...(_ladderDivisionsCache.get(_aggVersion).get(`${year}|${ageGroup}`) || [])];
+}
+
+// ─── Pooled divisions ─────────────────────────────────────────────────────────────────────────
+// PlayHQ occasionally splits ONE division into several pools that share a division number but are
+// entirely separate competitions. 2025 U14 Division 5 was "Division 5 North", "Division 5 South"
+// and "Division 5 Central" — 6 + 8 + 8 teams, each pool with its own ladder, its own finals and its
+// own Grand Final, and teams in different pools never meeting. getDivision() deliberately still
+// calls all of them "Division 5": it feeds ~30 places that build and compare "Division N" labels
+// (9 of them rebuild the label from the number), and promotion/relegation across years needs the
+// plain number. So the pool is layered on top here, and only where it genuinely matters — the
+// Ladder page, its finals bracket, and its finals cut-off.
+// The pool name is read from the competition name, and only trusted when a division really has 2+
+// differently-named pools in the same season: a lone "Division 3 North …" competition is just a
+// sponsor's name, not a pool, and is left alone. Across all five seasons on file exactly one
+// competition is pooled. To recognise a differently-named pool (say "Division 4 Red / Blue"), add
+// the word to POOL_WORD_RE — a division split into pools whose names aren't recognised still
+// shows its combined ladder, with a note that it has no single finals cut-off.
+const POOL_WORD_RE = /^(North(?:ern)?|South(?:ern)?|East(?:ern)?|West(?:ern)?|Central)\b/i;
+function poolFromCompetition(competitionRaw){
+  const m = /\bDiv(?:ision)?\s*\d+\s+(\S+)/i.exec(competitionRaw || '');
+  if(!m) return null;
+  const w = POOL_WORD_RE.exec(m[1]);
+  return w ? w[1].charAt(0).toUpperCase() + w[1].slice(1).toLowerCase() : null;
+}
+// year|ageGroup|division -> { pools:[sorted names], teamPool:{ teamName: pool } }, or absent when
+// that division isn't split. Built for every season in one pass over the games and cached until the
+// data changes, like the app's other per-render caches. A team is placed in whichever pool it
+// played most games in (in practice always exactly one).
+const _divisionPoolsCache = new Map(); // _aggVersion -> Map
+function getDivisionPools(year, ageGroup, division){
+  if(!_divisionPoolsCache.has(_aggVersion)){
+    _divisionPoolsCache.clear();
+    const acc = new Map();
+    games.forEach(g=>{
+      if(!g.teamA || !g.teamB || g.phase==='Grading') return;
+      const pool = poolFromCompetition(g.competitionRaw);
+      if(!pool) return;
+      const key = `${getGameYear(g)}|${getAgeGroupLabel(g.teamA.name)}|${getDivision(g)}`;
+      const a = acc.get(key) || { pools:new Set(), teamCounts:new Map() };
+      a.pools.add(pool);
+      [g.teamA.name, g.teamB.name].forEach(n=>{
+        const m = a.teamCounts.get(n) || new Map();
+        m.set(pool, (m.get(pool)||0) + 1);
+        a.teamCounts.set(n, m);
+      });
+      acc.set(key, a);
+    });
+    const out = new Map();
+    acc.forEach((a, key)=>{
+      if(a.pools.size < 2) return; // one lone "pool" is just part of a competition's name
+      const teamPool = {};
+      a.teamCounts.forEach((m, team)=>{
+        teamPool[team] = [...m.entries()].sort((x,y)=> y[1]-x[1] || (x[0]<y[0]?-1:1))[0][0];
+      });
+      out.set(key, { pools:[...a.pools].sort(), teamPool });
+    });
+    _divisionPoolsCache.set(_aggVersion, out);
+  }
+  return _divisionPoolsCache.get(_aggVersion).get(`${year}|${ageGroup}|${division}`) || null;
+}
+
+// `pool` is optional and only meaningful for a division that's actually split (see above). Left
+// out, this returns the whole division exactly as before — which is what the tools that rank a team
+// within its division (squad progressions, overall grade rank) still get.
+// Which teams played regular-season, ladder-competition games in more than one division the same
+// (year, ageGroup), and — for each — which division they finished the season in vs which they were
+// regraded OUT of partway through. "Finished in" is decided purely by game chronology (whichever
+// division holds their LATEST game that season), never by getTeamDivisionMap (a different-purpose
+// map that keeps whichever numbered division it meets FIRST in games' own array order, not
+// necessarily the true last one — wrong basis for "where did they end up").
+// Only a CLEAN move counts as a regrade: every game in one division finishes before the first game
+// in the next. Of the 16 teams on file with ladder games in 2+ divisions in one season, 15 are
+// clean single jumps; the 16th (2022 "Geelong West Giants Seniors", 18 games in the Geelong FNL
+// and 18 in the G&D FNL, both running April-August week by week) is two separate sides sharing
+// one name, not a regrade. Overlapping cases like that are left out of this map, so each ladder
+// simply shows that side's own games there, ranked normally — never a false "regraded" label.
+// Returns Map(teamName -> { finalDivision, priorDivisions: [{ division, gamesPlayed }] }), scoped
+// to one (year, ageGroup); a team not in the map was never regraded that season.
+const _regradeInfoCache = new Map(); // `${year}|${ageGroup}|${_aggVersion}` -> Map
+function getRegradeInfo(year, ageGroup){
+  const cacheKey = `${year}|${ageGroup}|${_aggVersion}`;
+  if(_regradeInfoCache.has(cacheKey)) return _regradeInfoCache.get(cacheKey);
+  const byTeam = new Map(); // teamName -> Map(division -> { count, lastDate })
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB || g.phase==='Grading' || isFinalsGame(g) || !isLadderCompetitionGame(g)) return;
+    if(String(getGameYear(g))!==String(year) || getAgeGroupLabel(g.teamA.name)!==ageGroup) return;
+    const div = getDivision(g);
+    const date = extractGameDate(g);
+    [g.teamA.name, g.teamB.name].forEach(name=>{
+      const divs = byTeam.get(name) || new Map();
+      const rec = divs.get(div) || { count:0, firstDate:Infinity, lastDate:-Infinity };
+      rec.count++; rec.firstDate = Math.min(rec.firstDate, date); rec.lastDate = Math.max(rec.lastDate, date);
+      divs.set(div, rec);
+      byTeam.set(name, divs);
+    });
+  });
+  const result = new Map();
+  byTeam.forEach((divs, name)=>{
+    if(divs.size < 2) return;
+    const sorted = [...divs.entries()].sort((a,b)=> a[1].lastDate - b[1].lastDate);
+    // Clean chronology check (see above): each division's last game strictly before the next
+    // division's first game. Anything overlapping isn't a regrade.
+    const clean = sorted.every((e,i)=> i===0 || sorted[i-1][1].lastDate < e[1].firstDate);
+    if(!clean) return;
+    const finalDivision = sorted[sorted.length-1][0];
+    const priorDivisions = sorted.slice(0, -1).map(([division, rec])=> ({ division, gamesPlayed: rec.count }));
+    result.set(name, { finalDivision, priorDivisions });
+  });
+  _regradeInfoCache.set(cacheKey, result);
+  return result;
+}
+
+function computeLadder({ year, ageGroup, division, pool }){
+  return withAllDataFilters(()=>{
+    // Two aggregates, each cached:
+    //   divList    — built from THIS division's games only: decides who belongs on this ladder, and
+    //                supplies the row for a team regraded OUT of it (only the games played here).
+    //   seasonList — the whole season across every ladder division: supplies the row for a team
+    //                regraded INTO this division (their final one), whose whole season counts here.
+    // A regraded team keeps one name all season ("Anglesea U18"), so the old single whole-season
+    // aggregate gave it one combined row that appeared on BOTH ladders — P12 in Division 4 and P12
+    // in Division 3. Now its full season shows only where it finished, and its starting division
+    // shows just the games it played there, set apart at the bottom (see renderLadder).
+    // How the final division counts a regraded team — PlayHQ's own rule, confirmed against its
+    // published ladder for 2026 U16 Division 1: Grovedale Knevitt (4 games in Division 2, then 7 in
+    // Division 1) shows P11 W7 L4 28pts — the WHOLE season — but For 333 / Against 337 / 98.81%,
+    // which are its Division 1 games ONLY (the Division 2 games were 597-28 and are left out).
+    // So games, wins, losses, draws and points carry over; scores and percentage don't.
+    // Against the 11 regrades on file that have finals, this reproduces the real finalists in 10.
+    // The 11th (2026 U16 Division 2) turns on Barwon Heads Philp, who has no Round 4 game on file
+    // at all — a result PlayHQ has but this data doesn't would explain it.
+    const listFor = (key, filterFn)=>{
+      let list = _ladderTeamListCache.get(key);
+      if(!list){
+        list = computeAggregates(games.filter(g=>
+          g.teamA && g.teamB && String(getGameYear(g))===String(year) &&
+          g.phase !== 'Grading' && !isFinalsGame(g) && isLadderCompetitionGame(g) && filterFn(g)
+        )).teamList;
+        _ladderTeamListCache.set(key, list);
+      }
+      return list;
+    };
+    const seasonList = listFor(`${_aggVersion}|${year}|ALL|`, ()=> true);
+    const divList = (!division || division==='ALL') ? seasonList : listFor(`${_aggVersion}|${year}|${division}|${pool||''}`, g=>
+      getDivision(g)===division && (!pool || poolFromCompetition(g.competitionRaw)===pool));
+    const regradeInfo = (division && division!=='ALL') ? getRegradeInfo(year, ageGroup) : new Map();
+    const seasonByName = new Map(seasonList.map(t=> [t.name, t]));
+    let rows = divList.filter(t=> t.ageGroup===ageGroup && t.gamesPlayed>0).map(t=>{
+      const info = regradeInfo.get(t.name);
+      if(info && info.finalDivision===division && seasonByName.has(t.name)){
+        // Regraded INTO here: whole-season games/wins/losses/draws (and so points), but For,
+        // Against and percentage from this division's games only — see the rule above.
+        const whole = seasonByName.get(t.name);
+        return { ...whole, pointsFor:t.pointsFor, pointsAgainst:t.pointsAgainst, percentage:t.percentage,
+          regradedIn:true, regradedInFrom: info.priorDivisions };
+      }
+      return t;
+    });
+    if(pool && !getDivisionPools(year, ageGroup, division)){
+      // Asking for a pool that doesn't exist is an empty ladder — never the whole division
+      // wearing a pool's name.
+      rows = [];
+    }
+    // Byes are tied to their own division through the same getDivision() games use (a bye carries
+    // its competitionRaw — see convert.js). A regraded-in team counts its byes from every division,
+    // like its games and points. A bye with no competition on it (entered by hand) can't be placed,
+    // so it counts wherever the team appears, as it always did.
+    const byeDivision = b => getDivision({ competitionRaw:b.competitionRaw, teamA:{name:b.team}, teamB:{name:b.team} });
+    const countByes = (name, wholeSeason)=> byes.filter(b=>
+      b.team===name && String(b.year)===String(year) && (b.phase||'Regular Season')==='Regular Season' &&
+      (wholeSeason || !b.competitionRaw || !division || division==='ALL' || byeDivision(b)===division)
+    ).length;
+    rows = rows.map(t=>{
+      const points = t.wins*4 + t.draws*2;
+      return { ...t, points, byeCount: countByes(t.name, !!t.regradedIn),
+        matchRatio: t.gamesPlayed ? points / (4*t.gamesPlayed) * 100 : 0 };
+    });
+
+    // Regraded-out teams (this division was NOT where they finished the season) are held out of
+    // normal ranking and points-sorted separately underneath — see renderLadder for how they're
+    // displayed. "ALL" is the projection/other-caller path asking for every division combined at
+    // once; that view already legitimately shows every division a team touched, so nothing here
+    // is regraded relative to IT specifically.
+    let regradedOutRows = [];
+    if(division && division!=='ALL'){
+      const active = [];
+      rows.forEach(r=>{
+        const info = regradeInfo.get(r.name);
+        if(info && info.finalDivision !== division){
+          const prior = info.priorDivisions.find(p=> p.division===division);
+          regradedOutRows.push({ ...r, regradedOut:true, regradedOutGamesPlayed: prior ? prior.gamesPlayed : r.gamesPlayed, regradedIntoDivision: info.finalDivision });
+        } else {
+          active.push(r);
+        }
+      });
+      rows = active;
+    }
+
+    // AFL Barwon By-Law 16.1: 4 points a win, 2 a draw, ties split on percentage — and 16.1(c):
+    // "Where a competition has an uneven number of byes experienced by participating clubs, the
+    // Match Ratio system may be used". Match ratio = points earned / points available from games
+    // actually played (4 per game), so a team isn't ranked ahead just for having played more.
+    // Checked against PlayHQ's own 2026 U16 Division 2 ladder: Barwon Heads Philp (4 wins, 1 bye,
+    // 11 played, 16 pts) ranks above Surf Coast Suns Birdrock (4 wins, 12 played, 16 pts) — 36.4% v
+    // 33.3% — although Birdrock has the better percentage, and Philp is who played finals.
+    // It's used ONLY when bye counts differ, not whenever games played differ: across every ladder on
+    // file, "match ratio always" and "points always" each reproduce the real finalists on 98 of 105
+    // ladders, missing different ones — the byes condition is what separates them. Seasons with no
+    // bye data (every season before byes were read from the scrape) all show 0 byes, so they stay on
+    // points, as before.
+    const rankedByMatchRatio = (division && division!=='ALL') && new Set(rows.map(r=> r.byeCount)).size > 1;
+    rows.forEach(r=> r.rankedByMatchRatio = rankedByMatchRatio);
+    rows.sort(rankedByMatchRatio
+      ? (a,b)=> b.matchRatio-a.matchRatio || b.percentage-a.percentage || b.pointsFor-a.pointsFor
+      : (a,b)=> b.points-a.points || b.percentage-a.percentage || b.pointsFor-a.pointsFor);
     rows.forEach((r,i)=> r.rank = i+1);
-    return rows;
+    regradedOutRows.sort((a,b)=> b.points-a.points || b.percentage-a.percentage || b.pointsFor-a.pointsFor);
+    regradedOutRows.forEach(r=> r.rank = null);
+    return [...rows, ...regradedOutRows];
   });
 }
 
@@ -2746,12 +2982,13 @@ function finalsRoundRank(label){
 // Groups completed finals games into columns by round, for the bracket display next to the
 // ladder. Scoped to the exact division shown (or every division, tagged, when "All divisions" is
 // selected) — mirrors computeLadder's own scoping so the two stay showing the same competition.
-function computeFinals({ year, ageGroup, division }){
+function computeFinals({ year, ageGroup, division, pool }){
   return withAllDataFilters(()=>{
     const finalsGames = games.filter(g=>
       g.teamA && g.teamB && isFinalsGame(g) && String(getGameYear(g))===String(year) &&
       getAgeGroupLabel(g.teamA.name)===ageGroup &&
-      (division==='ALL' || getDivision(g)===division)
+      (division==='ALL' || getDivision(g)===division) &&
+      (!pool || poolFromCompetition(g.competitionRaw)===pool)
     );
     const byRound = {};
     finalsGames.forEach(g=>{
@@ -2770,40 +3007,104 @@ function computeFinals({ year, ageGroup, division }){
 }
 
 // ─── Finals chances projection ─────────────────────────────────────────────────────────────
-// Looks at the most recent PRIOR year with finals data for this exact age group + division, and
-// counts the distinct teams that appeared in Finals-phase games that year — used as the assumed
-// number of finals spots this year, rather than requiring it to be configured by hand every
-// season. Returns null if no prior finals data exists for this combo (a brand new division, or
-// one that's never reached finals in the data on file) — the caller falls back to a plain
-// top-4 default in that case, clearly labelled as a guess rather than inferred.
-// Cached per (ageGroup|division|year|_aggVersion) — a plain-name-scan over the whole games array
-// with no memoization was re-running on every Ladder render (every dropdown change, every finals-
-// spots override toggle), which adds up on an 11,000+ game dataset. Invalidates itself the moment
-// the underlying data actually changes, same pattern as the app's other per-render caches.
+// Works out how many teams make finals in this exact age group + division, from the finals games
+// actually on file — used both for the ladder's red cut-off line and as the assumed number of
+// finals spots for the projection below, so the two can never disagree.
+//
+// Finals size genuinely differs between competitions (on the real data: U14/U16 are almost all
+// top 4, Seniors/Reserves top 5, U18 a mix of 4 and 5), so nothing here assumes a default — it
+// counts the distinct teams that played a finals game:
+//   • A season that's already been played (an earlier year than the latest on file, or one with a
+//     Grand Final on file) uses ITS OWN finals. The earlier version always borrowed the previous
+//     year's count, which was wrong whenever the format changed — 2023 U18 Divisions 2 and 3 moved
+//     from top 4 to top 5, for example.
+//   • A season still in progress uses the most recent prior year's count, or this season's finals
+//     so far if that's already higher (finals under way can only ever prove a LOWER bound — a team
+//     with a first-week bye hasn't played yet).
+//   • A completed season with no finals on file returns null rather than guessing from another
+//     year: the result is already decided, so a borrowed format would only be invented precision.
+// Some divisions are really several parallel pools on one combined ladder, each with its own
+// Grand Final (2025 U14 Division 5: 22 teams, three brackets of four). No single cut-off exists
+// there — counting every finalist would say "top 12" — so that's reported as `parallel` with no
+// count, and callers draw no line. Two Grand Finals between the SAME pair is just a replay, not a
+// second bracket.
+// Returns { count, sourceYear, basis:'thisSeason'|'thisSeasonSoFar'|'priorYear', parallel } or null.
+// Cached per (ageGroup|division|year|latestYear|_aggVersion) — a scan of the whole games array
+// re-running on every Ladder render adds up on a 16,000+ game dataset, and this invalidates itself
+// the moment the underlying data actually changes, same as the app's other per-render caches.
 const _finalsSpotCache = new Map();
-function inferFinalsSpotCount(ageGroup, division, currentYear){
-  const cacheKey = `${ageGroup}|${division}|${currentYear}|${_aggVersion}`;
+function inferFinalsSpotCount(ageGroup, division, currentYear, latestYearOnFile, pool){
+  const cacheKey = `${ageGroup}|${division}|${pool||''}|${currentYear}|${latestYearOnFile}|${_aggVersion}`;
   if(_finalsSpotCache.has(cacheKey)) return _finalsSpotCache.get(cacheKey);
-  const priorYears = [...new Set(
-    games.filter(g=> g.teamA && g.teamB && isFinalsGame(g) &&
-      getAgeGroupLabel(g.teamA.name)===ageGroup && getDivision(g)===division &&
-      Number(getGameYear(g)) < Number(currentYear)
-    ).map(g=>getGameYear(g))
-  )].sort((a,b)=>b-a);
+
+  // One pass: for each year, which teams played finals in this exact age group + division, and
+  // how many DISTINCT pairings contested a Grand Final.
+  const byYear = {};
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB || !isFinalsGame(g)) return;
+    if(getAgeGroupLabel(g.teamA.name) !== ageGroup || getDivision(g) !== division) return;
+    if(pool && poolFromCompetition(g.competitionRaw) !== pool) return;
+    const y = Number(getGameYear(g));
+    if(!y) return;
+    const yi = byYear[y] = byYear[y] || { teams:new Set(), gfPairs:new Set() };
+    yi.teams.add(g.teamA.name); yi.teams.add(g.teamB.name);
+    if(isGrandFinalGame(g)) yi.gfPairs.add([g.teamA.name, g.teamB.name].sort().join('|'));
+  });
+
+  const cy = Number(currentYear), ly = Number(latestYearOnFile);
+  const cur = byYear[cy] || null;
+  const priorYears = Object.keys(byYear).map(Number).filter(y=> y < cy).sort((a,b)=>b-a);
+  const priorYear = priorYears.length ? priorYears[0] : null;
+  const prior = priorYear!=null ? byYear[priorYear] : null;
+  const isParallel = yi => !!yi && yi.gfPairs.size > 1;
+  const seasonOver = cy < ly;
+
   let result = null;
-  if(priorYears.length){
-    const sourceYear = priorYears[0];
-    const teams = new Set();
-    games.forEach(g=>{
-      if(!g.teamA || !g.teamB || !isFinalsGame(g)) return;
-      if(String(getGameYear(g)) !== String(sourceYear)) return;
-      if(getAgeGroupLabel(g.teamA.name) !== ageGroup || getDivision(g) !== division) return;
-      teams.add(g.teamA.name); teams.add(g.teamB.name);
-    });
-    result = { count: teams.size, sourceYear };
+  if(isParallel(cur)){
+    result = { count:null, parallel:true, sourceYear:cy, basis:'thisSeason' };
+  } else if(cur && (seasonOver || cur.gfPairs.size >= 1)){
+    result = { count:cur.teams.size, parallel:false, sourceYear:cy, basis:'thisSeason' };
+  } else if(seasonOver){
+    result = null; // decided season, nothing on file to count — don't borrow another year's format
+  } else if(isParallel(prior)){
+    result = { count:null, parallel:true, sourceYear:priorYear, basis:'priorYear' };
+  } else {
+    const curCount = cur ? cur.teams.size : 0;
+    const priorCount = prior ? prior.teams.size : 0;
+    if(curCount > priorCount){
+      result = { count:curCount, parallel:false, sourceYear:cy, basis:'thisSeasonSoFar' };
+    } else if(priorCount > 0){
+      result = { count:priorCount, parallel:false, sourceYear:priorYear, basis:'priorYear' };
+    }
   }
   _finalsSpotCache.set(cacheKey, result);
   return result;
+}
+
+// Decides whether the ladder draws a red finals cut-off line, where, and what its one-line
+// explanation says. Pure (no DOM, no globals) so every edge case can be tested directly.
+//   override  — the manual "Override finals spots" pick, if any (always wins)
+//   inferred  — inferFinalsSpotCount()'s result
+//   rowCount  — how many teams are on the ladder
+// Returns { spots, note }. `spots` is the number of teams above the line, or null for no line —
+// and a null with a non-empty note means "we can't say", which is stated rather than hidden: a
+// confident line in a guessed position would be worse than no line. The projection's own
+// fallback of "top 4" is deliberately NOT used here for that reason.
+function ladderCutoffLine({ override, inferred, rowCount }){
+  const known = override || (inferred && inferred.count) || null;
+  if(!known){
+    if(inferred && inferred.parallel){
+      return { spots:null, note:'No finals cut-off line — this division runs separate finals brackets, so a combined ladder has no single cut-off.' };
+    }
+    return { spots:null, note:"No finals cut-off line — there's no finals history on file for this competition to work it out from. You can pick a number under Finals chances below." };
+  }
+  if(known >= rowCount) return { spots:null, note:'' }; // every team makes finals — nothing to separate
+  let basis, verb = 'make';
+  if(override) basis = 'set manually below';
+  else if(inferred.basis === 'priorYear') basis = `based on ${inferred.sourceYear}'s finals for this competition`;
+  else if(inferred.basis === 'thisSeason'){ basis = "from this season's finals"; verb = 'made'; }
+  else basis = "from this season's finals so far";
+  return { spots:known, note:`Finals cut-off — top ${known} ${verb} finals (${basis}).` };
 }
 
 // How many regular-season games each team in this division has actually got on file for the
@@ -2815,7 +3116,9 @@ function inferFinalsSpotCount(ageGroup, division, currentYear){
 // every team's finals chances. Cached the same way as inferFinalsSpotCount above, for the same reason.
 const _seasonLengthCache = new Map();
 function checkSeasonLengthMismatch(year, ageGroup, division, teamNames){
-  const cacheKey = `${year}|${ageGroup}|${division}|${_aggVersion}`;
+  // The team list is part of the key: the pools of one division share year/ageGroup/division but
+  // have different teams, and would otherwise be handed each other's cached answer.
+  const cacheKey = `${year}|${ageGroup}|${division}|${teamNames.length}:${teamNames.slice().sort().join(',')}|${_aggVersion}`;
   if(_seasonLengthCache.has(cacheKey)) return _seasonLengthCache.get(cacheKey);
   const result = checkSeasonLengthMismatchUncached(year, ageGroup, division, teamNames);
   _seasonLengthCache.set(cacheKey, result);
@@ -2893,12 +3196,15 @@ function classifyFinalsChance(r, cutoffPoints, finalsSpots){
   return 'Likely'; // has at least one game of buffer either way
 }
 
-function computeFinalsProjection({ year, ageGroup, division, finalsSpots, extraGamesPerTeam, ladderRows }){
+function computeFinalsProjection({ year, ageGroup, division, pool, finalsSpots, extraGamesPerTeam, ladderRows }){
   return withAllDataFilters(()=>{
     // Accepts the ladder rows renderLadder() already computed, rather than running computeLadder()
     // a second time with identical params — this alone was doubling the cost of every single
     // Ladder page render, since the projection used to always recompute its own copy from scratch.
-    ladderRows = ladderRows || computeLadder({ year, ageGroup, division });
+    // Falls back to computing them here if a future caller doesn't pre-supply them — filtered to
+    // the same "actually competing here" scope renderLadder itself passes (rank!=null; see
+    // computeLadder), so a regraded-out team can never factor into this fallback's simulation either.
+    ladderRows = ladderRows || computeLadder({ year, ageGroup, division, pool }).filter(r=> r.rank!=null);
     if(!ladderRows.length) return null;
     const teamNames = ladderRows.map(r=>r.name);
     const seasonCheck = checkSeasonLengthMismatch(year, ageGroup, division, teamNames);
@@ -2927,12 +3233,24 @@ function computeFinalsProjection({ year, ageGroup, division, finalsSpots, extraG
     const cutoffRow = ladderRows[finalsSpots-1]; // current Nth-place row — the reference line everything below is measured against
     const cutoffCurrentPoints = cutoffRow ? cutoffRow.points : null;
 
+    // Each team's worst and best possible finish, in whatever the ladder is ranked by: points (floor =
+    // points now, ceiling = + 4 a game left) or match ratio (floor = lose every game left, ceiling =
+    // win every game left, both over the full season). Locked in = fewer than N other teams could
+    // still reach this team's floor; Eliminated = at least N teams are already guaranteed above its
+    // ceiling. (Was points-only, and "locked in" only checked the one team just below the line —
+    // a team further down with more games left could still have passed it.) Ties count as a
+    // threat, so a tie never produces a false "Locked in"; with no games left anywhere this reduces
+    // to the ladder order itself.
+    const byMR = ladderRows.some(r=> r.rankedByMatchRatio);
+    const remOf = n => maxRemainingByTeam[n] || 0;
+    const floorOf = r => byMR ? (r.gamesPlayed+remOf(r.name) ? r.points / (4*(r.gamesPlayed+remOf(r.name))) : 0) : r.points;
+    const ceilOf  = r => byMR ? (r.gamesPlayed+remOf(r.name) ? (r.points+4*remOf(r.name)) / (4*(r.gamesPlayed+remOf(r.name))) : 0) : r.points + 4*remOf(r.name);
     const rows = ladderRows.map(r=>{
       const remaining = remainingFixtures.filter(f=>f.teamA===r.name||f.teamB===r.name)
         .map(f=> f.teamA===r.name ? { opponent:f.teamB, synthetic:!!f.synthetic } : { opponent:f.teamA, synthetic:!!f.synthetic });
       const ceiling = r.points + maxRemainingByTeam[r.name]*4;
-      const mathematicallyOut = cutoffRow && r.rank > finalsSpots && ceiling < cutoffRow.points;
-      const mathematicallyIn = cutoffRow && r.rank <= finalsSpots && (r.points - (ladderRows[finalsSpots] ? ladderRows[finalsSpots].points : -Infinity)) > maxRemainingByTeam[ladderRows[finalsSpots] ? ladderRows[finalsSpots].name : '']*4;
+      const mathematicallyOut = cutoffRow && r.rank > finalsSpots && ladderRows.filter(o=> o!==r && floorOf(o) > ceilOf(r)).length >= finalsSpots;
+      const mathematicallyIn = cutoffRow && r.rank <= finalsSpots && ladderRows.filter(o=> o!==r && ceilOf(o) >= floorOf(r)).length < finalsSpots;
       const rowWithFlags = { ...r, remaining, ceiling, mathematicallyOut, mathematicallyIn: !!mathematicallyIn };
       return { ...rowWithFlags, chanceLabel: classifyFinalsChance(rowWithFlags, cutoffCurrentPoints, finalsSpots) };
     });
@@ -2946,6 +3264,10 @@ function doOpenLadder(preset){
     if(preset.year != null) ladderFilters.year = String(preset.year);
     if(preset.ageGroup != null && isLadderEligibleGrade(preset.ageGroup)) ladderFilters.ageGroup = preset.ageGroup;
     ladderFilters.division = null;
+    ladderFilters.pool = null;
+    // The manual "Override finals spots" pick belongs to ONE competition — carrying it into a
+    // different one would now draw a wrong red line on that ladder, not just skew a projection.
+    ladderFilters.finalsSpotsOverride = null;
   }
   showPanel('ladder');
   renderLadder();
@@ -2976,25 +3298,11 @@ async function renderLadder(){
   if(f.ageGroup==null || !ageGroups.includes(f.ageGroup)) f.ageGroup = ageGroups[0] || null;
 
   const divisions = f.ageGroup
-    ? [...new Set(eligibleTeams.filter(t=> String(t.year)===String(f.year) && t.ageGroup===f.ageGroup).flatMap(t=>t.divisions))]
-        .filter(Boolean).sort((a,b)=>(divisionRank(a)??99)-(divisionRank(b)??99))
+    ? getLadderDivisions(f.year, f.ageGroup).filter(Boolean).sort((a,b)=>(divisionRank(a)??99)-(divisionRank(b)??99))
     : [];
   // Seniors/Reserves never run a numbered division in this league — one flat ladder for the
   // whole grade, so the division picker simply doesn't apply and stays hidden.
   const hasDivisions = divisions.length > 0;
-  // A ladder only ever shows ONE division at a time — teams in different divisions are in
-  // different competitions, so pooling them into a combined table isn't a real ladder, just a
-  // confusing mix of unrelated results. Always default to the first division rather than ever
-  // offering a combined "All divisions" view.
-  if(hasDivisions){
-    if(!f.division || !divisions.includes(f.division)) f.division = divisions[0];
-  } else {
-    f.division = null;
-  }
-
-  const rows = f.ageGroup ? computeLadder({ year:f.year, ageGroup:f.ageGroup, division:f.division }) : [];
-  const finalsRounds = f.ageGroup ? computeFinals({ year:f.year, ageGroup:f.ageGroup, division:f.division }) : [];
-  const renderId = ++_ladderRenderId;
 
   // A "division" label is only ever a bare number for graded junior comps (Division 3, etc). For
   // Seniors/Reserves it's a full league name instead (this league runs 3 separate senior
@@ -3002,6 +3310,54 @@ async function renderLadder(){
   // label, so the league name IS the division here). Never prefix an already-complete label with
   // the word "Division" a second time.
   const divisionLabel = d => divisionRank(d)!=null ? `Division ${divisionRank(d)}` : d;
+
+  // One dropdown entry per LADDER rather than per division: a division PlayHQ split into pools
+  // (2025 U14 Division 5 North / Central / South) is really several separate competitions that
+  // happen to share a number, so each pool gets its own entry and its own ladder — see
+  // getDivisionPools. An ordinary division is a single entry, exactly as before.
+  const divisionEntries = [];
+  divisions.forEach(d=>{
+    const info = f.ageGroup ? getDivisionPools(f.year, f.ageGroup, d) : null;
+    if(info) info.pools.forEach(pl=> divisionEntries.push({ division:d, pool:pl, key:`${d}|${pl}`, label:`${divisionLabel(d)} ${pl}` }));
+    else divisionEntries.push({ division:d, pool:null, key:d, label:divisionLabel(d) });
+  });
+  // A ladder only ever shows ONE division (or pool) at a time — teams in different divisions are in
+  // different competitions, so pooling them into a combined table isn't a real ladder, just a
+  // confusing mix of unrelated results. Always default to the first entry rather than ever
+  // offering a combined "All divisions" view.
+  if(hasDivisions){
+    const wantedKey = f.pool ? `${f.division}|${f.pool}` : f.division;
+    if(!f.division || !divisionEntries.some(e=> e.key===wantedKey)){
+      f.division = divisionEntries[0].division;
+      f.pool = divisionEntries[0].pool;
+    }
+  } else {
+    f.division = null;
+    f.pool = null;
+  }
+  const selectedKey = f.pool ? `${f.division}|${f.pool}` : f.division;
+
+  const allRows = f.ageGroup ? computeLadder({ year:f.year, ageGroup:f.ageGroup, division:f.division, pool:f.pool }) : [];
+  // Regraded-out rows (rank:null — see computeLadder) sit apart from the real ladder: shown
+  // further down, unranked, under their own heading rather than mixed into rows.length/rank math
+  // anywhere below — the Finals cut-off, the Monte Carlo projection, and the season-length check
+  // all reason about "the teams actually competing here", which no longer includes a team that
+  // moved to a different division partway through.
+  const rows = allRows.filter(r=> r.rank!=null);
+  const regradedRows = allRows.filter(r=> r.rank==null);
+  // Ranked by match ratio (uneven byes — see computeLadder): shown as an extra MR column, as PlayHQ does
+  const usesMR = rows.some(r=> r.rankedByMatchRatio);
+  const finalsRounds = f.ageGroup ? computeFinals({ year:f.year, ageGroup:f.ageGroup, division:f.division, pool:f.pool }) : [];
+  const renderId = ++_ladderRenderId;
+
+  // Worked out BEFORE the first paint (a single cached scan — cheap, unlike the simulation further
+  // down) so the red finals cut-off line is on screen straight away instead of popping in a moment
+  // later. years[0] is the latest season on file, which is how a finished season is told apart from
+  // one still in progress. The projection's own fallback of "top 4" is kept for finalsSpots, but the
+  // LINE only ever uses a number that's actually known — see ladderCutoffLine.
+  const inferredSpots = (f.ageGroup && rows.length) ? inferFinalsSpotCount(f.ageGroup, f.division, f.year, years[0], f.pool) : null;
+  const finalsSpots = f.finalsSpotsOverride || (inferredSpots && inferredSpots.count) || 4;
+  const cutoff = ladderCutoffLine({ override:f.finalsSpotsOverride, inferred:inferredSpots, rowCount:rows.length });
 
   const matchCardHtml = g => {
     const aWin = !g.draw && g.winner===g.teamA.name, bWin = !g.draw && g.winner===g.teamB.name;
@@ -3077,15 +3433,15 @@ async function renderLadder(){
       </select>
       ${hasDivisions ? `
       <select id="ladderDivSel">
-        ${divisions.map(d=>`<option value="${d}" ${f.division===d?'selected':''}>${divisionLabel(d)}</option>`).join('')}
+        ${divisionEntries.map(e=>`<option value="${e.key}" ${selectedKey===e.key?'selected':''}>${e.label}</option>`).join('')}
       </select>` : ''}
     </div>
     ${!f.ageGroup ? '<div class="empty">No ladder-eligible grade has games for this year.</div>' : (
-      rows.length===0 ? '<div class="empty">No regular season games found for this selection.</div>' : `
+      allRows.length===0 ? '<div class="empty">No regular season games found for this selection.</div>' : `
       <table><thead><tr>
         <th>#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th><th class="num">D</th>
         <th class="num" title="Byes this season — not counted for or against">Byes</th>
-        <th class="num">For</th><th class="num">Against</th><th class="num">%</th><th class="num">Pts</th>
+        <th class="num">For</th><th class="num">Against</th><th class="num">%</th><th class="num">Pts</th>${usesMR ? '<th class="num" title="Match ratio: points won as a share of the points available from games played (4 per game). This ladder is ranked by it because teams have had different numbers of byes — AFL Barwon By-Law 16.1(c).">MR</th>' : ''}
         <th title="A plain, checkable read rather than a simulated percentage: Locked in / Eliminated are hard facts based on games remaining. Likely means they've got at least one game of room for error to reach the current cutoff line; Unlikely means they'd need to win everything left with zero room to spare. See Finals chances below for the full picture.">Finals status</th>
       </tr></thead><tbody>
       ${rows.map(r=>{
@@ -3093,8 +3449,27 @@ async function renderLadder(){
         const swatch = cc ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${cc.primary};border:1px solid ${cc.secondary};margin-right:7px;vertical-align:middle;" title="${getClub(r.name)} colours"></span>` : '';
         const p = projByName[r.name];
         const statusColor = { 'Locked in':'var(--green)', 'Likely':'var(--gold)', 'Unlikely':'#e08a3c', 'Eliminated':'var(--red)' };
-        return `<tr>
+        return `<tr${cutoff.spots && r.rank===cutoff.spots ? ' class="finals-cutoff"' : ''}>
         <td>${r.rank}</td>
+        <td>${swatch}<span class="team-link" data-key="${r.key.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span>${r.regradedIn ? `<span class="regraded-in-mark" style="color:var(--muted);font-size:11.5px;margin-left:6px;cursor:help;" title="Regraded here mid-season. Games, wins, losses and points include ${r.regradedInFrom.map(x=> x.gamesPlayed+' game'+(x.gamesPlayed===1?'':'s')+' in '+divisionLabel(x.division)).join(' and ')}; For, Against and % count only games played in this division — the same way PlayHQ's ladder does it.">†</span>` : ''}</td>
+        <td class="num">${r.gamesPlayed}</td>
+        <td class="num">${r.wins}</td>
+        <td class="num">${r.losses}</td>
+        <td class="num">${r.draws}</td>
+        <td class="num" style="color:var(--muted);">${r.byeCount}</td>
+        <td class="num">${r.pointsFor}</td>
+        <td class="num">${r.pointsAgainst}</td>
+        <td class="num">${r.percentage.toFixed(1)}</td>
+        <td class="num" style="font-weight:600;color:var(--gold);">${r.points}</td>${usesMR ? `<td class="num">${r.matchRatio.toFixed(1)}</td>` : ''}
+        <td style="font-size:12.5px;font-weight:600;color:${p?(statusColor[p.chanceLabel]||'var(--muted)'):'var(--muted)'};">${p ? p.chanceLabel : (computing ? '…' : '—')}</td>
+      </tr>`;}).join('')}
+      ${regradedRows.length ? `
+      <tr class="regraded-gap-row"><td colspan="${usesMR ? 13 : 12}" style="border-bottom:none;padding:18px 10px 4px;font-size:12.5px;color:var(--muted);font-style:italic;">Regraded out of ${divisionLabel(f.division)} mid-season — shown below with an asterisk, ranked separately since they finished the season in a different division. Stats below are for the games they played here only.</td></tr>
+      ${regradedRows.map(r=>{
+        const cc = getClubColor(getClub(r.name));
+        const swatch = cc ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${cc.primary};border:1px solid ${cc.secondary};margin-right:7px;vertical-align:middle;" title="${getClub(r.name)} colours"></span>` : '';
+        return `<tr style="opacity:0.75;">
+        <td>*</td>
         <td>${swatch}<span class="team-link" data-key="${r.key.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${r.name}</span></td>
         <td class="num">${r.gamesPlayed}</td>
         <td class="num">${r.wins}</td>
@@ -3104,10 +3479,14 @@ async function renderLadder(){
         <td class="num">${r.pointsFor}</td>
         <td class="num">${r.pointsAgainst}</td>
         <td class="num">${r.percentage.toFixed(1)}</td>
-        <td class="num" style="font-weight:600;color:var(--gold);">${r.points}</td>
-        <td style="font-size:12.5px;font-weight:600;color:${p?(statusColor[p.chanceLabel]||'var(--muted)'):'var(--muted)'};">${p ? p.chanceLabel : (computing ? '…' : '—')}</td>
-      </tr>`;}).join('')}
-      </tbody></table>${finalsHtml}
+        <td class="num" style="font-weight:600;color:var(--gold);">${r.points}</td>${usesMR ? `<td class="num">${r.matchRatio.toFixed(1)}</td>` : ''}
+        <td style="font-size:12.5px;color:var(--muted);">*Played ${r.regradedOutGamesPlayed} game${r.regradedOutGamesPlayed===1?'':'s'} here before being regraded to ${divisionLabel(r.regradedIntoDivision)}</td>
+      </tr>`;}).join('')}` : ''}
+      </tbody></table>
+      ${usesMR ? `<p class="hint" style="margin:8px 0 0;">Ranked by match ratio (MR): teams have had different numbers of byes this season, so under AFL Barwon By-Law 16.1(c) the ladder is ordered by points won as a share of the points available from games played, then percentage — the same as PlayHQ.</p>` : ''}
+      ${rows.some(r=> r.regradedIn) ? `<p class="hint" style="margin:8px 0 0;">† Regraded into ${divisionLabel(f.division)} mid-season — their games, wins, losses and points include their earlier division; For, Against and % count only games played here (the same as PlayHQ). Hover the † for details.</p>` : ''}
+      ${cutoff.note ? `<p class="hint" style="margin:8px 0 0;display:flex;align-items:center;gap:8px;">${cutoff.spots ? '<span aria-hidden="true" style="display:inline-block;flex:none;width:22px;height:0;border-top:2px solid var(--red);"></span>' : ''}<span>${cutoff.note}</span></p>` : ''}
+      ${finalsHtml}
       <div style="border-top:1px solid var(--line);margin:32px 0 24px;"></div>
       <h2 style="font-size:19px;margin:0 0 4px;">Finals chances</h2>
       ${computing ? '<p class="hint">Calculating…</p>' : renderFinalsChancesHtml(f, proj, inferredSpots, finalsSpots)}`
@@ -3117,27 +3496,31 @@ async function renderLadder(){
     wrap.querySelectorAll('.team-link').forEach(el=>{ el.onclick = ()=> openTeamDetail(el.dataset.key); });
     wrap.querySelectorAll('.game-link').forEach(el=>{ el.onclick = ()=> openGameDetail(el.dataset.id); });
     const yearSel = document.getElementById('ladderYearSel');
-    if(yearSel) yearSel.onchange = e=>{ f.year = e.target.value; f.ageGroup = null; f.division = null; renderLadder(); };
+    if(yearSel) yearSel.onchange = e=>{ f.year = e.target.value; f.ageGroup = null; f.division = null; f.pool = null; f.finalsSpotsOverride = null; renderLadder(); };
     const ageSel = document.getElementById('ladderAgeSel');
-    if(ageSel) ageSel.onchange = e=>{ f.ageGroup = e.target.value; f.division = null; renderLadder(); };
+    if(ageSel) ageSel.onchange = e=>{ f.ageGroup = e.target.value; f.division = null; f.pool = null; f.finalsSpotsOverride = null; renderLadder(); };
     const divSel = document.getElementById('ladderDivSel');
-    if(divSel) divSel.onchange = e=>{ f.division = e.target.value; renderLadder(); };
-    if(rows.length && !computing) bindFinalsChancesEvents(wrap);
+    if(divSel) divSel.onchange = e=>{
+      const entry = divisionEntries.find(x=> x.key===e.target.value);
+      f.division = entry ? entry.division : e.target.value;
+      f.pool = entry ? entry.pool : null;
+      f.finalsSpotsOverride = null;
+      renderLadder();
+    };
+    if(allRows.length && !computing) bindFinalsChancesEvents(wrap);
   };
 
   // Stage 1 — paint the ladder table (and finals bracket) immediately; this is all cheap. The
   // Monte Carlo simulation behind Chance/Status and the Finals chances section is the one
   // genuinely expensive part of this page, and used to block the WHOLE table from appearing
   // until it finished, on every single render.
-  paint(null, null, null, !!f.ageGroup && rows.length>0);
-  if(!f.ageGroup || rows.length===0) return;
+  paint(null, inferredSpots, finalsSpots, !!f.ageGroup && allRows.length>0);
+  if(!f.ageGroup || allRows.length===0) return;
 
   await yieldToUI();
   if(renderId !== _ladderRenderId) return; // a newer render started while we were computing — bail
 
-  const inferredSpots = inferFinalsSpotCount(f.ageGroup, f.division, f.year);
-  const finalsSpots = f.finalsSpotsOverride || (inferredSpots ? inferredSpots.count : 4);
-  const proj = computeFinalsProjection({ year:f.year, ageGroup:f.ageGroup, division:f.division, finalsSpots, extraGamesPerTeam: f.extraGamesPerTeam||0, ladderRows: rows });
+  const proj = computeFinalsProjection({ year:f.year, ageGroup:f.ageGroup, division:f.division, pool:f.pool, finalsSpots, extraGamesPerTeam: f.extraGamesPerTeam||0, ladderRows: rows });  // regraded-out teams excluded — see the split above
   if(renderId !== _ladderRenderId) return;
 
   // Stage 2 — the real numbers, once the simulation's done.
@@ -3277,9 +3660,15 @@ function renderFinalsChancesHtml(f, proj, inferred, finalsSpots){
 
   const spotsSourceNote = f.finalsSpotsOverride
     ? `set manually to top ${finalsSpots}`
-    : inferred
-      ? `inferred from ${inferred.sourceYear} (top ${inferred.count} played finals that year)`
-      : `no prior-year finals data for this division — defaulted to top ${finalsSpots}, please confirm`;
+    : inferred && inferred.parallel
+      ? `this division runs separate finals brackets, so there's no single cut-off — using top ${finalsSpots} as a stand-in, please confirm`
+      : inferred
+        ? (inferred.basis==='priorYear'
+            ? `inferred from ${inferred.sourceYear} (top ${inferred.count} played finals that year)`
+            : inferred.basis==='thisSeason'
+              ? `taken from this season's finals (${inferred.count} teams played finals)`
+              : `taken from this season's finals so far (${inferred.count} teams have played finals)`)
+        : `no finals data on file for this division yet — defaulted to top ${finalsSpots}, please confirm`;
 
   const seasonWarningHtml = proj.seasonCheck.mismatch ? `
     <div class="warn-box" style="margin:0 0 14px;">
@@ -3345,7 +3734,7 @@ function renderFinalsChancesHtml(f, proj, inferred, finalsSpots){
       <div style="margin-top:8px;">
         <label style="font-size:12.5px;color:var(--muted);">Override finals spots:</label>
         <select id="fcSpotsOverride" style="margin-left:6px;">
-          <option value="" ${!f.finalsSpotsOverride?'selected':''}>Auto (${inferred?inferred.count:4})</option>
+          <option value="" ${!f.finalsSpotsOverride?'selected':''}>Auto (${inferred && inferred.count ? inferred.count : 4})</option>
           ${[4,5,6,8].map(n=>`<option value="${n}" ${f.finalsSpotsOverride===n?'selected':''}>Top ${n}</option>`).join('')}
         </select>
       </div>
@@ -7476,6 +7865,43 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
+// Detects when a newer game-tracker.html has been published since this tab loaded, and shows a
+// persistent banner prompting a reload — rather than relying on anyone knowing that a "random
+// loading bug" might actually mean their browser is quietly running stale code and needs a hard
+// refresh, which isn't something a typical visitor has any reason to know or try.
+// GitHub Pages doesn't support custom Cache-Control headers at all (confirmed directly) — only
+// ETag and Last-Modified are set automatically — so this can't assume any particular HTTP caching
+// behaviour either way. Instead it sidesteps the question entirely: fetch this exact page's own
+// URL with a HEAD request and cache:'no-store' (so THIS specific check always talks to the real
+// server, never a cached copy, regardless of what the browser did for the original page load),
+// read whichever of ETag/Last-Modified the server actually sent, and compare it against the value
+// stored the last time any tab on this device successfully loaded the app. A mismatch means a
+// newer file exists on the server than whatever this browser has cached as "the app" — which is
+// exactly the scenario a hard refresh fixes, just detected and surfaced automatically instead of
+// requiring anyone to already know that trick.
+async function checkForAppUpdate(){
+  try{
+    const res = await fetch(location.pathname, { method:'HEAD', cache:'no-store' });
+    if(!res.ok) return;
+    const stamp = res.headers.get('etag') || res.headers.get('last-modified');
+    if(!stamp) return; // GitHub Pages always sends one of these for a static file, but be defensive
+    const key = 'appPageStamp';
+    const seen = await window.storage.get(key, false);
+    if(seen && seen.value && seen.value !== stamp){
+      document.getElementById('updateBanner').classList.add('show');
+      // Deliberately NOT updating the stored stamp here — if the person dismisses the banner
+      // instead of reloading, the next check (or next visit) should still recognise this same
+      // newer version as new and offer it again, rather than silently forgetting about it.
+      return;
+    }
+    await window.storage.set(key, stamp, false);
+  }catch(e){
+    // Silent — this is a nice-to-have check layered on top of an app that already works
+    // correctly once loaded; a failed version check (offline, a flaky request) is never a reason
+    // to interrupt or alarm anyone actually using the app.
+  }
+}
+
 // A fixture is "fulfilled" once a completed game exists for the exact same round + competition +
 // year with the same two teams (order-independent) — at that point it's not upcoming anymore and
 // should disappear from the Upcoming list automatically, not linger until someone notices it and
@@ -8189,6 +8615,22 @@ function getDivision(g){
   // Not a numbered division, grading pool, or known senior league — e.g. a cup or other comp.
   // Keep the name (still useful context) but strip any leading year so it reads cleanly.
   return g.competitionRaw.replace(/^\s*20\d{2}\s+/, '').trim() || 'Unknown division';
+}
+
+// Does this game belong to a competition that actually HAS a ladder? Only two kinds do: a numbered
+// junior division ("Division 3") and one of the three recognised senior/reserves leagues. Anything
+// else that getDivision() falls back to naming — the Grading rounds, and PlayHQ's "Open Mixed"
+// pre-season practice matches — is a real game on file but isn't a round of any ladder.
+// The Ladder page uses this for BOTH what it counts and what it offers in the Division dropdown,
+// so the two can't disagree. Before this, the nine 2025 "Open Mixed" games (Mar–Apr, before the
+// season proper) leaked into their teams' real division ladders as extra games, and "Open Mixed"
+// itself was offered as a division with one or two teams in it. Grading was already kept out of the
+// standings by phase, but still showed up as an empty "division" in every year's dropdown.
+// Checked against every game on file: this keeps all 17 numbered divisions and all 6 senior/
+// reserves leagues and drops only Grading (1,237 games) and Open Mixed (9 games).
+function isLadderCompetitionGame(g){
+  if(!g || !g.teamA || !g.teamB) return false;
+  return /^Division \d+$/.test(getDivision(g)) || !!canonicalSeniorDivision(g);
 }
 
 // Lower number = stronger competition (Division 1 is the top tier). Returns null for
@@ -10281,11 +10723,148 @@ function renderHotStreakBadge(hotStreak){
 // live would need every shard fetched first. A player with no pre-baked entry is implicitly NOT on
 // a streak (publish.js only bakes an entry for players who ARE), which happens to match exactly
 // what computeHotStreak() itself returns for an empty/unloaded timeline — so the fallback is safe.
+// ─── On-fire history ───────────────────────────────────────────────────────────────────────────
+// Every separate "on fire" spell in a player's career, oldest first — the same two rules the live
+// indicator above (computeHotStreak) uses, applied along the WHOLE timeline instead of only its end:
+// a run of 3+ consecutive games as 1st-named best player, and/or a run of 3+ consecutive games with
+// 3+ goals. "Consecutive" means consecutive games the player actually PLAYED — a round missed in
+// between doesn't break a streak, exactly as the live rule — which is why the history lists the
+// actual rounds rather than just a length. Streaks are not cut at season or team boundaries either,
+// again matching the live rule (37 of ~720 on the real data run across two seasons).
+// A best-player run and a goals run that share a game, or sit back to back with nothing between
+// them, are ONE spell (🔥🔥), not two: "times on fire" counts spells, not runs.
+// Pure (timeline in, index ranges out) so it can be tested against every edge case directly.
+// Returns [{ start, end, best, goals, bestLen, goalLen }] — start/end are inclusive timeline
+// indexes; bestLen/goalLen are the longest such run inside the spell (0 if none).
+function findFireEpisodes(timeline){
+  const tl = timeline || [];
+  const runsOf = pred => {
+    const out = []; let start = -1;
+    for(let i=0; i<=tl.length; i++){
+      const ok = i<tl.length && pred(tl[i]);
+      if(ok && start<0) start = i;
+      if(!ok && start>=0){ if(i-start >= 3) out.push({ start, end:i-1 }); start = -1; }
+    }
+    return out;
+  };
+  const runs = [
+    ...runsOf(t=> t.isBest && t.bestRank===1).map(r=>({ ...r, kind:'best' })),
+    ...runsOf(t=> (t.goals||0) >= 3).map(r=>({ ...r, kind:'goals' }))
+  ].sort((a,b)=> a.start-b.start || a.end-b.end);
+  const episodes = [];
+  runs.forEach(r=>{
+    const len = r.end - r.start + 1;
+    let ep = episodes[episodes.length-1];
+    if(ep && r.start <= ep.end + 1) ep.end = Math.max(ep.end, r.end);
+    else { ep = { start:r.start, end:r.end, best:false, goals:false, bestLen:0, goalLen:0 }; episodes.push(ep); }
+    if(r.kind==='best'){ ep.best = true; ep.bestLen = Math.max(ep.bestLen, len); }
+    else { ep.goals = true; ep.goalLen = Math.max(ep.goalLen, len); }
+  });
+  return episodes;
+}
+
+// "Round 5" -> R5, "Finals Round 1" -> Finals R1, "Preliminary Final" -> Prelim Final; anything else
+// (Grand Final, an unexpected label) is shown as it is.
+function fireRoundToken(label){
+  const l = String(label||'').trim();
+  let m = /^Round (\d+)$/.exec(l);
+  if(m) return { round:true, n:+m[1], text:'R'+m[1] };
+  m = /^Finals Round (\d+)$/.exec(l);
+  if(m) return { round:false, text:'Finals R'+m[1] };
+  if(l==='Preliminary Final') return { round:false, text:'Prelim Final' };
+  return { round:false, text:l || '?' };
+}
+// entries: [{ label, year }] oldest first -> "R4–R7", "R3, R4, R6", "R17–R18, Finals R1, Grand Final".
+// Only 3+ back-to-back numbered rounds are collapsed into a range (two are just listed), the same
+// round played twice in a row (two grades in one round) reads "R5 ×2", and a streak that crosses a
+// season is split by year ("2025: R17–R18 · 2026: R1"). Exact, never approximate — a gap is a gap.
+function formatFireRounds(entries){
+  const groups = [];
+  (entries||[]).forEach(e=>{
+    const g = groups[groups.length-1];
+    if(g && g.year===e.year) g.items.push(e); else groups.push({ year:e.year, items:[e] });
+  });
+  const fmtGroup = items => {
+    const toks = items.map(e=> fireRoundToken(e.label));
+    const out = []; let i = 0;
+    while(i < toks.length){
+      const t = toks[i];
+      let dup = 1; while(i+dup < toks.length && toks[i+dup].text === t.text) dup++;
+      if(dup > 1){ out.push(`${t.text} ×${dup}`); i += dup; continue; }
+      if(t.round){
+        let j = i;
+        while(j+1 < toks.length && toks[j+1].round && toks[j+1].n === toks[j].n + 1) j++;
+        if(j - i >= 2){ out.push(`R${t.n}–R${toks[j].n}`); i = j+1; continue; }
+      }
+      out.push(t.text); i++;
+    }
+    return out.join(', ');
+  };
+  if(groups.length <= 1) return groups.length ? fmtGroup(groups[0].items) : '';
+  return groups.map(g=> `${g.year}: ${fmtGroup(g.items)}`).join(' · ');
+}
+
+// All on-fire spells league-wide, from EVERY season regardless of the page's Year/Phase filter (a
+// history has to look at everything, and "on fire right now" shouldn't move when a filter does).
+//   past   — one row per spell that is NOT the one running right now (the "on fire now" table owns that)
+//   times  — player key -> how many separate spells they've had in total, current one included
+// Cached until the data changes.
+const _fireHistoryCache = new Map();
+function computeFireHistory(){
+  if(_fireHistoryCache.has(_aggVersion)) return _fireHistoryCache.get(_aggVersion);
+  _fireHistoryCache.clear();
+  const { playerList } = withAllDataFilters(()=> computeAggregates());
+  const gameById = new Map(); games.forEach(g=> gameById.set(g.id, g));
+  const dateOf = t => t.dateTime ? extractGameDate({ dateTime:t.dateTime }) : (t.date ? new Date(t.date).getTime() : 0);
+  const times = new Map(), past = [];
+  playerList.forEach(p=>{
+    const tl = p.timeline || [];
+    const eps = findFireEpisodes(tl);
+    if(!eps.length) return;
+    times.set(p.key, eps.length);
+    const live = computeHotStreak(p);
+    const runningNow = live.isBestHot || live.isGoalHot;
+    eps.forEach(ep=>{
+      if(runningNow && ep.end === tl.length-1) return; // still going — shown in the "on fire now" table
+      const span = tl.slice(ep.start, ep.end+1);
+      const yearOf = t => { const g = gameById.get(t.gameId); return g ? Number(getGameYear(g)) : null; };
+      const startYear = yearOf(span[0]), endYear = yearOf(span[span.length-1]);
+      const teams = []; span.forEach(t=>{ if(!teams.includes(t.team)) teams.push(t.team); });
+      past.push({
+        key:p.key, name:p.name,
+        teams: teams.join(' → '),
+        startDate: dateOf(span[0]), endDate: dateOf(span[span.length-1]),
+        yearLabel: startYear===endYear ? String(endYear) : `${startYear}–${String(endYear).slice(-2)}`,
+        roundsLabel: formatFireRounds(span.map(t=>{ const g = gameById.get(t.gameId); return { label: g && g.roundLabel, year: yearOf(t) }; })),
+        games: span.length,
+        best: ep.best, goals: ep.goals, bestLen: ep.bestLen, goalLen: ep.goalLen,
+        both: ep.best && ep.goals
+      });
+    });
+  });
+  // every spell knows its player's total, so the column can be sorted like any other
+  past.forEach(r=>{ r.times = times.get(r.key) || 0; });
+  const result = { past, times };
+  _fireHistoryCache.set(_aggVersion, result);
+  return result;
+}
+
+// Every currently on-fire player, league-wide, in the default order (double fire first, then the
+// longest streak). Prefers each player's pre-computed p.hotStreak (baked into summaries.json by
+// publish.js) over live computeHotStreak() — on the real sharded site most players' timelines
+// aren't loaded until their own page is opened, so scanning everyone live would need every shard
+// fetched first. A player with no pre-baked entry is implicitly NOT on a streak (publish.js only
+// bakes an entry for players who ARE), which happens to match exactly what computeHotStreak()
+// itself returns for an empty/unloaded timeline — so the fallback is safe.
+// Looks at all seasons whatever the page's Year/Phase filter says: a year filter used to make this
+// list quietly empty (set to 2024, 7 players on fire right now became 0).
 function computeOnFirePlayers(){
-  const { playerList } = computeAggregates();
+  const { playerList } = withAllDataFilters(()=> computeAggregates());
+  const times = computeFireHistory().times;
   return playerList
     .map(p=>({ p, streak: p.hotStreak || computeHotStreak(p) }))
     .filter(({streak})=> streak.isBestHot || streak.isGoalHot)
+    .map(({p,streak})=>({ p, streak, times: Math.max(times.get(p.key) || 0, 1) })) // on fire now, so at least once
     .sort((a,b)=>{
       const aBoth = a.streak.isBestHot && a.streak.isGoalHot, bBoth = b.streak.isBestHot && b.streak.isGoalHot;
       if(aBoth!==bBoth) return aBoth ? -1 : 1; // double-fire first
@@ -10302,32 +10881,115 @@ function openOnFirePlayers(){
   navPush('on-fire-players', 'On Fire Players', 'tools/on-fire-players', doOpenOnFirePlayers);
 }
 
+// Sort state for the two tables on the On Fire page. The "now" table starts in its own default
+// order (double fire first, then longest streak — liveKey null shows no arrow); the history starts
+// newest first.
+const onFireSort = { liveKey:null, liveDir:'desc', histKey:'endDate', histDir:'desc' };
+
 function renderOnFirePlayers(){
   const wrap = document.getElementById('onFirePlayersWrap');
   if(!initialGamesLoadDone && games.length===0){
     wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading player data…</p></div>`;
     return;
   }
-  const rows = computeOnFirePlayers();
+  const esc = v => String(v).replace(/"/g,'&quot;');
+  const fireCell = both => `<td style="font-size:16px;">${both ? '🔥🔥' : '🔥'}</td>`;
+  const playerCell = (key, name) => `<td><span class="player-link" data-key="${esc(key)}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${name}</span></td>`;
+
+  // One generic comparator for both tables. Text sorts A–Z, numbers by size; ties fall back to the
+  // order the rows arrived in (sort is stable), so clicking never shuffles equal rows around.
+  const sortRows = (rows, key, dir, val) => {
+    const mul = dir==='asc' ? 1 : -1;
+    return rows.slice().sort((a,b)=>{
+      const av = val(a,key), bv = val(b,key);
+      if(typeof av === 'string') return av.localeCompare(bv) * mul;
+      return ((av ?? 0) - (bv ?? 0)) * mul;
+    });
+  };
+  const headHtml = (table, cols, sortKey, sortDir) => cols.map(c=>{
+    const active = sortKey === c.key;
+    const arrow = active ? (sortDir==='asc' ? ' ▲' : ' ▼') : '';
+    const tip = c.tooltip ? `${c.tooltip} (Click to sort)` : 'Click to sort';
+    return `<th class="${c.numeric?'num ':''}sortable-th" data-table="${table}" data-sort-key="${c.key}" data-default-dir="${c.defaultDir}" style="cursor:pointer;user-select:none;${active?'color:var(--gold);':''}" title="${tip}">${c.label}${arrow}</th>`;
+  }).join('');
+
+  // ── Table 1: on fire right now ──
+  const LIVE_COLS = [
+    { key:'fire',  label:'🔥', numeric:false, defaultDir:'desc', tooltip:'Two flames = both kinds of streak running at once' },
+    { key:'name',  label:'Player', numeric:false, defaultDir:'asc' },
+    { key:'team',  label:'Team', numeric:false, defaultDir:'asc' },
+    { key:'best',  label:'Best streak', numeric:true, defaultDir:'desc', tooltip:'Straight games as 1st-named best player' },
+    { key:'goals', label:'Goal streak', numeric:true, defaultDir:'desc', tooltip:'Straight games with 3+ goals' },
+    { key:'times', label:'Times on fire', numeric:true, defaultDir:'desc', tooltip:'How many separate hot streaks this player has had on file, including the one running now' }
+  ];
+  const liveVal = (r,k) => k==='fire' ? (r.streak.isBestHot && r.streak.isGoalHot ? 2 : 1)
+    : k==='name' ? r.p.name : k==='team' ? r.p.team
+    : k==='best' ? (r.streak.isBestHot ? r.streak.bestStreak : 0)
+    : k==='goals' ? (r.streak.isGoalHot ? r.streak.goalStreak : 0) : r.times;
+  let liveRows = computeOnFirePlayers();
+  if(onFireSort.liveKey) liveRows = sortRows(liveRows, onFireSort.liveKey, onFireSort.liveDir, liveVal);
+
+  // ── Table 2: every earlier streak ──
+  const HIST_COLS = [
+    { key:'fire',      label:'🔥', numeric:false, defaultDir:'desc', tooltip:'Two flames = both kinds of streak in the same spell' },
+    { key:'name',      label:'Player', numeric:false, defaultDir:'asc' },
+    { key:'teams',     label:'Team', numeric:false, defaultDir:'asc', tooltip:'The team(s) they were playing for during the streak' },
+    { key:'endDate',   label:'Year', numeric:false, defaultDir:'desc', tooltip:'The season(s) the streak ran in — sorts by when it ended' },
+    { key:'startDate', label:'Rounds', numeric:false, defaultDir:'desc', tooltip:'Every game in the streak, oldest first — sorts by when it began' },
+    { key:'bestLen',   label:'Best streak', numeric:true, defaultDir:'desc', tooltip:'Straight games as 1st-named best player' },
+    { key:'goalLen',   label:'Goal streak', numeric:true, defaultDir:'desc', tooltip:'Straight games with 3+ goals' },
+    { key:'times',     label:'Times on fire', numeric:true, defaultDir:'desc', tooltip:'How many separate hot streaks this player has had on file in total, including any running now' }
+  ];
+  const histVal = (r,k) => k==='fire' ? (r.both ? 2 : 1) : k==='bestLen' ? (r.best ? r.bestLen : 0) : k==='goalLen' ? (r.goals ? r.goalLen : 0) : r[k];
+  const history = computeFireHistory().past;
+  // Newest first is the base order, so ties in any other column still read newest to oldest
+  const histBase = history.slice().sort((a,b)=> b.endDate-a.endDate || a.name.localeCompare(b.name));
+  const histRows = sortRows(histBase, onFireSort.histKey, onFireSort.histDir, histVal);
+  const histPlayers = new Set(history.map(r=>r.key)).size;
+
   wrap.innerHTML = `
     <span class="back-link" id="backFromOnFirePlayers">&larr; Back to tools</span>
     <h2 style="font-size:20px;">On fire players</h2>
-    <p class="hint" style="margin:0 0 12px;">Every player currently on a hot streak — 3+ straight games as 1st-named best player, and/or 3+ straight games with 3+ goals. A LIVE list: a streak disappears the moment a player's most recent game doesn't qualify, so this only shows what's true right now, not a career-best record. 🔥🔥 means both streaks are running at once.</p>
-    ${rows.length===0 ? '<div class="empty">No one is currently on a qualifying streak.</div>' : `
-    <table><thead><tr><th></th><th>Player</th><th>Team</th><th class="num">Best streak</th><th class="num">Goal streak</th></tr></thead>
-    <tbody>${rows.map(({p,streak})=>{
-      const flames = (streak.isBestHot && streak.isGoalHot) ? '🔥🔥' : '🔥';
-      return `<tr>
-        <td style="font-size:16px;">${flames}</td>
-        <td><span class="player-link" data-key="${p.key}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${p.name}</span></td>
-        <td style="font-size:12.5px;color:var(--muted);">${p.team}</td>
-        <td class="num">${streak.isBestHot ? streak.bestStreak : '—'}</td>
-        <td class="num">${streak.isGoalHot ? streak.goalStreak : '—'}</td>
-      </tr>`;
-    }).join('')}</tbody></table>`}
+    <p class="hint" style="margin:0 0 12px;">Every player currently on a hot streak — 3+ straight games as 1st-named best player, and/or 3+ straight games with 3+ goals. A LIVE list: a streak disappears the moment a player's most recent game doesn't qualify, so this only shows what's true right now, not a career-best record. 🔥🔥 means both streaks are running at once. Click any heading to sort.</p>
+    ${liveRows.length===0 ? '<div class="empty">No one is currently on a qualifying streak.</div>' : `
+    <table><thead><tr>${headHtml('live', LIVE_COLS, onFireSort.liveKey, onFireSort.liveDir)}</tr></thead>
+    <tbody>${liveRows.map(r=>`<tr>
+        ${fireCell(r.streak.isBestHot && r.streak.isGoalHot)}
+        ${playerCell(r.p.key, r.p.name)}
+        <td style="font-size:12.5px;color:var(--muted);">${r.p.team}</td>
+        <td class="num">${r.streak.isBestHot ? r.streak.bestStreak : '—'}</td>
+        <td class="num">${r.streak.isGoalHot ? r.streak.goalStreak : '—'}</td>
+        <td class="num">${r.times}</td>
+      </tr>`).join('')}</tbody></table>`}
+
+    <div style="border-top:1px solid var(--line);margin:32px 0 24px;"></div>
+    <h2 style="font-size:19px;margin:0 0 4px;">Previous on-fire streaks</h2>
+    <p class="hint" style="margin:0 0 12px;">Every earlier hot streak on file, newest first, under the same rules as above. "Straight" means straight games the player actually played, so a round they missed doesn't break a streak — the Rounds column shows exactly which games it covered. A streak that carried across two seasons shows both (e.g. 2025–26). <strong>Times on fire</strong> counts every separate streak that player has had, including one running right now. Streaks running right now are in the table above, not here.</p>
+    ${histRows.length===0 ? '<div class="empty">No earlier streaks on file yet.</div>' : `
+    <p class="hint" style="margin:0 0 10px;">${histRows.length} earlier streak${histRows.length===1?'':'s'} by ${histPlayers} player${histPlayers===1?'':'s'}.</p>
+    <table><thead><tr>${headHtml('hist', HIST_COLS, onFireSort.histKey, onFireSort.histDir)}</tr></thead>
+    <tbody>${histRows.map(r=>`<tr>
+        ${fireCell(r.both)}
+        ${playerCell(r.key, r.name)}
+        <td style="font-size:12.5px;color:var(--muted);">${r.teams}</td>
+        <td style="white-space:nowrap;">${r.yearLabel}</td>
+        <td style="font-size:12.5px;">${r.roundsLabel}</td>
+        <td class="num">${r.best ? r.bestLen : '—'}</td>
+        <td class="num">${r.goals ? r.goalLen : '—'}</td>
+        <td class="num">${r.times}</td>
+      </tr>`).join('')}</tbody></table>`}
   `;
   document.getElementById('backFromOnFirePlayers').onclick = ()=> navBack();
   wrap.querySelectorAll('.player-link').forEach(el=>{ el.onclick = ()=> openPlayerDetail(el.dataset.key); });
+  wrap.querySelectorAll('.sortable-th').forEach(th=>{
+    th.onclick = ()=>{
+      const live = th.dataset.table === 'live';
+      const kKey = live ? 'liveKey' : 'histKey', kDir = live ? 'liveDir' : 'histDir';
+      if(onFireSort[kKey] === th.dataset.sortKey) onFireSort[kDir] = onFireSort[kDir]==='asc' ? 'desc' : 'asc';
+      else { onFireSort[kKey] = th.dataset.sortKey; onFireSort[kDir] = th.dataset.defaultDir; }
+      renderOnFirePlayers();
+    };
+  });
 }
 
 function renderPlayerDetail(key){
@@ -15144,7 +15806,7 @@ function divisionAndLadderScore(teamName, year){
   if(div == null) return null;
   const ageGroup = getAgeGroupLabel(teamName);
   if(!ageGroup) return divisionRank('Division ' + div);
-  const ladder = computeLadder({ year, ageGroup, division: 'Division ' + div });
+  const ladder = computeLadder({ year, ageGroup, division: 'Division ' + div }).filter(r=> r.rank!=null);
   if(!ladder.length) return divisionRank('Division ' + div);
   const row = ladder.find(r=> r.name===teamName);
   if(!row) return divisionRank('Division ' + div);
@@ -15324,7 +15986,12 @@ function computeOverallGradeRank(ageGroup, year){
   const rankOf = {};
   let offset = 0;
   divisions.forEach(div=>{
-    const ladder = computeLadder({ year, ageGroup, division:'Division '+div });
+    // A regraded-out team's rank:null here would otherwise coerce to +0 in the arithmetic below
+    // (JS treats `offset + null` as `offset + 0`), silently tying them with this division's own
+    // #1 seed instead of ranking them by wherever they actually finished the season — excluded
+    // the same way every other caller of computeLadder now filters this, rather than trusting
+    // arithmetic to fail loudly on a case it doesn't.
+    const ladder = computeLadder({ year, ageGroup, division:'Division '+div }).filter(r=> r.rank!=null);
     ladder.forEach(row=>{ rankOf[row.name] = offset + row.rank; });
     offset += ladder.length;
   });
@@ -19572,7 +20239,8 @@ function navResolveHash(){
         'merge-players': ()=>openMergePlayers(), 'manage-clubs': ()=>openManageClubs(),
         'suggest-divisions': ()=>openSuggestDivisions(), 'top-players': ()=>openTopPlayers(),
         'suggest-next-season': ()=>openSuggestNextSeason(),
-        'prediction-accuracy': ()=>openPredictionAccuracy()
+        'prediction-accuracy': ()=>openPredictionAccuracy(),
+        'on-fire-players': ()=>openOnFirePlayers()
       };
       if(openers[type]){ seedRoot('tools'); openers[type](); return; }
     }
@@ -19588,7 +20256,7 @@ function navResolveHash(){
 // doesn't look like it should be doing something. Every other page (including most of the Tools
 // pages) reads computeAggregates(), which IS scoped by this filter. Player Movement is the one
 // tool that deliberately looks across every season regardless — it says so on its own page.
-const FILTER_IRRELEVANT_PANELS = new Set(['add','game-detail','player-movement','ladder']);
+const FILTER_IRRELEVANT_PANELS = new Set(['add','game-detail','player-movement','ladder','on-fire-players']);
 
 // Redraws a top-level tab with whatever state it currently has (filters, sub-view, etc) —
 // used both right after activateTab() resets that state for a fresh click, AND on its own when
@@ -20593,6 +21261,16 @@ startHomeSnapshotBaseline();
   }
   try{ navResolveHash(); }
   catch(e){ console.error('Could not restore view from URL', e); }
+
+  // Only meaningful on the real hosted site — location.pathname doesn't correspond to a real,
+  // separately-fetchable HTML file in the sandbox/artifact context, so there's nothing genuine to
+  // check there. Runs after everything above so it never delays the actual app loading, then
+  // re-checks periodically for anyone who leaves a tab open across a later publish — 10 minutes is
+  // frequent enough to catch that without adding any meaningful load.
+  if(USING_LOCAL_STORAGE_FALLBACK){
+    checkForAppUpdate();
+    setInterval(checkForAppUpdate, 10 * 60 * 1000);
+  }
 })();
 </script>
 </body>
