@@ -6,3 +6,4 @@
 !tracker/games-*.json
 !tracker/details/manifest.json
 !tracker/details/players-*.json
+!tracker/club-stats.json

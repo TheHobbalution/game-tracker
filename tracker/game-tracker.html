@@ -107,6 +107,17 @@
   .tools-section-label{ font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);
     margin:22px 0 10px; }
   .tools-section-label:first-child{ margin-top:0; }
+  /* Tools page only: the four main section headings bigger and bolder, in the tile-title font; the
+     Data & admin heading keeps the plain small style above, and its tiles are made more compact —
+     they're occasional utilities, not the tools people use week to week. */
+  #panel-tools .tools-section-label:not(.tools-section-label-admin){ font-family:'Oswald',sans-serif; font-size:17px;
+    font-weight:700; letter-spacing:0.07em; color:var(--text); margin:30px 0 12px; }
+  #panel-tools .tools-section-label:not(.tools-section-label-admin):first-of-type{ margin-top:4px; }
+  #panel-tools .tools-section-label-admin{ margin-top:34px; }
+  #panel-tools .tools-grid-muted{ grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+  #panel-tools .tool-tile.tool-tile-muted{ padding:9px 12px; }
+  #panel-tools .tool-tile.tool-tile-muted .tool-tile-title{ font-size:12.5px; margin-bottom:3px; }
+  #panel-tools .tool-tile.tool-tile-muted .tool-tile-desc{ font-size:11.5px; line-height:1.35; }
 
   main{ padding:24px 28px 60px; max-width:1100px; margin:0 auto; }
   .panel{ display:none; }
@@ -160,6 +171,9 @@
      border-collapse:collapse the wider of two competing borders wins, so this 2px red one replaces
      the ordinary 1px --line divider between that row and the next. */
   tr.finals-cutoff td{ border-bottom:2px solid var(--red); }
+  table.auto-sort th.as-th{ cursor:pointer; user-select:none; }
+  table.auto-sort th.as-th:hover{ color:var(--gold); }
+  th .as-arrow{ font-size:10px; }
   th{ font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:11.5px; letter-spacing:0.04em; color:var(--muted); user-select:none; }
   th.sortable{ cursor:pointer; }
   th.sortable:hover{ color:var(--text); }
@@ -441,7 +455,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 29092026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 21102026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -495,10 +509,10 @@
     <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across the AFL Barwon FNL, all pulled together in one place — goals, records, form trends, head-to-head history, and team rankings, updated as results come in.</p>
     <div id="privacyBanner" class="warn-box" style="max-width:760px;margin-bottom:18px;"><strong>This is your own copy.</strong> Anything you add, edit or delete here changes only what <em>you</em> see — it isn't shared with anyone else, and it doesn't alter the real results.</div>
     <div id="homeSnapshot" class="home-snapshot">
-      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">16,987</div><div class="label">Players with stats tracked</div></div>
-      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">1,968</div><div class="label">Teams</div></div>
       <div class="home-snapshot-item" style="--accent-color:var(--teal);"><div class="value">41</div><div class="label">Clubs</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--blue);"><div class="value">1,968</div><div class="label">Teams</div></div>
       <div class="home-snapshot-item" style="--accent-color:var(--gold);"><div class="value">16,388</div><div class="label">Games tracked (all-time)</div></div>
+      <div class="home-snapshot-item" style="--accent-color:var(--green);"><div class="value">16,987</div><div class="label">Players with stats tracked</div></div>
       <div class="home-snapshot-item" style="--accent-color:var(--purple);"><div class="value">138,984</div><div class="label">Goals scored</div></div>
     </div>
     <p class="hint" style="margin:22px 0 14px;">Pick where you want to go:</p>
@@ -684,9 +698,10 @@
     <div class="tools-section-label">Games &amp; fixtures</div>
     <div class="tools-grid">
       <div class="tool-tile tool-tile-green" id="toolTilePredictionAccuracy"><div class="tool-tile-title">Prediction accuracy</div><div class="tool-tile-desc">How well the forecast model has called results so far.</div></div>
+      <div class="tool-tile tool-tile-green" id="toolTileCompetitionTrends"><div class="tool-tile-title">Competition trends</div><div class="tool-tile-desc">Scores, margins and close games for any year, age group or division — through the season, and compared across divisions, ages and years.</div></div>
       <div class="tool-tile tool-tile-green" id="toolTileQuarterComebacks"><div class="tool-tile-title">Biggest turnarounds</div><div class="tool-tile-desc">Games where the lead changed hands — comebacks and collapses.</div></div>
     </div>
-    <div class="tools-section-label">Data &amp; admin</div>
+    <div class="tools-section-label tools-section-label-admin">Data &amp; admin</div>
     <div class="tools-grid tools-grid-muted">
       <div class="tool-tile tool-tile-muted" id="toolTileMergePlayers"><div class="tool-tile-title">Merge players</div><div class="tool-tile-desc">Fix duplicate player records — typos, or a player who switched clubs mid-season.</div></div>
       <div class="tool-tile tool-tile-muted" id="toolTileSuggestDivisions"><div class="tool-tile-title">Suggest divisions</div><div class="tool-tile-desc">Flags teams that may be sitting in the wrong division.</div></div>
@@ -707,6 +722,9 @@
   </section>
 
   <!-- QUARTER COMEBACKS -->
+  <section class="panel" id="panel-competition-trends">
+    <div id="competitionTrendsWrap"></div>
+  </section>
   <section class="panel" id="panel-quarter-comebacks">
     <div id="quarterComebacksWrap"></div>
   </section>
@@ -946,11 +964,17 @@ let knownClubs = [
   "Geelong West Giants","Grovedale","Inverleigh","Lara","Leopold","Lethbridge","Little River",
   "Modewarre","Newcomb","Newtown & Chilwell","North Geelong","North Shore","Northern Stars","Ocean Grove",
   "Portarlington","Queenscliff","South Barwon","St Albans","St Joseph's","St Mary's",
-  "Surf Coast Suns","Thomson","Torquay","Werribee Centrals","Winchelsea"
+  "Surf Coast Suns","Thomson","Torquay","Werribee Centrals","Winchelsea",
+  // Colac & District FNL (CDFNL). "Colac Imperials" / "South Colac" must be listed so their teams
+  // don't fall back to the GFNL club "Colac" — club matching always prefers the longest name.
+  "Alvie","Apollo Bay","Birregurra","Colac Imperials","Irrewarra-Beeac","Lorne","Otway Districts",
+  "Simpson","South Colac","Western Eagles"
 ];
 let teamClubOverrides = {}; // exact team name -> chosen club, for names generic matching can't work out
 let clubNicknames = {
   "ammos": "Geelong Amateur",
+  // CDFNL: PlayHQ may spell it with or without the hyphen ("Irrewarra Beeac")
+  "irrewarra": "Irrewarra-Beeac",
   // Geelong West Giants' two U18 sides were entered under their coaches' surnames for the 2026
   // season rather than "Giants" — baked in here rather than left as ordinary Manage Clubs config,
   // since it's a permanent fact about the club rather than something a Replace-everything restore
@@ -1349,10 +1373,40 @@ function normalizeGameScoreField(side){
     side.total = side.score;
   }
 }
+// Team-name aliases: the same team spelled differently between seasons on PlayHQ, collapsed to one
+// name so a team links to its own other seasons, searches find every season, and lists show one
+// spelling. Teesdale's junior sides are "Teesdale Roos U9/U10" 2023-2025 but "Teesdale Roo's
+// U10/U12" from 2026; "Roos" is kept (3 of 5 seasons, and the plain plural). The club ("Teesdale")
+// and each player's identity already resolved the same either way — only the TEAM name differed.
+// The same list lives in convert.js (applied when a scrape is converted) and game-tracker.html
+// (applied as games, fixtures and byes load, so existing data and backups are covered too) — keep
+// them in step. To use "Roo's" instead, swap the replacement text in both.
+const TEAM_NAME_ALIASES = [
+  [/^Teesdale Roo['\u2019`]s\b/i, 'Teesdale Roos']
+];
+function canonicalTeamName(name, competitionRaw){
+  if(typeof name !== 'string') return name;
+  // 2022's GDFL sides were entered as "Geelong West Giants Seniors" / "Geelong West Giants -
+  // Reserves" — the first name identical to the Geelong FNL side the same season. From 2023 PlayHQ
+  // calls them "GW Giants FNC …", so 2022 is brought into line by competition, letting the two
+  // programs be told apart in every season (see splitClubKey).
+  if(competitionRaw && /geelong\s+(?:&\s+|and\s+)?district/i.test(competitionRaw)){
+    const m = name.match(/^Geelong West Giants\b[\s-]*(Seniors?|Reserves?)\b/i);
+    if(m) return `GW Giants FNC ${/^res/i.test(m[1]) ? 'Reserves' : 'Seniors'}`;
+  }
+  for(const [re, rep] of TEAM_NAME_ALIASES){ if(re.test(name)) return name.replace(re, rep); }
+  return name;
+}
 function normalizeGameScores(list){
   if(!Array.isArray(list)) return list;
   list.forEach(g=>{
     if(g){
+      // every load path runs through here, so this is where team-name aliases are applied to games
+      const comp = g.competitionRaw;
+      if(g.teamA && g.teamA.name) g.teamA.name = canonicalTeamName(g.teamA.name, comp);
+      if(g.teamB && g.teamB.name) g.teamB.name = canonicalTeamName(g.teamB.name, comp);
+      if(g.winner) g.winner = canonicalTeamName(g.winner, comp);
+      if(g.forfeitWinner) g.forfeitWinner = canonicalTeamName(g.forfeitWinner, comp);
       normalizeGameScoreField(g.teamA);
       normalizeGameScoreField(g.teamB);
     }
@@ -1480,6 +1534,7 @@ async function loadFixtures(){
   try{
     const res = await window.storage.get('fixtures', false);
     fixtures = res ? JSON.parse(res.value) : [];
+    fixtures.forEach(f=>{ if(f){ f.teamA = canonicalTeamName(f.teamA, f.competitionRaw); f.teamB = canonicalTeamName(f.teamB, f.competitionRaw); } });
   }catch(e){
     fixtures = [];
   }
@@ -1495,6 +1550,7 @@ async function loadByes(){
   try{
     const res = await window.storage.get('byes', false);
     byes = res ? JSON.parse(res.value) : [];
+    byes.forEach(b=>{ if(b) b.team = canonicalTeamName(b.team, b.competitionRaw); });
   }catch(e){
     byes = [];
   }
@@ -2681,9 +2737,11 @@ function applyHeadToHeadOrdering(rows){
 // (not as a top-level const) since GRADE_DISPLAY_ORDER itself is declared further down the file —
 // a top-level const here would try to read it before that line has run.
 function isLadderEligibleGrade(grade){
+  // U12 qualifies because Colac & District runs U12 ladders/finals (Geelong only from U14) — an age
+  // group is only actually OFFERED on the Ladder page for a year where it has ladder games (see
+  // renderLadder), so Geelong-only U12 seasons never show an empty U12 ladder.
   const r = gradeDisplayRank(grade);
-  const ladderMinGradeRank = GRADE_DISPLAY_ORDER['U14']; // Seniors,Reserves,U18,U16,U14 all qualify (rank <= this)
-  return r <= ladderMinGradeRank;
+  return r <= GRADE_DISPLAY_ORDER['U12'];
 }
 
 let ladderFilters = { year:null, ageGroup:null, division:null, pool:null, mode:'ladder', finalsSpotsOverride:null, extraGamesPerTeam:0 };
@@ -3294,6 +3352,7 @@ async function renderLadder(){
 
   const ageGroups = Object.keys(GRADE_DISPLAY_ORDER).filter(isLadderEligibleGrade)
     .filter(a=> eligibleTeams.some(t=> String(t.year)===String(f.year) && t.ageGroup===a))
+    .filter(a=> getLadderDivisions(f.year, a).length > 0)
     .sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
   if(f.ageGroup==null || !ageGroups.includes(f.ageGroup)) f.ageGroup = ageGroups[0] || null;
 
@@ -3425,7 +3484,7 @@ async function renderLadder(){
     wrap.innerHTML = `
     <span class="back-link" id="backFromLadder">&larr; Back</span>
     <h2 style="font-size:20px;">Ladders</h2>
-    <p class="hint" style="margin:0 0 12px;">Regular season standings only — Grading rounds (used to sort teams into divisions) and Finals aren't counted, same as a real ladder. U12 and below don't run a ladder or finals in this league, so they're not offered here.</p>
+    <p class="hint" style="margin:0 0 12px;">Regular season standings only — Grading rounds (used to sort teams into divisions) and Finals aren't counted, same as a real ladder. Geelong juniors run ladders and finals from U14 (by division); Colac &amp; District from U12 (one competition per age group). Younger grades are participation-only, so they're not offered here.</p>
     <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
       <select id="ladderYearSel">${years.map(y=>`<option value="${y}" ${String(f.year)===String(y)?'selected':''}>${y}</option>`).join('')}</select>
       <select id="ladderAgeSel" ${ageGroups.length?'':'disabled'}>
@@ -3438,8 +3497,8 @@ async function renderLadder(){
     </div>
     ${!f.ageGroup ? '<div class="empty">No ladder-eligible grade has games for this year.</div>' : (
       allRows.length===0 ? '<div class="empty">No regular season games found for this selection.</div>' : `
-      <table><thead><tr>
-        <th>#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th><th class="num">D</th>
+      <table class="auto-tip"><thead><tr>
+        <th data-tip="Ladder position">#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th><th class="num">D</th>
         <th class="num" title="Byes this season — not counted for or against">Byes</th>
         <th class="num">For</th><th class="num">Against</th><th class="num">%</th><th class="num">Pts</th>${usesMR ? '<th class="num" title="Match ratio: points won as a share of the points available from games played (4 per game). This ladder is ranked by it because teams have had different numbers of byes — AFL Barwon By-Law 16.1(c).">MR</th>' : ''}
         <th title="A plain, checkable read rather than a simulated percentage: Locked in / Eliminated are hard facts based on games remaining. Likely means they've got at least one game of room for error to reach the current cutoff line; Unlikely means they'd need to win everything left with zero room to spare. See Finals chances below for the full picture.">Finals status</th>
@@ -5598,7 +5657,7 @@ function computeRetroPredictions(filterFn){
 //  3. Division numbers aren't comparable. In 2026 U14 runs to 7 divisions, U16 to 5 and U18 to 3,
 //     so "Division 4" is mid-table in one grade and near-bottom in another. Direction is judged on
 //     relative level (0 = top division of that grade-season, 1 = bottom) instead.
-const AGE_GROUP_ORDER = { 'U8':0,'U9':1,'U10':2,'U12':3,'U14':4,'U16':5,'U18':6,'Reserves':7,'Seniors':7 };
+const AGE_GROUP_ORDER = { 'U8':0,'U9':1,'U10':2,'U12':3,'U14':4,'U15':4.5,'U16':5,'U17':5.5,'U18':6,'Reserves':7,'Seniors':7 };
 
 // The next age group up from a given one. Juniors progress in 2-year steps (U12→U14→U16→U18);
 // U18 moves to Seniors/Reserves; Seniors/Reserves stay at their level (no further progression).
@@ -6386,7 +6445,7 @@ function isJuniorGrade(g){ return /^U\d{1,2}$/.test(g || ''); }
 // youngest (U18 down to U12). Kept separate from AGE_GROUP_ORDER above, which ties Reserves and
 // Seniors to the same rank for the move-detection age-progression check — that's a correctness
 // rule, not a display preference, and must not change with this.
-const GRADE_DISPLAY_ORDER = { 'Seniors':0,'Reserves':1,'U18':2,'U16':3,'U14':4,'U12':5,'U10':6,'U9':7,'U8':8 };
+const GRADE_DISPLAY_ORDER = { 'Seniors':0,'Reserves':1,'U18':2,'U17':2.5,'U16':3,'U15':3.5,'U14':4,'U12':5,'U10':6,'U9':7,'U8':8 }; // U17/U15: country leagues (e.g. CDFNL) — fractional so existing ranks don't move
 function gradeDisplayRank(g){ return GRADE_DISPLAY_ORDER[g] ?? 99; }
 
 function doOpenPlayerMovement(){
@@ -6691,17 +6750,17 @@ function renderPlayerMovement(){
 
   const moveRows = list => list.length===0
     ? '<div class="empty">No moves match those filters.</div>'
-    : `<table><thead><tr><th>Player</th><th>Seasons</th><th>From</th><th>To</th><th>Level</th><th></th></tr></thead>
+    : `<table class="auto-sort" data-sort-id="player-movement"><thead><tr><th>Player</th><th>Seasons</th><th>From</th><th>To</th><th>Level</th><th></th></tr></thead>
       <tbody>${list.slice(0,400).map(m=>`
         <tr class="clickable-row" data-trail="${m.name.replace(/"/g,'&quot;')}">
           <td>${m.display}</td>
-          <td>${m.fromYear} → ${m.toYear}${m.gap>1?` <span class="hint" style="margin:0;">(gap)</span>`:''}</td>
+          <td data-sort-value="${m.fromYear}${m.toYear}">${m.fromYear} → ${m.toYear}${m.gap>1?` <span class="hint" style="margin:0;">(gap)</span>`:''}</td>
           <td>${m.fromClub}<div style="font-size:11.5px;color:var(--muted);">${m.fromGrade||''} · ${movementDivisionLabel(m.fromDivisions, m.direction==='na' && !m.fromDivisions.length)}</div></td>
           <td>${m.toClub}<div style="font-size:11.5px;">${m.toGrade||''} · ${movementDivisionLabel(m.toDivisions, m.direction==='na' && !m.toDivisions.length)}</div></td>
           <td>${dirCell(m)}</td>
           <td class="num"><button class="ghost mini" data-dismiss-move="${m.signature.replace(/"/g,'&quot;')}" title="Not the same player — hide this match">✕</button></td>
         </tr>
-        <tr class="trail-row" data-trail-for="${m.name.replace(/"/g,'&quot;')}" style="display:none;"><td colspan="6">${trailHtml(m.name)}</td></tr>
+        <tr class="trail-row sort-child" data-trail-for="${m.name.replace(/"/g,'&quot;')}" style="display:none;"><td colspan="6">${trailHtml(m.name)}</td></tr>
       `).join('')}</tbody></table>
       ${list.length>400?`<p class="hint">Showing the first 400 of ${list.length}.</p>`:''}`;
 
@@ -7309,7 +7368,8 @@ const CLUB_COLORS = {
   "Winchelsea":          { primary:"#1b2a5b", secondary:"#a8b4c2" }  // navy/silver
 };
 function getClubColor(club){
-  return club ? (CLUB_COLORS[club] || null) : null;
+  if(!club) return null;
+  return CLUB_COLORS[club] || CLUB_COLORS[String(club).replace(/\s*\((?:GFL|GDFL)\)$/,'')] || null;
 }
 
 // ─── Club-colour helpers for charts ─────────────────────────────────────────────────────────
@@ -7644,7 +7704,7 @@ function computeAggregates(gamesOverride){
     if(aRes==='W'){ tA.wins++; if(!g.isForfeit){ tA.decidedWins++; tA.biggestWin = Math.max(tA.biggestWin, g.margin); tA.winMarginSum += g.margin; } }
     else if(aRes==='L'){ tA.losses++; if(!g.isForfeit){ tA.decidedLosses++; tA.biggestLoss = Math.max(tA.biggestLoss, g.margin); tA.lossMarginSum += g.margin; } }
     else tA.draws++;
-    bumpPhaseRecord(tA, g.phase, aRes);
+    bumpPhaseRecord(tA, isFinalsGame(g) ? 'Finals' : g.phase, aRes);
 
     const tB = ensureTeam(g.teamB.name, gameYear); tB.gamesPlayed++;
     tB.divisions.add(gameDivision);
@@ -7652,7 +7712,7 @@ function computeAggregates(gamesOverride){
     if(bRes==='W'){ tB.wins++; if(!g.isForfeit){ tB.decidedWins++; tB.biggestWin = Math.max(tB.biggestWin, g.margin); tB.winMarginSum += g.margin; } }
     else if(bRes==='L'){ tB.losses++; if(!g.isForfeit){ tB.decidedLosses++; tB.biggestLoss = Math.max(tB.biggestLoss, g.margin); tB.lossMarginSum += g.margin; } }
     else tB.draws++;
-    bumpPhaseRecord(tB, g.phase, bRes);
+    bumpPhaseRecord(tB, isFinalsGame(g) ? 'Finals' : g.phase, bRes);
 
     if(g.quarterScores){
       tA.quarterGames++; tB.quarterGames++;
@@ -7857,6 +7917,146 @@ function getCareerPlayerList(){
     _careerPlayerListCacheVersion = _aggVersion;
   }
   return _careerPlayerListCache;
+}
+
+// ─── Auto-sort + header tooltips for plain tables ────────────────────────────────────────────
+// Opt-in by class, so no render function needs its own sort state:
+//   <table class="auto-sort">  clickable headers (▲▼), plus tooltips
+//   <table class="auto-tip">   tooltips only (e.g. the Ladder, whose order IS the ranking)
+// Tooltips come from HEADER_GLOSSARY by header text; a th's own data-tip overrides it (for a header
+// that means something different in one table), and a th that already has a title keeps it.
+// Sorting reads each cell's data-sort-value if present, else its text: numbers/percentages/"12 pts"
+// sort numerically, "13 Jun 2026"-style dates chronologically, anything else naturally ("Round 10"
+// after "Round 9"); blanks and "—" always go last. A row with class "sort-child" (a hidden detail
+// row) moves with the row above it. A th with class "no-sort" or no text isn't sortable. The chosen
+// sort is remembered per table (data-sort-id, else the header row's text) and re-applied whenever
+// the table is re-rendered — tables here are rebuilt with innerHTML, so a MutationObserver picks
+// every new one up without any render function having to call this.
+const HEADER_GLOSSARY = {
+  'P':'Games played', 'W':'Wins', 'L':'Losses', 'D':'Draws', 'Byes':'Byes — rounds with no game',
+  'For':'Total points scored', 'Against':'Total points conceded',
+  '%':'Percentage: points scored ÷ points conceded × 100. Separates teams level on premiership points',
+  'Pts':'Premiership points: 4 for a win, 2 for a draw (AFL Barwon By-Law 16.1)',
+  'Finals status':'Whether the team can still make finals: Locked in, Likely, Unlikely or Eliminated',
+  'Year':'Season', 'Team':'Team', 'Team(s)':'Team(s) played for that season', 'Division':'Division played in',
+  'Division(s)':'Division(s) played in that season', 'Club':'Club', 'Player':'Player',
+  'Games':'Games played', 'Goals':'Goals kicked', 'W-L-D':'Wins – losses – draws',
+  'Avg/gm':'Average goals per game', 'Bests':'Times named in the best players',
+  'Best':'★ = named in the best players', 'Date':'Date of the game', 'Opponent':'Opposing team',
+  'Result':'W = won, L = lost, D = drawn',
+  'Trend':'Compared with the season before: Improved (a higher division on average), Dropped back, or Steady',
+  'Round':'Round of the season', 'Hit-rate':'Share of games where the predicted favourite won',
+  'Avg margin error':'Average gap between the predicted and actual margin, in points',
+  'Predicted probability':'How confident the prediction was, grouped into bands',
+  'Predictions':'Number of predictions in this band',
+  'Favourite actually won':'How often the favourite won. Close to the band\'s own probability = well calibrated',
+  'Game':'The game — click to open it', 'Grade':'Age group',
+  'Type':'Comeback (the trailing team won) or Collapse (the leading team lost)',
+  'Biggest gap':'The largest deficit at any quarter-time break', 'Turnaround':'How many points the lead swung between the biggest gap and the final result',
+  'Win %':'Share of games won',
+  'Avg total':'Average combined score of both teams per game', 'Avg winning':'Average score of the winning team',
+  'Avg losing':'Average score of the losing team', 'Median margin':'The middle margin: half of games were closer, half were wider',
+  'Close %':'Share of games decided by a goal (6 points) or less', 'Blowout %':'Share of games won by 60 points or more',
+  'Age group':'Age group', 'League':'Senior league', 'Avg for':'Average points scored per game', 'Avg against':'Average points conceded per game',
+  'Avg margin':'Average margin per game: + won by, − lost by', 'Phase':'Regular season or finals',
+  'Stage':'Age group at that point of the cohort\'s path', 'Rank':'Overall rank in the age group that season, across every division (1 = top)',
+  'Club (if different)':'The club, where it differs from the player\'s home club',
+  'Players':'Players counted', 'One-club':'Players who have only ever played for this club',
+  'Home-grown %':'Share of players who came through this club\'s own juniors', 'Roster':'Players who played for this team that season',
+  'Season transition':'From one season to the next', 'Total players (prev season)':'Players at the club in the earlier season',
+  'No longer playing':'Of those, how many didn\'t play anywhere on file the next season',
+  'Rate':'No longer playing, as a share of the earlier season\'s players', 'Top age group lost':'Age group that lost the most players',
+  'Q1':'Score at quarter time (running total)', 'Q2':'Score at half time (running total)',
+  'Q3':'Score at three-quarter time (running total)', 'Q4':'Final score',
+  'Seasons':'The two seasons the move spans', 'From':'Club and grade they left', 'To':'Club and grade they moved to',
+  'Level':'▲ a higher grade than before, ▼ a lower one'
+};
+const _autoSortState = new Map(); // table id -> { col: header text, dir }
+function _autoSortKeyOf(table){
+  return table.dataset.sortId || [...table.querySelectorAll('thead th')].map(th=> th.dataset.asLabel || th.textContent.trim()).join('|');
+}
+function _autoSortParse(td){
+  if(!td) return { v:null, num:false };
+  const raw = td.dataset && td.dataset.sortValue != null ? td.dataset.sortValue : td.textContent;
+  const t = String(raw).replace(/\s+/g,' ').trim();
+  if(t==='' || t==='—' || t==='-' || t==='–') return { v:null, num:false };
+  const n = t.replace(/−/g,'-').replace(/,/g,'');
+  const m = /^([+-]?\d+(?:\.\d+)?)\s*(%|pts?|x)?$/i.exec(n);
+  if(m) return { v:Number(m[1]), num:true };
+  const d = /\b(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (\d{4})\b/.exec(t);
+  if(d){
+    const tm = /(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(t);
+    let hh = tm ? Number(tm[1])%12 + (tm[3] && tm[3].toUpperCase()==='PM' ? 12 : 0) : 0;
+    const when = new Date(`${d[1]} ${d[2]} ${d[3]}`).getTime() + (tm ? (hh*60 + Number(tm[2]))*60000 : 0);
+    if(!isNaN(when)) return { v:when, num:true };
+  }
+  return { v:t.toLowerCase(), num:false };
+}
+function _autoSortApply(table, colIndex, dir){
+  const tbody = table.tBodies[0]; if(!tbody) return;
+  const groups = [];
+  [...tbody.rows].forEach(tr=>{
+    if(tr.classList.contains('sort-child') && groups.length) groups[groups.length-1].rows.push(tr);
+    else groups.push({ rows:[tr], key:_autoSortParse(tr.cells[colIndex]) });
+  });
+  const mul = dir==='asc' ? 1 : -1;
+  groups.forEach((g,i)=> g.i = i);
+  groups.sort((a,b)=>{
+    const x=a.key, y=b.key;
+    if(x.v==null && y.v==null) return a.i-b.i;
+    if(x.v==null) return 1; if(y.v==null) return -1;          // blanks last, either direction
+    if(x.num !== y.num) return x.num ? -1 : 1;                 // numbers before text
+    const c = x.num ? x.v - y.v : String(x.v).localeCompare(String(y.v), undefined, { numeric:true });
+    return c*mul || a.i-b.i;
+  });
+  groups.forEach(g=> g.rows.forEach(r=> tbody.appendChild(r)));
+  [...table.querySelectorAll('thead th')].forEach((th,i)=>{
+    const a = th.querySelector('.as-arrow'); if(a) a.textContent = i===colIndex ? (dir==='asc'?' ▲':' ▼') : '';
+  });
+}
+function enhanceTable(table){
+  if(table.dataset.asReady) return;
+  table.dataset.asReady = '1';
+  const sortable = table.classList.contains('auto-sort');
+  const ths = [...table.querySelectorAll('thead th')];
+  ths.forEach((th, i)=>{
+    const label = th.textContent.trim();
+    th.dataset.asLabel = label;
+    const tip = th.dataset.tip || HEADER_GLOSSARY[label];
+    const canSort = sortable && label && !th.classList.contains('no-sort') && !(th.colSpan>1);
+    if(!th.title && tip) th.title = tip + (canSort ? ' (Click to sort)' : '');
+    else if(!th.title && canSort) th.title = 'Click to sort';
+    if(!canSort) return;
+    th.classList.add('as-th');
+    const arrow = document.createElement('span'); arrow.className = 'as-arrow'; th.appendChild(arrow);
+    th.addEventListener('click', ()=>{
+      // first click: numbers/dates high-to-low, text A-Z; clicking again flips it
+      const key = _autoSortKeyOf(table), cur = _autoSortState.get(key);
+      let dir;
+      if(cur && cur.col===label) dir = cur.dir==='asc' ? 'desc' : 'asc';
+      else {
+        const sample = [...(table.tBodies[0]||{rows:[]}).rows].filter(r=>!r.classList.contains('sort-child')).map(r=>_autoSortParse(r.cells[i])).filter(k=>k.v!=null);
+        dir = sample.length && sample.every(k=>k.num) ? 'desc' : 'asc';
+      }
+      _autoSortState.set(key, { col:label, dir });
+      _autoSortApply(table, i, dir);
+    });
+  });
+  if(sortable){
+    const saved = _autoSortState.get(_autoSortKeyOf(table));
+    if(saved){ const idx = ths.findIndex(th=> th.dataset.asLabel===saved.col); if(idx>=0) _autoSortApply(table, idx, saved.dir); }
+  }
+}
+function enhanceTablesIn(root){
+  if(!root || !root.querySelectorAll) return;
+  root.querySelectorAll('table.auto-sort, table.auto-tip').forEach(enhanceTable);
+}
+if(typeof MutationObserver!=='undefined' && typeof document!=='undefined' && document.body){
+  let _asQueued = false;
+  new MutationObserver(()=>{
+    if(_asQueued) return; _asQueued = true;
+    Promise.resolve().then(()=>{ _asQueued = false; enhanceTablesIn(document.body); });
+  }).observe(document.body, { childList:true, subtree:true });
 }
 
 function showToast(msg){
@@ -8597,7 +8797,10 @@ function canonicalSeniorDivision(g){
   }
   if(!grade) return null;
   // League: check district before geelong, since GDFL's name also contains "geelong".
-  let league = /district/.test(c) ? 'Geelong & District Football Netball League'
+  // GDFL must say "Geelong (and/&) District" — a bare "district" would also catch any future
+  // league added from elsewhere (e.g. Colac & District), which should fall through as its own league.
+  let league = /colac\s+(?:&\s+|and\s+)?district|\bcdfnl\b/.test(c) ? 'Colac & District Football Netball League'
+             : /geelong\s+(?:&\s+|and\s+)?district/.test(c) ? 'Geelong & District Football Netball League'
              : /bellarine/.test(c) ? 'Bellarine Football Netball League'
              : /geelong/.test(c) ? 'Geelong Football Netball League'
              : null;
@@ -8612,6 +8815,8 @@ function getDivision(g){
   if(/grading/i.test(g.competitionRaw)) return 'Grading';
   const senior = canonicalSeniorDivision(g);   // merge sponsor variants for the three senior leagues
   if(senior) return senior;
+  const leagueJunior = canonicalLeagueJuniorDivision(g);
+  if(leagueJunior) return leagueJunior;
   // Not a numbered division, grading pool, or known senior league — e.g. a cup or other comp.
   // Keep the name (still useful context) but strip any leading year so it reads cleanly.
   return g.competitionRaw.replace(/^\s*20\d{2}\s+/, '').trim() || 'Unknown division';
@@ -8630,7 +8835,24 @@ function getDivision(g){
 // reserves leagues and drops only Grading (1,237 games) and Open Mixed (9 games).
 function isLadderCompetitionGame(g){
   if(!g || !g.teamA || !g.teamB) return false;
-  return /^Division \d+$/.test(getDivision(g)) || !!canonicalSeniorDivision(g);
+  return /^Division \d+$/.test(getDivision(g)) || !!canonicalSeniorDivision(g) || !!canonicalLeagueJuniorDivision(g);
+}
+// Leagues whose JUNIOR grades are a single ungraded competition per age group (one team per club,
+// no divisions) that still runs a ladder and finals — unlike Geelong juniors, which are split into
+// numbered divisions and only play finals from U14. For these the league itself is the "division"
+// label, exactly like the senior leagues, so ladders/finals/cut-offs work with no special cases.
+// Colac & District FNL: ladders and finals from U12 up. Add another league here the same way.
+const LEAGUE_JUNIOR_LADDERS = [
+  { re: /colac\s+(?:&\s+|and\s+)?district|\bcdfnl\b/i, label: 'Colac & District Football Netball League', minAge: 'U12' }
+];
+function canonicalLeagueJuniorDivision(g){
+  const comp = (g && g.competitionRaw) || '';
+  if(!comp || /grading|open\s*mixed/i.test(comp)) return null;
+  const lg = LEAGUE_JUNIOR_LADDERS.find(l=> l.re.test(comp));
+  if(!lg) return null;
+  const age = [getAgeGroupLabel(g.teamA && g.teamA.name), getAgeGroupLabel(g.teamB && g.teamB.name)].find(isJuniorGrade);
+  if(!age) return null;
+  return gradeDisplayRank(age) <= gradeDisplayRank(lg.minAge) ? lg.label : null;
 }
 
 // Lower number = stronger competition (Division 1 is the top tier). Returns null for
@@ -9485,7 +9707,7 @@ function startHomeSnapshotBaseline(){
   const els = document.querySelectorAll('#homeSnapshot .home-snapshot-item .value');
   // Positional — MUST match the static HTML tiles' actual DOM order exactly (players, teams,
   // clubs, games, goals), not just include the right numbers somewhere in the array.
-  const targets = [HOME_SNAPSHOT_BASELINE.players, HOME_SNAPSHOT_BASELINE.teams, HOME_SNAPSHOT_BASELINE.clubs, HOME_SNAPSHOT_BASELINE.games, HOME_SNAPSHOT_BASELINE.goals];
+  const targets = [HOME_SNAPSHOT_BASELINE.clubs, HOME_SNAPSHOT_BASELINE.teams, HOME_SNAPSHOT_BASELINE.games, HOME_SNAPSHOT_BASELINE.players, HOME_SNAPSHOT_BASELINE.goals]; // same left-to-right order as the tiles: smallest to largest
   els.forEach((el,i)=> animateCountUp(el, targets[i] ?? 0));
 }
 
@@ -9652,7 +9874,7 @@ const LEAGUE_CONTEXT_STATS = [
   ['Total goals','totalGoals'], ['Goals per game','avgGoals'],
   ['Best points','weightedBest'], ['Form score','formScore'], ['MVP points','mvpScore']
 ];
-let leagueContextScope = 'age'; // 'age' = vs whole age group (default), 'division' = vs same division only
+let leagueContextScope = 'division'; // 'division' = same division (default), 'age' = whole age group — see playerLeagueContextHtml
 
 // A player's primary division for context: the one they've played most (ties broken toward the more
 // recent). For seniors this comes out as the canonical league label (e.g. "Geelong Football Netball
@@ -9763,55 +9985,140 @@ function leagueContextDensity(pool, key, markers){
 
 // The single-player version — one marker per row instead of two, gold rather than green/blue
 // since there's no "other side" to contrast against.
-function playerLeagueContextHtml(p, playerList){
-  // Whether the section shows at all is decided by the age-group pool (the always-available view).
-  const agePool = buildLeagueContextPool(playerList, p.ageGroup).pool;
-  if(agePool.length < 2) return ''; // not enough peers logged yet for this to mean anything
+// League context: where a player sits among their peers, for each tracked stat.
+//   This season — the player's figures AND everyone else's counted from one season's games only:
+//     "Same division" = that season's home-and-away games in that one division; "Whole age group" =
+//     that season's home-and-away games across the whole age group (grading rounds included). Finals
+//     are left out, like the handbook's goalkicking awards (By-Law 24.6). Stats come from the app's
+//     own computeAggregates() run on just those games, so every formula (best points, form, MVP) is
+//     the same one used everywhere else — just applied to that slice.
+//   Career — whole-career totals against every player whose age group matches, over EVERY year on
+//     file (deliberately not affected by the Players page's year filter).
+// Players are matched between a season slice and their career record by PlayHQ id (a few players'
+// internal keys differ between the two, since a key comes from where someone was first seen).
+let leagueContextPeriod = 'season';                 // 'season' | 'career'
+let leagueContextSel = { key:null, year:null, age:null, division:null };
+const _lcGameIndexCache = new Map(), _lcSliceCache = new Map();
+function lcGameIndex(){
+  if(!_lcGameIndexCache.has(_aggVersion)){ _lcGameIndexCache.clear(); _lcGameIndexCache.set(_aggVersion, new Map(games.map(g=>[g.id, g]))); }
+  return _lcGameIndexCache.get(_aggVersion);
+}
+// { year: { age: { division: gamesCount } } } from the player's home-and-away games
+function lcPlayerSeasons(p){
+  const idx = lcGameIndex(), out = {};
+  (p.timeline||[]).forEach(t=>{
+    const g = idx.get(t.gameId);
+    if(!g || !g.teamA || isFinalsGame(g)) return;
+    const d = getDivision(g); if(d==='Open Mixed') return;
+    const y = String(getGameYear(g)), a = getAgeGroupLabel(t.team);
+    ((out[y] = out[y]||{})[a] = out[y][a]||{})[d] = (out[y][a][d]||0) + 1;
+  });
+  return out;
+}
+function lcSliceAggregate(year, age, division){
+  const k = `${_aggVersion}|${year}|${age}|${division||''}`;
+  if(!_lcSliceCache.has(k)){
+    if(_lcSliceCache.size > 40) _lcSliceCache.clear();
+    const slice = games.filter(g=> g.teamA && g.teamB && String(getGameYear(g))===String(year) && !isFinalsGame(g) &&
+      getAgeGroupLabel(g.teamA.name)===age && getDivision(g)!=='Open Mixed' && (!division || getDivision(g)===division));
+    _lcSliceCache.set(k, computeAggregates(slice).playerList);
+  }
+  return _lcSliceCache.get(k);
+}
+function lcFindIn(list, p){
+  return (p.playhqId && list.find(q=> q.playhqId===p.playhqId)) || list.find(q=> q.key===p.key) || null;
+}
+function lcPool(list){
+  const maxGames = list.reduce((m,q)=> Math.max(m, q.gamesPlayed||0), 0);
+  const minGames = Math.min(3, maxGames) || 1;
+  return { pool: list.filter(q=> (q.gamesPlayed||0) >= minGames), minGames };
+}
+function lcRankLine(me, pool, key, minGames){
+  const vals = pool.map(q=> q[key]||0).sort((a,b)=>a-b);
+  const n = vals.length, mid = n ? (n%2 ? vals[(n-1)/2] : (vals[n/2-1]+vals[n/2])/2) : 0;
+  const leader = pool.reduce((b,q)=> !b || (q[key]||0) > (b[key]||0) ? q : b, null);
+  const fmt = v => formatStatValue(key, Math.round(v*100)/100);
+  const tail = ` <span class="hint" style="margin:0;">· median ${fmt(mid)}${leader ? ` · leader ${fmt(leader[key]||0)} (${leader.name})` : ''}</span>`;
+  if(!me) return `<span class="hint" style="margin:0;">No games in this selection.</span>`;
+  const mine = me[key]||0;
+  if((me.gamesPlayed||0) < minGames) return `<span style="color:var(--gold);">${fmt(mine)}</span> <span class="hint" style="margin:0;">— not ranked (needs ${minGames}+ games, played ${me.gamesPlayed||0})</span>${tail}`;
+  const rank = 1 + pool.filter(q=> (q[key]||0) > mine).length;
+  const top = Math.max(1, Math.round(rank / n * 100));
+  const ord = r => r + (['th','st','nd','rd'][(r%100>10 && r%100<14) ? 0 : (r%10<4 ? r%10 : 0)]);
+  return `<span style="color:var(--gold);font-weight:600;">${fmt(mine)}</span> · <strong>${ord(rank)} of ${n}</strong> <span class="hint" style="margin:0;">(top ${top}%)</span>${tail}`;
+}
 
-  const primaryDiv = primaryDivisionOf(p);
-  const scope = (leagueContextScope === 'division' && primaryDiv) ? 'division' : 'age';
-  const { pool, minGamesThreshold, percentileOf } = buildLeagueContextPool(playerList, p.ageGroup, scope==='division' ? primaryDiv : null);
+function playerLeagueContextHtml(p){
+  const seasons = lcPlayerSeasons(p);
+  const years = Object.keys(seasons).sort().reverse();
+  const period = years.length ? leagueContextPeriod : 'career';
+  const sel = leagueContextSel;
+  if(sel.key !== p.key){ sel.key = p.key; sel.year = null; sel.age = null; sel.division = null; }
 
-  let aboveMedian = 0;
-  LEAGUE_CONTEXT_STATS.forEach(([,key])=>{ if(percentileOf(p,key) >= 50) aboveMedian++; });
+  let list, me, scopeText, controls2 = '', scopeUsed = 'age';
+  if(period === 'season'){
+    if(!sel.year || !seasons[sel.year]) sel.year = years[0];
+    const agesThisYear = Object.keys(seasons[sel.year]).sort((a,b)=> gradeDisplayRank(a)-gradeDisplayRank(b));
+    const gamesInAge = a => Object.values(seasons[sel.year][a]).reduce((s,v)=>s+v,0);
+    if(!sel.age || !seasons[sel.year][sel.age]) sel.age = agesThisYear.slice().sort((a,b)=> gamesInAge(b)-gamesInAge(a))[0];
+    const divCounts = seasons[sel.year][sel.age];
+    const divs = Object.keys(divCounts).filter(d=> d!=='Grading').sort((a,b)=> divCounts[b]-divCounts[a]);
+    const canDivision = divs.length > 0;
+    const scope = (leagueContextScope==='division' && canDivision) ? 'division' : 'age';
+    if(scope==='division' && (!sel.division || !divs.includes(sel.division))) sel.division = divs[0];
+    const div = scope==='division' ? sel.division : null;
+    scopeUsed = scope;
+    list = lcSliceAggregate(sel.year, sel.age, div);
+    me = lcFindIn(list, p);
+    const divLabel = d => /^Division\s*\d+/i.test(d) ? `${sel.age} ${d}` : d.replace(' Football Netball League', ' FNL');
+    scopeText = scope==='division' ? `${divLabel(div)}, ${sel.year}` : `all of ${sel.age}, ${sel.year}`;
+    const btn = (cls, val, cur, text) => `<button class="ghost ${cls}" data-v="${val}" style="margin:0;${cur===val?'border-color:var(--gold);color:var(--gold);':''}">${text}</button>`;
+    controls2 = `
+      <select class="lc-year" style="margin:0;">${years.map(y=>`<option value="${y}" ${y===sel.year?'selected':''}>${y}</option>`).join('')}</select>
+      ${agesThisYear.length>1 ? `<select class="lc-age" style="margin:0;">${agesThisYear.map(a=>`<option value="${a}" ${a===sel.age?'selected':''}>${a}</option>`).join('')}</select>` : ''}
+      ${canDivision ? btn('lc-scope-btn','division',scope,'Same division') + btn('lc-scope-btn','age',scope,'Whole age group') : ''}
+      ${scope==='division' && divs.length>1 ? `<select class="lc-div" style="margin:0;">${divs.map(d=>`<option value="${d.replace(/"/g,'&quot;')}" ${d===div?'selected':''}>${divLabel(d)} (${divCounts[d]} game${divCounts[d]===1?'':'s'})</option>`).join('')}</select>` : ''}`;
+  } else {
+    list = withAllDataFilters(()=> computeAggregates()).playerList;
+    const career = lcFindIn(list, p) || p;
+    me = career;
+    list = list.filter(q=> q.ageGroup === career.ageGroup);
+    scopeText = `every ${career.ageGroup} player, whole careers (every season on file)`;
+  }
+  const { pool, minGames } = lcPool(list);
+  if(pool.length < 2) return '';
 
-  // Senior "divisions" are already league labels that include the grade word, so don't prepend the
-  // age group there; numbered junior divisions read better as "U16 Division 2".
-  const isNumberedDiv = /^Division\s*\d+/i.test(primaryDiv || '');
-  const scopeLabel = scope==='division' ? (isNumberedDiv ? `${p.ageGroup} ${primaryDiv}` : primaryDiv) : p.ageGroup;
-
-  const toggle = primaryDiv ? `<div class="controls-row" style="gap:6px;margin:0 0 8px;">
-    <button class="ghost lc-scope-btn" data-scope="age" style="margin:0;${scope==='age'?'border-color:var(--gold);color:var(--gold);':''}">Same age group</button>
-    <button class="ghost lc-scope-btn" data-scope="division" style="margin:0;${scope==='division'?'border-color:var(--gold);color:var(--gold);':''}">Same division</button>
-  </div>` : '';
-
+  const periodBtn = (val, text) => `<button class="ghost lc-period-btn" data-v="${val}" style="margin:0;${period===val?'border-color:var(--gold);color:var(--gold);':''}" ${val==='season' && !years.length ? 'disabled' : ''}>${text}</button>`;
+  const explain = period==='season'
+    ? `Ranked against every player with ${minGames}+ game${minGames!==1?'s':''} in ${scopeText}. Only those games count — for ${p.name} and everyone else — home and away only, finals left out${scopeUsed==='division'?'':' (grading rounds included)'}.`
+    : `Ranked against ${scopeText}, with ${minGames}+ games. Form score here is current form (the most recent games).`;
   return `
     <h3 style="font-size:14px;margin-top:24px;">League context</h3>
-    ${toggle}
-    <p class="hint">Where ${p.name} sits against every player in ${scopeLabel} with at least ${minGamesThreshold} game${minGamesThreshold!==1?'s':''} played.</p>
-    <p class="hint">Above the median on ${aboveMedian} of ${LEAGUE_CONTEXT_STATS.length} tracked stats.</p>
-    ${LEAGUE_CONTEXT_STATS.map(([label,key])=>{
-      const pct = percentileOf(p,key);
-      return `<div class="ctx-row">
+    <div class="controls-row" style="gap:6px;margin:0 0 8px;flex-wrap:wrap;align-items:center;">
+      ${periodBtn('season','This season')}${periodBtn('career','Career')}
+      ${period==='season' ? `<span style="width:10px;"></span>${controls2}` : ''}
+    </div>
+    <p class="hint">${explain}</p>
+    ${LEAGUE_CONTEXT_STATS.map(([label,key])=>`<div class="ctx-row">
         <div class="ctx-label">${label}</div>
-        <div class="ctx-readout" style="justify-content:flex-start;">
-          <span style="color:var(--gold);">${p.name}: ${formatStatValue(key,p[key])} <span class="ctx-pct">(${pct}th pct.)</span></span>
-        </div>
-        ${leagueContextDensity(pool, key, [{ value:p[key]||0, color:'var(--gold)', label:p.name }])}
-      </div>`;
-    }).join('')}
+        <div class="ctx-readout" style="justify-content:flex-start;flex-wrap:wrap;gap:4px;font-family:'Inter',sans-serif;font-size:14.5px;margin-top:3px;">${lcRankLine(me, pool, key, minGames)}</div>
+        ${leagueContextDensity(pool, key, me ? [{ value:me[key]||0, color:'var(--gold)', label:p.name }] : [])}
+      </div>`).join('')}
   `;
 }
 
-// Renders the solo league-context section and (re)binds its scope toggle. Used on first render and
-// again whenever the age/division toggle is flipped, so the pool re-filters in place.
+// Renders the solo league-context section and (re)binds its controls. Called on first render and
+// whenever a control changes, so it re-computes in place.
 function renderPlayerLeagueContext(p, playerList){
   const wrap = document.getElementById('playerLeagueContextWrap');
   if(!wrap) return;
-  wrap.innerHTML = playerLeagueContextHtml(p, playerList);
-  wrap.querySelectorAll('.lc-scope-btn').forEach(btn=>{
-    btn.onclick = ()=>{ leagueContextScope = btn.dataset.scope; renderPlayerLeagueContext(p, playerList); };
-  });
+  wrap.innerHTML = playerLeagueContextHtml(p);
+  const again = ()=> renderPlayerLeagueContext(p, playerList);
+  wrap.querySelectorAll('.lc-period-btn').forEach(b=> b.onclick = ()=>{ leagueContextPeriod = b.dataset.v; again(); });
+  wrap.querySelectorAll('.lc-scope-btn').forEach(b=> b.onclick = ()=>{ leagueContextScope = b.dataset.v; again(); });
+  const y = wrap.querySelector('.lc-year'); if(y) y.onchange = e=>{ leagueContextSel.year = e.target.value; leagueContextSel.age = null; leagueContextSel.division = null; again(); };
+  const a = wrap.querySelector('.lc-age'); if(a) a.onchange = e=>{ leagueContextSel.age = e.target.value; leagueContextSel.division = null; again(); };
+  const d = wrap.querySelector('.lc-div'); if(d) d.onchange = e=>{ leagueContextSel.division = e.target.value; again(); };
 }
 
 // Every teammate this player has EVER shared a team-season with, across their whole recorded
@@ -9901,6 +10208,105 @@ function computePlayerTeammates(playerObj){
 // most-recent-year — because a spreadsheet can only sort sensibly on single-value columns.
 // An AutoFilter is applied across the header row so every column is click-sortable/filterable in
 // Excel, Numbers, or Sheets the moment it opens, matching how the in-app tables behave.
+// Shared "Read me" first tab for the link exports — a plain-language guide to the next tab, so a
+// spreadsheet passed on to a club volunteer explains itself without the tracker open beside it.
+// SheetJS community can't write cell styles (wrap, bold), so the layout leans on short lines and
+// a wide column B: section headings sit alone in column A, column notes go Column | Meaning.
+const LINKS_README_AGE_NOTES = [
+  ['How "Expected age group" works', ''],
+  ['', 'The tracker does not have dates of birth. It estimates age group from the grades a player has actually played in each season.'],
+  ['', 'Juniors usually spend about 2 seasons in each age group (U12, U14, U16, U18), so it counts how many seasons they have had at their'],
+  ['', 'latest age group, then steps them forward for every season since they were last seen (players keep ageing even if they stop playing).'],
+  ['', 'Seniors and Reserves players are expected to stay at that level.'],
+  ['', 'It is a good general guide, but NOT 100% accurate. It can be wrong if a player:'],
+  ['', '  • played up (or down) an age group for a whole season'],
+  ['', '  • joined a grade in their second (top-age) year, or repeated a year'],
+  ['', '  • took a season off, or has only a few games on record'],
+  ['', '  • has since moved to a new PlayHQ profile/registration (see the note above)'],
+  ['', 'Please confirm the age group manually (e.g. on PlayHQ or with the player/family) before acting on it.'],
+  ['', ''],
+  ['Prediction confidence', ''],
+  ['High', 'Played in the most recent season on file — the estimate is based on very current information.'],
+  ['Medium', 'Last seen 1–2 seasons ago.'],
+  ['Low', 'Last seen 3 or more seasons ago — treat as a rough guess only.'],
+];
+const LINKS_README_GUIDE_NOTES = [
+  ['PLEASE NOTE — this is a guide only', ''],
+  ['', 'Everything here is generated automatically from game results and team sheets recorded in the tracker. There may be some mistakes:'],
+  ['', '  • A player who has since played under a NEW registration or PlayHQ profile can show as "Not currently playing", or with an'],
+  ['', '    old club/team, because their newer games sit under a different profile.'],
+  ['', '  • Two different people with the same name can occasionally be mixed up, or one person can appear twice.'],
+  ['', '  • Only the competitions listed above are counted — a player who has moved to another league can look like they have stopped.'],
+  ['', 'Always double-check a player on PlayHQ manually (use the PlayHQProfile link, or search their name) before contacting anyone.'],
+  ['', ''],
+];
+// Which competitions the tracker currently holds, worked out from the games themselves so it stays
+// right when a new league is scraped in (e.g. Colac & District) — nothing here is a fixed list.
+// Seniors/Reserves: the three known leagues by their full names; any other senior competition
+// falls back to the league name the scraper recorded, or its cleaned competition title.
+// Juniors: AFL Barwon's junior competition (league field AFL Barwon / blank) is "Geelong Junior
+// Football"; juniors from any other league are grouped under that league's own name.
+const TRACKED_SENIOR_LEAGUE_NAMES = { GFNL:'Geelong Football Netball League', BFNL:'Bellarine Football Netball League', GDFL:'Geelong & District Football Netball League', CDFNL:'Colac & District Football Netball League' };
+const _trackedCompsCache = new Map();
+function describeTrackedCompetitions(){
+  const cacheKey = `${_aggVersion}|${games.length}`;
+  if(_trackedCompsCache.has(cacheKey)) return _trackedCompsCache.get(cacheKey);
+  const seniors = new Map();  // name -> { grades:Set, years:Set }
+  const juniors = new Map();  // name -> { ages:Set, years:Set }
+  const allYears = new Set();
+  const bump = (map, name, field, val, year)=>{
+    const e = map.get(name) || { [field]: new Set(), years: new Set() };
+    e[field].add(val); if(year) e.years.add(year); map.set(name, e);
+  };
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB) return;
+    if(/open\s*mixed/i.test(g.competitionRaw||'')) return;   // PlayHQ's pre-season practice-match bucket, not a competition
+    const year = getGameYear(g); if(year) allYears.add(year);
+    const ages = [getAgeGroupLabel(g.teamA.name), getAgeGroupLabel(g.teamB.name)];
+    const senior = ages.find(a=> a==='Seniors' || a==='Reserves');
+    const orgName = (g.league || '').trim();
+    if(senior){
+      const code = leagueFromDivisionLabel(getDivision(g));
+      let name = code ? TRACKED_SENIOR_LEAGUE_NAMES[code] : null;
+      if(!name){
+        name = (orgName && !/afl barwon/i.test(orgName)) ? orgName
+          : (g.competitionRaw||'').replace(/^\s*20\d{2}\s+/, '').replace(/\b(seniors?|reserves?)\b/ig, '').replace(/\s{2,}/g,' ').trim();
+      }
+      if(name) bump(seniors, name, 'grades', senior, year);
+      return;
+    }
+    const age = ages.find(a=> /^U\d+$/.test(a));
+    if(!age) return;   // open/mixed or unlabelled sides aren't an age group
+    const name = (!orgName || /afl barwon/i.test(orgName)) ? 'Geelong Junior Football (AFL Barwon)' : `${orgName} (juniors)`;
+    bump(juniors, name, 'ages', age, year);
+  });
+  const yrsText = set=>{ const ys=[...set].sort((a,b)=>a-b); return !ys.length ? '' : ys.length===1 ? `${ys[0]}` : `${ys[0]}–${ys[ys.length-1]}`; };
+  const out = {
+    years: yrsText(allYears),
+    seniors: [...seniors.entries()].sort((a,b)=> a[0].localeCompare(b[0])).map(([name,e])=>({
+      name, detail: ['Seniors','Reserves'].filter(x=>e.grades.has(x)).join(' & '), years: yrsText(e.years) })),
+    juniors: [...juniors.entries()].sort((a,b)=> a[0].localeCompare(b[0])).map(([name,e])=>({
+      name, detail: [...e.ages].sort((a,b)=> (AGE_GROUP_ORDER[a]??99)-(AGE_GROUP_ORDER[b]??99)).join(', '), years: yrsText(e.years) })),
+  };
+  _trackedCompsCache.set(cacheKey, out);
+  return out;
+}
+function trackedCompetitionsReadmeRows(){
+  const t = describeTrackedCompetitions();
+  return [
+    ['Competitions currently tracked', t.years ? `Seasons on file: ${t.years}` : ''],
+    ...t.juniors.map(c=> ['', `${c.name} — ${c.detail}${c.years && c.years!==t.years ? ` (${c.years})` : ''}`]),
+    ...t.seniors.map(c=> ['', `${c.name} — ${c.detail}${c.years && c.years!==t.years ? ` (${c.years})` : ''}`]),
+    ['', 'Games played in any other league or association are not included.'],
+    ['', ''],
+  ];
+}
+function buildLinksReadmeSheet(rows, colWidths){
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = colWidths || [{wch:30},{wch:130}];
+  return ws;
+}
+
 function exportPlayerLinksToXlsx(p, teammates, latestYear){
   const { playerList } = computeAggregates();
   const playerByKey = new Map(playerList.map(pl=>[pl.key, pl]));
@@ -9949,7 +10355,38 @@ function exportPlayerLinksToXlsx(p, teammates, latestYear){
       });
     }
   }
+  const exportedOn = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
+  const readme = buildLinksReadmeSheet([
+    [`Player links — ${p.name}`, ''],
+    ['Exported', `${exportedOn}${latestYear ? ` (most recent season on file: ${latestYear})` : ''}`],
+    ['', ''],
+    ['What the "Player links" tab shows', ''],
+    ['', `Every player who has been on the same team, in the same season, as ${p.name} — teammates only, not opponents (${rows.length} found).`],
+    ['', 'Each row shows where that player is now, so you can see who is still playing, where, and who has stopped.'],
+    ['', 'Every column has a filter arrow in the header row — use it to sort or filter (e.g. by CurrentClub or Status).'],
+    ['', ''],
+    ...trackedCompetitionsReadmeRows(),
+    ...LINKS_README_GUIDE_NOTES,
+    ['What each column means', ''],
+    ['Teammate', 'Player name as recorded in the tracker.'],
+    ['SharedSeasons', `The team(s) and season(s) they played alongside ${p.name}.`],
+    ['SharedSeasonCount', 'How many team-seasons they shared.'],
+    ['MostRecentSharedYear', 'The most recent season they were teammates.'],
+    ['Status', `Active = played in the most recent season on file${latestYear ? ` (${latestYear})` : ''}. Not currently playing = last game was in an earlier season.`],
+    ['CurrentClub', 'Club of their most recent games (or last club, if not currently playing).'],
+    ['CurrentTeam', 'Team(s) of their most recent games.'],
+    ['CurrentDivision', 'Division of their most recent games, where the grade has divisions.'],
+    ['LastSeenYear', 'The last season they have a game on record.'],
+    ['ExpectedAgeGroupNextYear', 'Estimated age group for next season — see "How Expected age group works" below.'],
+    ['PredictionConfidence', 'How much to trust that estimate — High / Medium / Low (explained below).'],
+    ['PredictionReason', 'Short note on how the estimate was worked out.'],
+    ['PlayHQProfile', 'Clickable link to their PlayHQ profile (blank if no profile ID is on file).'],
+    ['PlayHQId', 'Their PlayHQ profile ID.'],
+    ['', ''],
+    ...LINKS_README_AGE_NOTES,
+  ]);
   const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, readme, 'Read me');
   XLSX.utils.book_append_sheet(wb, ws, 'Player links');
   const safeName = (p.name||'player').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase();
   XLSX.writeFile(wb, `player-links-${safeName}.xlsx`);
@@ -10209,7 +10646,42 @@ function exportTeamPossibleLinksToXlsx(teamObj, results){
       });
     }
   }
+  const exportedOn = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
+  const myClub = getClub(teamObj.name);
+  const readme = buildLinksReadmeSheet([
+    [`Possible links — ${teamObj.name}${teamObj.year ? ' ' + teamObj.year : ''}`, ''],
+    ['Exported', `${exportedOn}${latestYear ? ` (most recent season on file: ${latestYear})` : ''}`],
+    ['', ''],
+    ['What the "Possible links" tab shows', ''],
+    ['', `Players who are NOT currently at ${myClub || 'this club'}, but have previously been teammates (same team, same season) with someone`],
+    ['', `on the ${teamObj.name} squad. They are possible recruiting leads — players who already know someone here (${rows.length} found).`],
+    ['', 'The list starts with the strongest leads first (highest Strength). Every column has a filter arrow in the header row to sort or filter.'],
+    ['', ''],
+    ...trackedCompetitionsReadmeRows(),
+    ...LINKS_README_GUIDE_NOTES,
+    ['What each column means', ''],
+    ['Player', 'Player name as recorded in the tracker.'],
+    ['Strength', 'One score to rank leads: (games × 2) + goals + (best-player votes × 3), boosted for reaching a higher age group'],
+    ['', '(Seniors highest). Higher = a longer, stronger playing history. A ranking aid only, not a rating of the player.'],
+    ['HighestLevel', 'Highest age group (and division, where there is one) they have played in.'],
+    ['Games / Goals / Bests', 'Career totals across every game on record (Bests = times named in the best players).'],
+    ['Status', `Active = played in the most recent season on file${latestYear ? ` (${latestYear})` : ''}. Not currently playing = last game was in an earlier season.`],
+    ['CurrentClub', 'Club of their most recent games (or last club, if not currently playing).'],
+    ['CurrentTeam', 'Team(s) of their most recent games.'],
+    ['CurrentDivision', 'Division of their most recent games, where the grade has divisions.'],
+    ['LastSeenYear', 'The last season they have a game on record.'],
+    ['ExpectedAgeGroupNextYear', 'Estimated age group for next season — see "How Expected age group works" below.'],
+    ['PredictionConfidence', 'How much to trust that estimate — High / Medium / Low (explained below).'],
+    ['PredictionReason', 'Short note on how the estimate was worked out.'],
+    ['ConnectedVia', `Who on the ${teamObj.name} squad they played with, and on which team / season.`],
+    ['ConnectionCount', 'How many of those connections there are — more connections often means a warmer lead.'],
+    ['PlayHQProfile', 'Clickable link to their PlayHQ profile (blank if no profile ID is on file).'],
+    ['PlayHQId', 'Their PlayHQ profile ID.'],
+    ['', ''],
+    ...LINKS_README_AGE_NOTES,
+  ]);
   const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, readme, 'Read me');
   XLSX.utils.book_append_sheet(wb, ws, 'Possible links');
   const safeName = (teamObj.name||'team').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase();
   XLSX.writeFile(wb, `possible-links-${safeName}.xlsx`);
@@ -11110,7 +11582,7 @@ function renderPlayerDetail(key){
 
   const seasonHistory = getPlayerSeasonHistory(p);
   document.getElementById('playerSeasonHistoryWrap').innerHTML = seasonHistory.length===0 ? '' : `
-    <table style="max-width:640px;">
+    <table class="auto-sort" style="max-width:640px;">
       <thead><tr><th>Year</th><th>Team(s)</th><th>Division(s)</th><th class="num">Games</th><th class="num">Goals</th></tr></thead>
       <tbody>
         ${seasonHistory.map(s=>`
@@ -11156,7 +11628,7 @@ function renderPlayerDetail(key){
     if(rows.length<=1) return ''; // a single bucket tells you nothing a split would add
     return `
       <h3 style="font-size:14px;margin-top:24px;" title="${hint}">${title}</h3>
-      <table><thead><tr><th>${title}</th><th class="num">Games</th><th class="num">W-L-D</th><th class="num">Goals</th><th class="num">Avg/gm</th><th class="num">Bests</th></tr></thead>
+      <table class="auto-sort"><thead><tr><th>${title}</th><th class="num">Games</th><th class="num">W-L-D</th><th class="num">Goals</th><th class="num">Avg/gm</th><th class="num">Bests</th></tr></thead>
       <tbody>${rows.map(gr=>{
         const s = summarisePlayerSplit(gr.rows);
         return `<tr><td>${gr.label}</td><td class="num">${s.count}</td><td class="num">${s.w}-${s.l}-${s.d}</td><td class="num">${s.goals}</td><td class="num">${s.avgGoals}</td><td class="num">${s.best}</td></tr>`;
@@ -11184,7 +11656,7 @@ function renderPlayerDetail(key){
   const visibleTimeline = playerGameLogExpanded ? timeline : timeline.slice(0,3);
   const logWrap = document.getElementById('playerGameLogWrap');
   logWrap.innerHTML = `
-    <table>
+    <table class="auto-sort" data-sort-id="player-game-log">
       <thead><tr><th>Date</th><th>Opponent</th><th class="num">Result</th><th class="num">Goals</th><th class="num">Best</th></tr></thead>
       <tbody>
         ${visibleTimeline.map(t=>`
@@ -11674,7 +12146,7 @@ function renderFixturePreview(fixtureId){
   }
 
   const trendTable = (club, trend) => trend.length===0 ? '<div class="empty">No prior-season data.</div>' : `
-    <table><thead><tr><th>Year</th><th>Division</th><th class="num">W</th><th class="num">L</th><th>Trend</th></tr></thead>
+    <table class="auto-sort"><thead><tr><th>Year</th><th>Division</th><th class="num">W</th><th class="num">L</th><th>Trend</th></tr></thead>
     <tbody>${trend.slice(0,5).map(r=>`<tr><td>${r.year}</td><td>${r.divisions.join(', ')}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td>${r.trend||'—'}</td></tr>`).join('')}</tbody></table>`;
 
   wrap.innerHTML = `
@@ -11767,12 +12239,12 @@ function renderPredictionAccuracy(){
     ${retroCount>0 ? `<p class="hint" style="margin-top:10px;">${liveCount} predicted live (frozen before the result came in), ${retroCount} added retroactively from today's ratings — a hindsight check of the model's current form, not a genuine forecast test for those games.</p>` : ''}`;
 
   const roundsHtml = rounds.length===0 ? '<div class="empty">No graded predictions match this filter yet.</div>' : `
-    <table><thead><tr><th>Round</th><th>Year</th><th class="num">Games</th><th class="num">Hit-rate</th><th class="num">Avg margin error</th></tr></thead>
+    <table class="auto-sort"><thead><tr><th>Round</th><th>Year</th><th class="num" data-tip="Games predicted that round">Games</th><th class="num">Hit-rate</th><th class="num">Avg margin error</th></tr></thead>
     <tbody>${rounds.map(r=>`<tr><td>${r.roundLabel||'—'}</td><td>${r.year||'—'}</td><td class="num">${r.count}</td><td class="num">${pct(r.hitRate)}</td><td class="num">${pts(r.avgMarginError)}</td></tr>`).join('')}</tbody></table>`;
 
   const calibratedRows = calibration.filter(b=>b.count>0);
   const calibrationHtml = calibratedRows.length===0 ? '<div class="empty">Not enough graded predictions yet to check calibration.</div>' : `
-    <table><thead><tr><th>Predicted probability</th><th class="num">Predictions</th><th class="num">Favourite actually won</th></tr></thead>
+    <table class="auto-sort"><thead><tr><th>Predicted probability</th><th class="num">Predictions</th><th class="num">Favourite actually won</th></tr></thead>
     <tbody>${calibratedRows.map(b=>`<tr><td>${b.label}</td><td class="num">${b.count}</td><td class="num">${pct(b.favouredWon/b.count)}</td></tr>`).join('')}</tbody></table>`;
 
   wrap.innerHTML = `
@@ -12200,12 +12672,13 @@ const _juniorPathwayCache = new Map();
 // also contains the word "geelong".
 function leagueFromDivisionLabel(label){
   if(!label) return null;
-  if(/district/i.test(label)) return 'GDFL';
+  if(/colac\s+(?:&\s+|and\s+)?district|\bcdfnl\b/i.test(label)) return 'CDFNL';
+  if(/geelong\s+(?:&\s+|and\s+)?district/i.test(label)) return 'GDFL';
   if(/bellarine/i.test(label)) return 'BFNL';
-  if(/geelong/i.test(label)) return 'GFNL';
+  if(/geelong/i.test(label) && !/district/i.test(label)) return 'GFNL';
   return null;
 }
-const LEAGUE_FULL_NAMES = { GFNL:'Geelong FNL', BFNL:'Bellarine FNL', GDFL:'Geelong & District FNL' };
+const LEAGUE_FULL_NAMES = { GFNL:'Geelong FNL', BFNL:'Bellarine FNL', GDFL:'Geelong & District FNL', CDFNL:'Colac & District FNL' };
 
 function computeJuniorPathwayByClub(playerList, filters){
   filters = filters || { gradeScope:'both', juniorScope:'any', currentYear:null, league:'ALL', juniorYear:null };
@@ -12359,8 +12832,9 @@ function computeJuniorPathwayByClubUncached(playerList, filters){
         year,
         teams: [...teamMap.values()].map(te=> ({ ...te, divisions:[...te.divisions] })).sort((a,b)=> b.games-a.games)
       }));
-    if(!byClub.has(p.club)) byClub.set(p.club, { club:p.club, total:0, withJuniors:0, players:[], leagues:new Set() });
-    const entry = byClub.get(p.club);
+    const clubKey = splitClubKey(p.club, currentEntries[0].team);
+    if(!byClub.has(clubKey)) byClub.set(clubKey, { club:clubKey, total:0, withJuniors:0, players:[], leagues:new Set() });
+    const entry = byClub.get(clubKey);
     entry.total++;
     if(hasJuniorHistory) entry.withJuniors++;
     currentEntries.forEach(t=>{ const lg = leagueFromDivisionLabel(t.division); if(lg) entry.leagues.add(lg); });
@@ -12959,6 +13433,245 @@ let quarterComebacksFilter = 'ALL'; // 'ALL', 'COMEBACKS', 'COLLAPSES'
 let quarterComebacksAgeGroup = 'ALL';
 let quarterComebacksDivision = 'ALL';
 
+// ─── Competition Trends ───────────────────────────────────────────────────────────────────────
+// Competition-wide scoring for any year / age group / division (or senior league): a season summary,
+// how scoring moves through the season, and comparisons across divisions, age groups or years.
+// Which games count: every completed game with a score, EXCEPT
+//   • 2025 "Open Mixed" practice matches (not part of any competition),
+//   • forfeits (no score — they'd drag every average toward 0),
+//   • games recorded 0-0 (most look like results never entered).
+// The last two are still counted and shown, just kept out of the averages. Grading rounds count as
+// part of the home-and-away season (they're real games); finals are reported separately.
+let compTrendsFilters = { year:null, age:'ALL', division:'ALL', compareBy:null, compareByChosen:false };
+const CT_CLOSE = 6, CT_BLOWOUT = 60;
+const CT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function ctScopeGames(year, age, division){
+  const out = { games:[], forfeits:0, unscored:0 };
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB) return;
+    if(year!=='ALL' && String(getGameYear(g))!==String(year)) return;
+    const a = getAgeGroupLabel(g.teamA.name);
+    if(age!=='ALL' && a!==age) return;
+    const d = getDivision(g);
+    if(d==='Open Mixed') return;
+    if(division!=='ALL' && d!==division) return;
+    if(g.isForfeit){ out.forfeits++; return; }
+    if(((g.teamA.total||0) + (g.teamB.total||0))===0){ out.unscored++; return; }
+    out.games.push(g);
+  });
+  return out;
+}
+function ctStats(list){
+  const n = list.length;
+  if(!n) return { n:0 };
+  let tot=0, win=0, lose=0, mar=0, close=0, blow=0, draws=0;
+  const margins = [];
+  list.forEach(g=>{
+    const x = g.teamA.total||0, y = g.teamB.total||0, m = Math.abs(x-y);
+    tot += x+y; win += Math.max(x,y); lose += Math.min(x,y); mar += m; margins.push(m);
+    if(m<=CT_CLOSE) close++; if(m>=CT_BLOWOUT) blow++; if(m===0) draws++;
+  });
+  margins.sort((p,q)=>p-q);
+  const med = n%2 ? margins[(n-1)/2] : (margins[n/2-1]+margins[n/2])/2;
+  return { n, avgTotal:tot/n, avgWin:win/n, avgLose:lose/n, avgMargin:mar/n, medMargin:med, closePct:close/n*100, blowPct:blow/n*100, draws };
+}
+// Available divisions for one year + age group: numbered divisions, the senior leagues, and Grading.
+// Ages run as one mixed competition (U9-U12) have none, so the filter is hidden for them.
+function ctDivisionsFor(year, age){
+  if(age==='ALL') return [];
+  const set = new Set();
+  games.forEach(g=>{
+    if(!g.teamA || !g.teamB || getAgeGroupLabel(g.teamA.name)!==age) return;
+    if(year!=='ALL' && String(getGameYear(g))!==String(year)) return;
+    const d = getDivision(g);
+    if(/^Division \d+$/.test(d) || d==='Grading' || canonicalSeniorDivision(g)) set.add(d);
+  });
+  return [...set].sort((a,b)=> (divisionRank(a)??(a==='Grading'?0:50)) - (divisionRank(b)??(b==='Grading'?0:50)) || a.localeCompare(b));
+}
+const ctF1 = v => v==null || isNaN(v) ? '—' : (Math.round(v*10)/10).toFixed(1);
+const ctPct = v => v==null || isNaN(v) ? '—' : Math.round(v)+'%';
+const ctDate = g => { const t = extractGameDate(g); return t ? new Date(t) : null; };
+const ctShortDiv = d => d.replace(' Football Netball League', ' FNL');
+
+function ctStatsRowHtml(label, s, sortValue){
+  return `<tr><td${sortValue!=null?` data-sort-value="${sortValue}"`:''}>${label}</td><td class="num">${s.n}</td><td class="num">${ctF1(s.avgTotal)}</td><td class="num">${ctF1(s.avgWin)}</td><td class="num">${ctF1(s.avgLose)}</td><td class="num">${ctF1(s.avgMargin)}</td><td class="num">${ctF1(s.medMargin)}</td><td class="num">${ctPct(s.closePct)}</td><td class="num">${ctPct(s.blowPct)}</td></tr>`;
+}
+function ctStatsHeadHtml(first, firstTip){
+  return `<thead><tr><th${firstTip?` data-tip="${firstTip}"`:''}>${first}</th><th class="num" data-tip="Games with a score (forfeits and 0-0 games left out)">Games</th><th class="num">Avg total</th><th class="num">Avg winning</th><th class="num">Avg losing</th><th class="num" data-tip="Average winning margin, in points">Avg margin</th><th class="num">Median margin</th><th class="num">Close %</th><th class="num">Blowout %</th></tr></thead>`;
+}
+
+function renderCompetitionTrends(){
+  const wrap = document.getElementById('competitionTrendsWrap');
+  if(!initialGamesLoadDone && games.length===0){
+    wrap.innerHTML = `<div style="padding:40px 0;text-align:center;"><div class="loading-bar-track"><div class="loading-bar-fill"></div></div><p class="hint" style="margin-top:12px;">Loading games…</p></div>`;
+    return;
+  }
+  const f = compTrendsFilters;
+  const years = [...new Set(games.filter(g=>g.teamA).map(g=>String(getGameYear(g))).filter(y=>/^\d{4}$/.test(y)))].sort().reverse();
+  if(!f.year) f.year = years[0] || 'ALL';
+  const ages = [...new Set(games.filter(g=>g.teamA && (f.year==='ALL' || String(getGameYear(g))===f.year)).map(g=>getAgeGroupLabel(g.teamA.name)))]
+    .filter(Boolean).sort((a,b)=> gradeDisplayRank(a)-gradeDisplayRank(b));
+  if(f.age!=='ALL' && !ages.includes(f.age)) f.age = 'ALL';
+  const divisions = ctDivisionsFor(f.year, f.age);
+  if(f.division!=='ALL' && !divisions.includes(f.division)) f.division = 'ALL';
+  const compareOptions = [];
+  if(divisions.length>1) compareOptions.push(['division','Divisions']);
+  compareOptions.push(['age','Age groups']);
+  compareOptions.push(['year','Years']);
+  // Only a comparison you picked yourself sticks; otherwise use the best one for the current selection
+  // (divisions whenever the age group has them) — so choosing U16 after "All age groups" switches to
+  // comparing U16's divisions instead of staying on the age-group comparison picked automatically.
+  if(!f.compareByChosen || !compareOptions.some(o=>o[0]===f.compareBy)){ f.compareBy = compareOptions[0][0]; f.compareByChosen = false; }
+
+  const scope = ctScopeGames(f.year, f.age, f.division);
+  const ha = scope.games.filter(g=> !isFinalsGame(g));
+  const fin = scope.games.filter(g=> isFinalsGame(g));
+  const s = ctStats(ha);
+
+  // ---- records (home & away) ----
+  let hi=null, big=null, lowWin=null;
+  ha.forEach(g=>{
+    const x=g.teamA.total||0, y=g.teamB.total||0, m=Math.abs(x-y);
+    const top = x>=y ? { team:g.teamA.name, score:x, opp:g.teamB.name, oppScore:y } : { team:g.teamB.name, score:y, opp:g.teamA.name, oppScore:x };
+    if(!hi || top.score>hi.score) hi = { ...top, g };
+    if(!big || m>big.m) big = { ...top, m, g };
+    if(m>0 && (!lowWin || top.score<lowWin.score)) lowWin = { ...top, g };
+  });
+  const recLink = (r, text) => r ? `<span class="game-link" data-id="${r.g.id}" style="cursor:pointer;color:var(--gold);text-decoration:underline;">${text}</span><div class="hint" style="margin:2px 0 0;font-size:11.5px;">${r.team} ${r.score} v ${r.opp} ${r.oppScore} · ${(r.g.dateTime||'').replace(/^.*?, /,'')}</div>` : '—';
+  const card = (label, value, tip) => `<div class="home-snapshot-item" style="--accent-color:var(--green);" title="${tip}"><div class="value" style="font-size:26px;">${value}</div><div class="label">${label}</div></div>`;
+
+  // ---- trends: by round (one division) or by week (several mixed) ----
+  const singleComp = f.division!=='ALL' || (f.age!=='ALL' && divisions.length===0);
+  let trendRows = [], trendLabel = '';
+  if(f.year!=='ALL'){
+    const buckets = new Map();
+    ha.forEach(g=>{
+      const d = ctDate(g); if(!d) return;
+      let key, label, order;
+      if(singleComp && g.roundLabel){ key = g.roundLabel+'|'+(g.phase||''); label = g.roundLabel + (g.phase==='Grading'?' (grading)':''); }
+      else { const mon = new Date(d); mon.setHours(0,0,0,0); mon.setDate(mon.getDate() - ((mon.getDay()+6)%7)); key = mon.getTime(); label = `Week of ${mon.getDate()} ${CT_MONTHS[mon.getMonth()]}`; }
+      const b = buckets.get(key) || { label, first:Infinity, list:[] };
+      b.first = Math.min(b.first, d.getTime()); b.list.push(g); buckets.set(key, b);
+    });
+    trendRows = [...buckets.values()].sort((a,b)=>a.first-b.first).map(b=>({ label:b.label, first:b.first, s:ctStats(b.list) }));
+    trendLabel = singleComp ? 'Round' : 'Week';
+  }
+  const monthBuckets = new Map();
+  ha.forEach(g=>{ const d = ctDate(g); if(!d) return; const k=d.getMonth(); const b=monthBuckets.get(k)||[]; b.push(g); monthBuckets.set(k,b); });
+  const monthRows = [...monthBuckets.keys()].sort((a,b)=>a-b).map(k=>({ label:CT_MONTHS[k], k, s:ctStats(monthBuckets.get(k)) }));
+
+  // ---- comparisons (home & away only) ----
+  let cmpRows = [], cmpLabel = '', cmpNote = '';
+  if(f.compareBy==='division'){
+    cmpLabel = f.age.startsWith('U') ? 'Division' : 'League';
+    cmpRows = divisions.map(d=>({ label:ctShortDiv(d), sort:(divisionRank(d)??(d==='Grading'?0:50)), s:ctStats(ctScopeGames(f.year, f.age, d).games.filter(g=>!isFinalsGame(g))) }));
+    cmpNote = `${f.age}, ${f.year==='ALL'?'all years':f.year}`;
+  } else if(f.compareBy==='age'){
+    cmpLabel = 'Age group';
+    const allAges = [...new Set(games.filter(g=>g.teamA && (f.year==='ALL' || String(getGameYear(g))===f.year)).map(g=>getAgeGroupLabel(g.teamA.name)))].filter(Boolean).sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+    cmpRows = allAges.map(a=>({ label:a, sort:gradeDisplayRank(a), s:ctStats(ctScopeGames(f.year, a, 'ALL').games.filter(g=>!isFinalsGame(g))) }));
+    cmpNote = `every division, ${f.year==='ALL'?'all years':f.year}`;
+  } else {
+    cmpLabel = 'Year';
+    cmpRows = [...years].sort().map(y=>({ label:y, sort:Number(y), s:ctStats(ctScopeGames(y, f.age, f.division).games.filter(g=>!isFinalsGame(g))) }));
+    cmpNote = `${f.age==='ALL'?'every age group':f.age}${f.division!=='ALL'?', '+ctShortDiv(f.division):''}`;
+  }
+  cmpRows = cmpRows.filter(r=> r.s.n>0);
+
+  const scopeText = `${f.year==='ALL'?'All years':f.year} · ${f.age==='ALL'?'All age groups':f.age}${f.division!=='ALL'?' · '+ctShortDiv(f.division):''}`;
+  wrap.innerHTML = `
+    <span class="back-link" id="backToToolsFromCompetitionTrends">&larr; Back to tools</span>
+    <h2 style="font-size:20px;">Competition trends</h2>
+    <p class="hint" style="margin:0 0 12px;">Scoring across a whole competition — pick a year, age group and division. Averages use home-and-away games (grading rounds included); finals are shown separately. Forfeits and games recorded 0-0 are left out of every average.</p>
+    <div class="controls-row" style="margin-bottom:16px;">
+      <select id="ctYear"><option value="ALL" ${f.year==='ALL'?'selected':''}>All years</option>${years.map(y=>`<option value="${y}" ${f.year===y?'selected':''}>${y}</option>`).join('')}</select>
+      <select id="ctAge"><option value="ALL" ${f.age==='ALL'?'selected':''}>All age groups</option>${ages.map(a=>`<option value="${a}" ${f.age===a?'selected':''}>${a}</option>`).join('')}</select>
+      ${divisions.length ? `<select id="ctDiv"><option value="ALL" ${f.division==='ALL'?'selected':''}>All ${f.age.startsWith('U')?'divisions':'leagues'}</option>${divisions.map(d=>`<option value="${d.replace(/"/g,'&quot;')}" ${f.division===d?'selected':''}>${ctShortDiv(d)}</option>`).join('')}</select>` : ''}
+    </div>
+
+    <h3 style="font-size:16px;margin:4px 0 10px;">Season summary <span class="hint" style="font-size:12.5px;margin:0;">— ${scopeText}</span></h3>
+    ${!s.n ? '<div class="empty">No scored games for this selection.</div>' : `
+    <div class="home-snapshot" style="margin-bottom:14px;">
+      ${card('Games', s.n, 'Home-and-away games with a score')}
+      ${card('Avg total score', ctF1(s.avgTotal), 'Both teams combined, per game')}
+      ${card('Avg winning score', ctF1(s.avgWin), 'Average score of the winning team')}
+      ${card('Avg losing score', ctF1(s.avgLose), 'Average score of the losing team')}
+      ${card('Avg margin', ctF1(s.avgMargin), 'Average winning margin. Median: '+ctF1(s.medMargin))}
+      ${card('Close games', ctPct(s.closePct), 'Decided by a goal (6 points) or less')}
+      ${card('Blowouts', ctPct(s.blowPct), 'Won by '+CT_BLOWOUT+' points or more')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:8px;font-size:13.5px;">
+      <div><div class="hint" style="margin:0 0 3px;">Highest score</div>${recLink(hi, hi ? hi.score+' points' : '')}</div>
+      <div><div class="hint" style="margin:0 0 3px;">Biggest win</div>${recLink(big, big ? big.m+' points' : '')}</div>
+      <div><div class="hint" style="margin:0 0 3px;">Lowest winning score</div>${recLink(lowWin, lowWin ? lowWin.score+' points' : '')}</div>
+    </div>
+    <p class="hint" style="margin:6px 0 0;">Median margin ${ctF1(s.medMargin)} · ${s.draws} draw${s.draws===1?'':'s'} · ${scope.forfeits} forfeit${scope.forfeits===1?'':'s'} and ${scope.unscored} game${scope.unscored===1?'':'s'} recorded 0-0 not counted.</p>`}
+
+    <h3 style="font-size:16px;margin:28px 0 10px;">Through the season</h3>
+    ${f.year==='ALL' ? '<p class="hint">Pick a single year to see scoring round by round.</p>' : !trendRows.length ? '<div class="empty">No games.</div>' : `
+    <p class="hint" style="margin:0 0 8px;">${singleComp ? 'Round by round.' : 'Week by week — several competitions are mixed here, and their rounds don\'t line up, so games are grouped by the week they were played.'}</p>
+    <div style="position:relative;height:260px;margin-bottom:10px;"><canvas id="ctTrendChart"></canvas></div>
+    <details><summary style="cursor:pointer;color:var(--gold);font-size:13px;">${trendLabel}-by-${trendLabel.toLowerCase()} table</summary>
+      <table class="auto-sort" data-sort-id="ct-trend" style="margin-top:8px;">${ctStatsHeadHtml(trendLabel, trendLabel==='Week'?'Games played that week (Monday to Sunday)':'Round of the season')}<tbody>${trendRows.map(r=>ctStatsRowHtml(r.label, r.s, r.first)).join('')}</tbody></table>
+    </details>`}
+    ${monthRows.length ? `
+    <h4 style="font-size:14px;margin:18px 0 8px;">By month${f.year==='ALL'?' (all years together)':''}</h4>
+    <table class="auto-sort" data-sort-id="ct-month">${ctStatsHeadHtml('Month','Month the games were played')}<tbody>${monthRows.map(r=>ctStatsRowHtml(r.label, r.s, r.k)).join('')}</tbody></table>` : ''}
+    ${s.n ? `
+    <h4 style="font-size:14px;margin:18px 0 8px;">Home and away v finals</h4>
+    <table class="auto-sort" data-sort-id="ct-phase">${ctStatsHeadHtml('Phase','Regular season (grading included) or finals')}<tbody>${ctStatsRowHtml('Home and away', s)}${fin.length ? ctStatsRowHtml('Finals', ctStats(fin)) : ''}</tbody></table>
+    ${fin.length ? '' : '<p class="hint" style="margin:6px 0 0;">No finals in this selection.</p>'}` : ''}
+
+    <h3 style="font-size:16px;margin:28px 0 10px;">Comparisons</h3>
+    <div class="controls-row" style="margin-bottom:8px;">
+      <span class="hint" style="margin:0;">Compare</span>
+      <select id="ctCompareBy">${compareOptions.map(([k,l])=>`<option value="${k}" ${f.compareBy===k?'selected':''}>${l}</option>`).join('')}</select>
+      <span class="hint" style="margin:0;">— ${cmpNote}, home and away</span>
+    </div>
+    ${!cmpRows.length ? '<div class="empty">Nothing to compare for this selection.</div>' : `
+    <div style="position:relative;height:${Math.max(220, 34*cmpRows.length+60)}px;margin-bottom:10px;"><canvas id="ctCompareChart"></canvas></div>
+    <table class="auto-sort" data-sort-id="ct-compare-${f.compareBy}">${ctStatsHeadHtml(cmpLabel)}<tbody>${cmpRows.map(r=>ctStatsRowHtml(r.label, r.s, r.sort)).join('')}</tbody></table>`}
+  `;
+
+  document.getElementById('backToToolsFromCompetitionTrends').onclick = ()=> navBack();
+  const onSel = (id, fn) => { const el = document.getElementById(id); if(el) el.onchange = e=>{ fn(e.target.value); renderCompetitionTrends(); }; };
+  onSel('ctYear', v=>{ f.year = v; });
+  onSel('ctAge', v=>{ f.age = v; f.division = 'ALL'; });
+  onSel('ctDiv', v=>{ f.division = v; });
+  onSel('ctCompareBy', v=>{ f.compareBy = v; f.compareByChosen = true; });
+  wrap.querySelectorAll('.game-link').forEach(el=>{ el.onclick = ()=> openGameDetail(el.dataset.id); });
+
+  (window._ctCharts||[]).forEach(c=>{ try{ c.destroy(); }catch(e){} });
+  window._ctCharts = [];
+  if(typeof Chart === 'undefined') return;
+  const AXIS = { ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+  const AXIS_N = { beginAtZero:true, ticks:{ color:'#8FA0A3' }, grid:{ color:'#2E3A3E' } };
+  const legend = { labels:{ color:'#EDF1F0' } };
+  const tc = document.getElementById('ctTrendChart');
+  if(tc && trendRows.length){
+    window._ctCharts.push(new Chart(tc.getContext('2d'), { type:'line', data:{ labels: trendRows.map(r=>r.label.replace('Week of ','')), datasets:[
+      { label:'Avg total score', data: trendRows.map(r=>+ctF1(r.s.avgTotal)), borderColor:'#4A9B6E', backgroundColor:'#4A9B6E', tension:0.25 },
+      { label:'Avg margin', data: trendRows.map(r=>+ctF1(r.s.avgMargin)), borderColor:'#C9A227', backgroundColor:'#C9A227', tension:0.25 }
+    ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend }, scales:{ x:AXIS, y:AXIS_N } } }));
+  }
+  const cc = document.getElementById('ctCompareChart');
+  if(cc && cmpRows.length){
+    window._ctCharts.push(new Chart(cc.getContext('2d'), { type:'bar', data:{ labels: cmpRows.map(r=>r.label), datasets:[
+      { label:'Avg total score', data: cmpRows.map(r=>+ctF1(r.s.avgTotal)), backgroundColor:'#4A9B6E' },
+      { label:'Avg margin', data: cmpRows.map(r=>+ctF1(r.s.avgMargin)), backgroundColor:'#C9A227' }
+    ]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend }, scales:{ x:AXIS_N, y:AXIS } } }));
+  }
+}
+function doOpenCompetitionTrends(){
+  showPanel('competition-trends');
+  renderCompetitionTrends();
+}
+function openCompetitionTrends(){
+  doOpenCompetitionTrends();
+  navPush('competition-trends', 'Competition Trends', 'tools/competition-trends', doOpenCompetitionTrends);
+}
+
 function doOpenQuarterComebacks(){
   showPanel('quarter-comebacks');
   renderQuarterComebacks();
@@ -13018,8 +13731,8 @@ function renderQuarterComebacks(){
     <td>${r.dateTime}</td>
     ${showGradeColumn ? `<td>${r.ageGroup||'—'}</td>` : ''}
     <td>${r.isComeback ? `<span style="color:var(--green);">Comeback</span>` : `<span style="color:var(--red);">Collapse</span>`}</td>
-    <td>${r.trailingTeam} trailed by ${r.deficitAmount} at Q${r.deficitAtQuarter}</td>
-    <td class="num">${r.winningTeam} won by ${r.finalMargin}</td>
+    <td data-sort-value="${r.deficitAmount}">${r.trailingTeam} trailed by ${r.deficitAmount} at Q${r.deficitAtQuarter}</td>
+    <td class="num" data-sort-value="${r.finalMargin}">${r.winningTeam} won by ${r.finalMargin}</td>
     <td class="num">${r.turnaround}</td>
   </tr>`;
 
@@ -13046,7 +13759,7 @@ function renderQuarterComebacks(){
       </select>
     </div>
     ${filtered.length===0 ? '<div class="empty">No turnarounds found for this filter.</div>' : `
-    <table><thead><tr><th>Game</th><th>Date</th>${showGradeColumn?'<th>Grade</th>':''}<th>Type</th><th>Biggest gap</th><th class="num">Result</th><th class="num">Turnaround</th></tr></thead>
+    <table class="auto-sort" data-sort-id="quarter-comebacks"><thead><tr><th>Game</th><th>Date</th>${showGradeColumn?'<th>Grade</th>':''}<th>Type</th><th>Biggest gap</th><th class="num" data-tip="Final winning margin">Result</th><th class="num">Turnaround</th></tr></thead>
     <tbody>${filtered.slice(0,50).map(rowHtml).join('')}</tbody></table>
     ${filtered.length>50 ? `<p class="hint" style="margin-top:10px;">Showing the top 50 of ${filtered.length}.</p>` : ''}`}
   `;
@@ -13419,7 +14132,7 @@ function renderTeamDetail(teamKey){
         if(rows.length<=1) return '';   // a single bucket tells you nothing a split would add
         return `
         <h3 style="font-size:14px;margin-top:24px;" title="${hint}">${title}</h3>
-        <table><thead><tr><th>${title}</th><th class="num">Games</th><th class="num">W-L-D</th><th class="num">Win %</th><th class="num">Avg for</th><th class="num">Avg against</th><th class="num">Avg margin</th></tr></thead>
+        <table class="auto-sort"><thead><tr><th>${title}</th><th class="num">Games</th><th class="num">W-L-D</th><th class="num">Win %</th><th class="num">Avg for</th><th class="num">Avg against</th><th class="num">Avg margin</th></tr></thead>
         <tbody>${rows.map(gr=>{
           const s = summariseTeamSplit(gr.games, nameFor);
           const mColor = s.avgMargin==null ? 'var(--muted)' : (s.avgMargin>=0 ? 'var(--green)' : 'var(--red)');
@@ -13494,7 +14207,7 @@ function renderTeamDetail(teamKey){
     </div>
     ${phaseRows ? `
       <h3 style="font-size:14px;margin-top:8px;">Record by phase</h3>
-      <table style="max-width:400px;margin-bottom:20px;">
+      <table class="auto-sort" style="max-width:400px;margin-bottom:20px;">
         <thead><tr><th>Phase</th><th class="num">W</th><th class="num">L</th><th class="num">D</th></tr></thead>
         <tbody>${phaseRows}</tbody>
       </table>` : ''}
@@ -13536,12 +14249,12 @@ function renderTeamDetail(teamKey){
   renderTeamPossibleLinks(t, playerList);
   renderTeamSquadOrigins(t, roster);
   document.getElementById('clubHistoryWrap').innerHTML = squadTrend.length===0 ? '<div class="empty">No prior-season data yet for this squad.</div>' : `
-    <table style="max-width:650px;margin-bottom:20px;">
+    <table class="auto-sort" style="max-width:650px;margin-bottom:20px;">
       <thead><tr><th>Year</th><th>Team(s)</th><th>Division(s)</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th>Trend</th></tr></thead>
       <tbody>
         ${squadTrend.map(r=>`
           <tr${String(r.year)===String(t.year)?' style="background:var(--surface);"':''}>
-            <td>${r.year}${String(r.year)===String(t.year)?' <span class="tag" style="color:var(--muted);">now</span>':''}</td>
+            <td data-sort-value="${r.year}">${r.year}${String(r.year)===String(t.year)?' <span class="tag" style="color:var(--muted);">now</span>':''}</td>
             <td>${r.teams.join(', ')}</td>
             <td>${r.divisions.join(', ')}</td>
             <td class="num">${r.wins}</td>
@@ -15064,16 +15777,16 @@ function renderPlayerComparisonResult(playerList){
         return `<div class="gl-cell"><span class="gl-num">${t.goals||0} gl</span>${bestHtml}</div>`;
       };
       const gamesTable = (list, scoreFor) => `
-        <table style="max-width:760px;">
-          <thead><tr><th>Date</th><th>Game</th><th class="num">${pA.name}</th><th class="num">${pB.name}</th></tr></thead>
+        <table class="auto-sort" style="max-width:760px;">
+          <thead><tr><th>Date</th><th data-tip="Score, and ${pA.name.replace(/"/g,'&quot;')}'s team and result">Game</th><th class="num" data-tip="Goals by ${pA.name.replace(/"/g,'&quot;')} in this game; ★ = named in the best">${pA.name}</th><th class="num" data-tip="Goals by ${pB.name.replace(/"/g,'&quot;')} in this game; ★ = named in the best">${pB.name}</th></tr></thead>
           <tbody>
             ${list.map(m=>{
               const score = scoreFor(m);
               return `<tr>
                 <td>${m.dateTime || new Date(m.date).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}</td>
                 <td>${score}<div style="font-size:11px;color:var(--muted);">${m.a.team}: <span class="${m.a.result==='L'?'loss-tag':'win-tag'}" style="font-size:11px;">${m.a.result}</span></div></td>
-                <td class="num">${glCell(m.a)}</td>
-                <td class="num">${glCell(m.b)}</td>
+                <td class="num" data-sort-value="${m.a.goals||0}">${glCell(m.a)}</td>
+                <td class="num" data-sort-value="${m.b.goals||0}">${glCell(m.b)}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -15233,7 +15946,7 @@ function renderCompareClubs(){
 }
 
 function renderCompareClubsHeadToHead(wrap, toggleRow){
-  const sortedClubs = [...knownClubs].sort((a,b)=>a.localeCompare(b));
+  const sortedClubs = clubViewList();
   const findMatches = (query, excludeClub) => sortedClubs
     .filter(c=>c!==excludeClub)
     .filter(c=> !query || c.toLowerCase().includes(query.toLowerCase()))
@@ -15311,7 +16024,7 @@ function renderCompareClubsAll(wrap, toggleRow){
   // switches to it — most visibly Players' breakdown, since Players is the default metric AND the
   // one with hasBreakdown, so it was still paying its own uncovered cost even after the original
   // fix here covered only the two non-breakdown computations.
-  knownClubs.forEach(club => computeClubCompareStats(club));
+  clubViewList().forEach(club => computeClubCompareStats(club));
   computeClubPlayerCounts('ALL', 'ALL');
   computeClubPlayerCountsBreakdown('ALL', 'ALL');
   const { teamList } = computeAggregates();
@@ -16442,7 +17155,7 @@ function renderCohortTrajectoryInner(wrap, header){
       ${showAllCohorts ? `<div id="cohortTrajLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11.5px;"></div>` : ''}
       ${showAllFull ? `<p class="hint" style="margin:10px 0 0;font-size:11.5px;">Every other club's own split shown too. <details style="display:inline;"><summary style="display:inline;cursor:pointer;color:var(--gold);">(why does 2023 only show one line?)</summary> That's each club's traceable half — the rest of that year's team was in an ungraded age with no real division or ladder rank to show.</details></p>` : ''}
     </div>
-    <table><thead><tr><th>Year</th><th>Stage</th><th>Team</th><th class="num">Rank</th></tr></thead><tbody>
+    <table class="auto-sort"><thead><tr><th>Year</th><th>Stage</th><th>Team</th><th class="num">Rank</th></tr></thead><tbody>
     ${trajectory.flatMap(col=>col.points.map(p=>`<tr>
       <td>${p.year}</td>
       <td>${p.label}</td>
@@ -17072,7 +17785,7 @@ function computeClubSquadLeaderboard(){
 // (or a gap in it) at a glance rather than one age group at a time.
 function computeClubPathway(club, year){
   const { teamList } = computeAggregates();
-  const teamsThisYear = teamList.filter(t=> String(t.year)===String(year) && getClub(t.name)===club);
+  const teamsThisYear = teamList.filter(t=> String(t.year)===String(year) && homeGrownClubKey(t.name)===club);
   const grades = Object.keys(GRADE_DISPLAY_ORDER);
   const out = [];
   grades.forEach(grade=>{
@@ -17157,7 +17870,7 @@ function computeClubYearRostersUncached(gamesList){
       const ageGroup = getAgeGroupLabel(t.name);
       (t.players||[]).forEach(row=>{
         if(!row.name || isPlaceholderPlayerName(row.name)) return;
-        const club = playerClubForTeam(t.name, row.tag);
+        const club = splitClubKey(playerClubForTeam(t.name, row.tag), t.name);
         if(!club) return;
         const key = resolveKey(row.name, row.playhqId, ageGroup, year, club);
         map[club] = map[club] || {};
@@ -17940,7 +18653,7 @@ function computeAllClubsCompareData(filters){
   // Which wording applies: yearOnly metrics swap to their single-year label once a specific year
   // is picked, since "Avg ... /season" would misdescribe a single season's real count.
   const effectiveLabel = (metric.yearLabel && year!=='ALL') ? metric.yearLabel : metric.label;
-  const rows = knownClubs
+  const rows = clubViewList()
     .filter(club=> league==='ALL' || computeClubCurrentLeague(club)===league)
     .map(club=>{
       let value;
@@ -18182,13 +18895,27 @@ function computeHomeGrown(){
 // its own top-level function (not scoped inside one caller) so both Home Grown's league table AND
 // its per-team detail view apply the exact same split — otherwise the two could disagree on which
 // "club" a GDFL-side player belongs to.
+// Club-level views (the Clubs tab: Home grown, Junior pathway, Club pathway & retention, Compare
+// clubs) treat the two programs as separate clubs, each labelled with its league so they can be
+// told apart: "Geelong West Giants (GFL)" (Geelong FNL seniors/reserves + the junior club) and
+// "Geelong West Giants (GDFL)" (the "GW Giants FNC" sides). Player profiles, team names and every
+// other view still use the single "Geelong West Giants" club, so nobody's history is split.
+const SPLIT_CLUB_BASE = 'Geelong West Giants';
+function isGwGdflTeamName(teamName){
+  const lower = (teamName||'').toLowerCase();
+  return lower.includes('gw giants fnc') || (/\bgw\b/.test(lower) && lower.includes('giants') && lower.includes('fnc'));
+}
+function splitClubKey(club, teamName){
+  if(club !== SPLIT_CLUB_BASE) return club;
+  return isGwGdflTeamName(teamName) ? `${SPLIT_CLUB_BASE} (GDFL)` : `${SPLIT_CLUB_BASE} (GFL)`;
+}
 function homeGrownClubKey(teamName){
-  const club = getClub(teamName);
-  if(club==='Geelong West Giants'){
-    const lower = teamName.toLowerCase();
-    if(lower.includes('gw giants fnc') || (lower.includes('gw') && lower.includes('giants') && lower.includes('fnc'))) return 'Geelong West Giants (GDFL)';
-  }
-  return club;
+  return splitClubKey(getClub(teamName), teamName);
+}
+// The club list for club-level views: knownClubs with the split club replaced by its two halves.
+function clubViewList(){
+  return [...new Set(knownClubs.flatMap(c=> c===SPLIT_CLUB_BASE ? [`${SPLIT_CLUB_BASE} (GFL)`, `${SPLIT_CLUB_BASE} (GDFL)`] : [c]))]
+    .sort((a,b)=>a.localeCompare(b));
 }
 function computeHomeGrownUncached(){
   const f = homeGrownFilters;
@@ -18474,7 +19201,7 @@ function renderHomeGrownDetail(){
         ? '<span class="win-tag" style="margin-left:6px;">Home grown</span>'
         : `<span class="tag" style="margin-left:6px;color:var(--gold);">${others.length? 'Also: '+others.join(', ') : 'Other club'}</span>`}</summary>
       <div style="padding:6px 0 10px 14px;">
-        <table style="max-width:620px;"><thead><tr><th>Year</th><th>Team</th><th>Club (if different)</th><th class="num">Games</th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">—</td></tr>'}</tbody></table>
+        <table class="auto-sort" style="max-width:620px;"><thead><tr><th>Year</th><th>Team</th><th>Club (if different)</th><th class="num">Games</th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">—</td></tr>'}</tbody></table>
       </div>
     </details>`;
   };
@@ -18527,7 +19254,7 @@ function renderHomeGrown(){
     rows.sort((a,b)=> b.pct-a.pct || b.players-a.players);
     searchPlaceholder = 'Search club name...';
     subtitle = 'Clubs ranked by the share of their players who are one-club loyalists.';
-    body = `<table><thead><tr><th>#</th><th>Club</th><th class="num">Players</th><th class="num">One-club</th><th class="num">Home-grown %</th><th class="num" title="Average per season, across every season on file — players whose very first-ever junior game anywhere in the competition was at this club (the earliest season on file is excluded, since everyone reads as a 'debut' that year with no earlier data to compare against).">Avg junior debuts/season (own club)</th><th class="num" title="Average per season — anyone appearing for THIS club for the first time at a junior grade, including players arriving from another club's junior program (always ≥ the own-club figure). Same earliest-season exclusion as own-club.">Avg junior debuts/season (any club)</th></tr></thead><tbody>
+    body = `<table class="auto-sort" data-sort-id="home-grown-clubs"><thead><tr><th data-tip="Position as first listed">#</th><th>Club</th><th class="num">Players</th><th class="num">One-club</th><th class="num">Home-grown %</th><th class="num" title="Average per season, across every season on file — players whose very first-ever junior game anywhere in the competition was at this club (the earliest season on file is excluded, since everyone reads as a 'debut' that year with no earlier data to compare against).">Avg junior debuts/season (own club)</th><th class="num" title="Average per season — anyone appearing for THIS club for the first time at a junior grade, including players arriving from another club's junior program (always ≥ the own-club figure). Same earliest-season exclusion as own-club.">Avg junior debuts/season (any club)</th></tr></thead><tbody>
       ${rows.length ? rows.map((c,i)=>`<tr class="hg-club-row" data-club="${c.club.replace(/"/g,'&quot;')}" style="cursor:pointer;"><td>${i+1}</td><td style="color:var(--gold);text-decoration:underline;">${c.club}</td><td class="num">${c.players}</td><td class="num">${c.home}</td><td class="num" style="color:var(--gold);font-weight:600;">${pctStr(c.pct)}</td><td class="num">${c.ownClubJuniorDebutsAvg!=null?c.ownClubJuniorDebutsAvg.toFixed(1):'—'}</td><td class="num">${c.allClubJuniorDebutsAvg!=null?c.allClubJuniorDebutsAvg.toFixed(1):'—'}</td></tr>`).join('') : `<tr><td colspan="7" class="empty">${search?'No clubs match that search.':'No clubs match these filters.'}</td></tr>`}
       </tbody></table>`;
   } else {
@@ -18536,7 +19263,7 @@ function renderHomeGrown(){
     rows.sort((a,b)=> b.pct-a.pct || b.roster-a.roster);
     searchPlaceholder = 'Search team name...';
     subtitle = "Teams ranked by the share of a season's roster who are one-club players.";
-    body = `<table><thead><tr><th>#</th><th>Team</th><th class="num">Year</th><th class="num">Roster</th><th class="num">One-club</th><th class="num">Home-grown %</th></tr></thead><tbody>
+    body = `<table class="auto-sort" data-sort-id="home-grown-teams"><thead><tr><th data-tip="Position as first listed">#</th><th>Team</th><th class="num">Year</th><th class="num">Roster</th><th class="num">One-club</th><th class="num">Home-grown %</th></tr></thead><tbody>
       ${rows.length ? rows.map((t,i)=>`<tr class="hg-team-row" data-name="${t.name.replace(/"/g,'&quot;')}" data-year="${t.year}" style="cursor:pointer;"><td>${i+1}</td><td style="color:var(--gold);text-decoration:underline;">${t.name}</td><td class="num">${t.year}</td><td class="num">${t.roster}</td><td class="num">${t.home}</td><td class="num" style="color:var(--gold);font-weight:600;">${pctStr(t.pct)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">${search?'No teams match that search.':'No teams match these filters.'}</td></tr>`}
       </tbody></table>`;
   }
@@ -19003,9 +19730,9 @@ function renderClubLeaderboard(wrap, header){
 
 function renderClubPathway(wrap, header, teamList){
   const f = squadProgFilters;
-  const clubs = [...new Set(teamList.map(t=>getClub(t.name)).filter(Boolean))].sort();
+  const clubs = [...new Set(teamList.map(t=>homeGrownClubKey(t.name)).filter(Boolean))].sort();
   if(!f.pathwayClub || !clubs.includes(f.pathwayClub)) f.pathwayClub = clubs[0] || null;
-  const years = [...new Set(teamList.filter(t=>getClub(t.name)===f.pathwayClub).map(t=>t.year).filter(Boolean))].sort((a,b)=>b-a);
+  const years = [...new Set(teamList.filter(t=>homeGrownClubKey(t.name)===f.pathwayClub).map(t=>t.year).filter(Boolean))].sort((a,b)=>b-a);
   if(!f.pathwayYear || !years.map(String).includes(String(f.pathwayYear))) f.pathwayYear = years[0] || null;
 
   const rows = f.pathwayClub && f.pathwayYear ? computeClubPathway(f.pathwayClub, f.pathwayYear) : [];
@@ -19512,19 +20239,19 @@ function renderClubChurnTrend(wrap, header, toggleRow){
       <strong>"No longer playing" only means no longer appearing in this competition</strong> — it can include players who moved to a different league or comp entirely (a nearby league, a different sport), not only players who stopped playing football altogether. A U18 who ages into Seniors/Reserves at the SAME club is correctly counted as retained, not lost — this only flags players who genuinely don't turn up anywhere on file the following year.
     </div>
     <div style="height:340px;margin-bottom:20px;"><canvas id="churnTrendChart"></canvas></div>
-    <table><thead><tr><th>Season transition</th><th class="num">Total players (prev season)</th><th class="num">No longer playing</th><th class="num">Rate</th><th>Top age group lost</th></tr></thead>
+    <table class="auto-sort"><thead><tr><th>Season transition</th><th class="num">Total players (prev season)</th><th class="num">No longer playing</th><th class="num">Rate</th><th>Top age group lost</th></tr></thead>
     <tbody>
     ${transitions.map((t,i)=>{
       const topAge = t.byAge[0];
       const detailId = `churnTrendDetail${i}`;
       return `<tr>
-        <td>${t.prevYear} → ${t.nextYear}</td>
+        <td data-sort-value="${t.prevYear}${t.nextYear}">${t.prevYear} → ${t.nextYear}</td>
         <td class="num">${t.totalPrev}</td>
         <td class="num" style="color:var(--red);font-weight:600;">${t.noLongerCount}</td>
         <td class="num">${t.pct==null?'—':t.pct+'%'}</td>
         <td>${topAge ? `${topAge.age} (${topAge.count})` : '—'}</td>
       </tr>
-      <tr><td colspan="5" style="padding-top:0;padding-bottom:10px;">
+      <tr class="sort-child"><td colspan="5" style="padding-top:0;padding-bottom:10px;">
         <details id="${detailId}"><summary style="cursor:pointer;color:var(--gold);font-size:12px;">Full breakdown by age group</summary>
         <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">${t.byAge.map(a=>`${a.age}: ${a.count}`).join(' · ')}</div>
         </details>
@@ -20004,7 +20731,7 @@ function renderGameDetail(id, editMode){
       })()}
       ${g.quarterScores ? `
         <div class="chart-wrap" style="height:auto;padding:16px;margin-bottom:20px;">
-          <table>
+          <table class="auto-tip">
             <thead><tr><th></th><th class="num">Q1</th><th class="num">Q2</th><th class="num">Q3</th><th class="num">Q4</th></tr></thead>
             <tbody>
               <tr><td>${g.teamA.name}</td>${g.quarterScores.teamA.map(v=>`<td class="num">${v}</td>`).join('')}</tr>
@@ -20018,12 +20745,12 @@ function renderGameDetail(id, editMode){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
         <div>
           <h3 style="font-size:14px;">${g.teamA.name}</h3>
-          <table><thead><tr><th>#</th><th>Player</th><th class="num">Goals</th></tr></thead>
+          <table class="auto-sort"><thead><tr><th data-tip="Jumper number">#</th><th>Player</th><th class="num">Goals</th></tr></thead>
           <tbody>${g.teamA.players.map(r=>`<tr><td>${r.number}${r.tag?` <span class="tag">${r.tag}</span>`:''}</td><td>${r.name}</td><td class="num">${r.goals}</td></tr>`).join('')}</tbody></table>
         </div>
         <div>
           <h3 style="font-size:14px;">${g.teamB.name}</h3>
-          <table><thead><tr><th>#</th><th>Player</th><th class="num">Goals</th></tr></thead>
+          <table class="auto-sort"><thead><tr><th data-tip="Jumper number">#</th><th>Player</th><th class="num">Goals</th></tr></thead>
           <tbody>${g.teamB.players.map(r=>`<tr><td>${r.number}${r.tag?` <span class="tag">${r.tag}</span>`:''}</td><td>${r.name}</td><td class="num">${r.goals}</td></tr>`).join('')}</tbody></table>
         </div>
       </div>
@@ -20240,7 +20967,9 @@ function navResolveHash(){
         'suggest-divisions': ()=>openSuggestDivisions(), 'top-players': ()=>openTopPlayers(),
         'suggest-next-season': ()=>openSuggestNextSeason(),
         'prediction-accuracy': ()=>openPredictionAccuracy(),
-        'on-fire-players': ()=>openOnFirePlayers()
+        'on-fire-players': ()=>openOnFirePlayers(),
+        'quarter-comebacks': ()=>openQuarterComebacks(),
+        'competition-trends': ()=>openCompetitionTrends()
       };
       if(openers[type]){ seedRoot('tools'); openers[type](); return; }
     }
@@ -20327,7 +21056,7 @@ const PANEL_OWNER_TAB = {
   'add':'games', 'team-detail':'teams', 'player-detail':'players', 'game-detail':'games', 'fixture-preview':'games',
   'power-rankings':'tools', 'ladder':'tools', 'compare-players':'tools', 'compare-teams':'tools', 'squad-progressions':'tools',
   'home-grown':'clubs', 'player-movement':'tools', 'merge-players':'tools', 'manage-clubs':'tools', 'find-players':'players',
-  'suggest-divisions':'tools', 'top-players': 'tools', 'suggest-next-season':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'clubs', 'quarter-comebacks':'tools', 'compare-clubs':'clubs'
+  'suggest-divisions':'tools', 'top-players': 'tools', 'suggest-next-season':'tools', 'prediction-accuracy':'tools', 'absence-leaderboard':'tools', 'junior-pathway':'clubs', 'quarter-comebacks':'tools', 'competition-trends':'tools', 'compare-clubs':'clubs'
 };
 // squad-progressions is shared by both team-level modes (trend/improvement/club/stability) and
 // club-level ones (pathway/churn) — a static PANEL_OWNER_TAB entry can't tell those apart, since
@@ -20604,6 +21333,7 @@ document.getElementById('toolTileToolsJuniorPathway').onclick = ()=> openJuniorP
 document.getElementById('toolTileToolsPathwayRetention').onclick = ()=> openSquadProgressions(null,'pathway');
 document.getElementById('toolTileToolsCompareClubs').onclick = ()=> openCompareClubs();
 document.getElementById('toolTileQuarterComebacks').onclick = ()=> openQuarterComebacks();
+document.getElementById('toolTileCompetitionTrends').onclick = ()=> openCompetitionTrends();
 document.getElementById('toolTilePredictionAccuracy').onclick = ()=> openPredictionAccuracy();
 document.getElementById('toolTileSuggestDivisions').onclick = ()=> openSuggestDivisions();
 document.getElementById('toolTileSuggestNextSeason').onclick = ()=> openSuggestNextSeason();
