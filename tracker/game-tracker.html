@@ -3,8 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <title>Game Stats Tracker has moved</title>
-<meta http-equiv="refresh" content="0; url=../">
-<script>location.replace('../' + location.search + location.hash);</script>
+<meta http-equiv="refresh" content="0; url=../?moved">
+<!-- ?moved makes it a different URL, so a browser still holding the OLD cached root page (which
+     redirected here) fetches the new app instead of bouncing back and forth until its cache expires -->
+<script>location.replace('../?moved' + location.hash);</script>
 </head>
 <body>
 <p>The game tracker has moved to <a href="../">thehobbalution.github.io/game-tracker/</a>.</p>
