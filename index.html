@@ -43,6 +43,10 @@
   /* Identifies which build is running — useful when checking whether a downloaded copy
      already includes a given fix. Update the date in the markup with each change. */
   header.top h1 span.build-stamp{ font-size:10.5px; opacity:0.55; margin-top:3px; font-family:'IBM Plex Mono',monospace; }
+  /* Plain-English "what this page tells you" line under each page/tool heading (see PAGE_ABOUT). */
+  .page-about{ max-width:760px; margin:2px 0 14px; padding:9px 12px; border-left:3px solid var(--gold); background:var(--surface); border-radius:0 6px 6px 0; font-size:13.5px; line-height:1.5; color:var(--text); }
+  .page-about strong{ color:var(--gold); font-weight:600; }
+  .page-about ul{ margin:6px 0 0; padding-left:18px; }
 
   nav.tabs{
     display:flex; gap:4px; padding:0 28px; border-bottom:1px solid var(--line); background:var(--bg);
@@ -506,7 +510,8 @@
   <!-- HOME -->
   <section class="panel active" id="panel-home">
     <h2 style="font-size:22px;margin-bottom:6px;">Welcome to Game Stats Tracker</h2>
-    <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across the AFL Barwon FNL, all pulled together in one place — goals, records, form trends, head-to-head history, and team rankings, updated as results come in.</p>
+    <p class="hint" style="margin-bottom:18px;max-width:640px;">Every player, team, and game across AFL Barwon, Geelong &amp; District and Colac &amp; District, all pulled together in one place — goals, records, form trends, head-to-head history, and team rankings, updated as results come in.</p>
+    <div id="homeCoverage" class="page-about"><strong>What's in here:</strong> PlayHQ results from the 2022 season onward. Nothing before 2022 is on file, so careers, records and "first club" all start from 2022.</div>
     <div id="privacyBanner" class="warn-box" style="max-width:760px;margin-bottom:18px;"><strong>This is your own copy.</strong> Anything you add, edit or delete here changes only what <em>you</em> see — it isn't shared with anyone else, and it doesn't alter the real results.</div>
     <div id="homeSnapshot" class="home-snapshot">
       <div class="home-snapshot-item" style="--accent-color:var(--teal);"><div class="value">41</div><div class="label">Clubs</div></div>
@@ -8057,7 +8062,7 @@ if(typeof MutationObserver!=='undefined' && typeof document!=='undefined' && doc
   let _asQueued = false;
   new MutationObserver(()=>{
     if(_asQueued) return; _asQueued = true;
-    Promise.resolve().then(()=>{ _asQueued = false; enhanceTablesIn(document.body); });
+    Promise.resolve().then(()=>{ _asQueued = false; enhanceTablesIn(document.body); try { addPageAbouts(); } catch(e){} });
   }).observe(document.body, { childList:true, subtree:true });
 }
 
@@ -9674,6 +9679,80 @@ function renderDataCoverageStamp(){
   if(!dates.length){ el.textContent = ''; return; }
   const fmt = ts => new Date(ts).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
   el.textContent = `Games on file: ${fmt(Math.min(...dates))} – ${fmt(Math.max(...dates))}`;
+  renderHomeCoverage(dates, fmt);
+}
+
+// Home's "What's in here" note — which leagues and age groups are on file and from when, built
+// from the games themselves so it stays right as leagues/seasons are added. Games with no league
+// tag are the Geelong-area juniors scraped before tagging existed, i.e. AFL Barwon.
+function renderHomeCoverage(dates, fmt){
+  const el = document.getElementById('homeCoverage');
+  if(!el || !games.length) return;
+  const byLeague = new Map();
+  games.forEach(g=>{
+    const league = g.league || 'AFL Barwon FNL';
+    if(!byLeague.has(league)) byLeague.set(league, { n:0, ages:new Set() });
+    const o = byLeague.get(league); o.n++;
+    try { const a = getAgeGroup(g); if(a) o.ages.add(a); } catch(e){}
+  });
+  const ageOrder = a => /^U(\d+)/.test(a) ? Number(a.slice(1)) : a==='Reserves' ? 100 : a==='Seniors' ? 101 : 200;
+  const years = games.map(g=>Number(g.year)).filter(Boolean);
+  const rows = [...byLeague.entries()].sort((a,b)=>b[1].n-a[1].n).map(([league,o])=>
+    `<li><strong style="color:var(--text);">${league}</strong>: ${[...o.ages].sort((a,b)=>ageOrder(a)-ageOrder(b)).join(', ')}</li>`).join('');
+  el.innerHTML = `<strong>What's in here:</strong> every PlayHQ result from <strong>${Math.min(...years)}</strong> to <strong>${Math.max(...years)}</strong> (${fmt(Math.min(...dates))} to ${fmt(Math.max(...dates))}). Nothing before 2022 is on file, so careers, records and "first club" all start from 2022. Boys', mixed and men's football only.<ul>${rows}</ul>`;
+}
+
+// One plain-English line under each page/tool heading saying what it tells you. Keyed by the
+// heading text (several tools share a panel and swap headings by mode), with a per-panel fallback
+// for pages whose heading is a name (player, team, game). Added after render by the body
+// MutationObserver below, so no render function needs to know about it.
+const PAGE_ABOUT = {
+  'Find players': 'Look up any player to see their games, goals, best-player votes and which teams they have played for.',
+  'Top players': 'The leading players for a season (or all years): most goals, most times named in the best, and best form.',
+  'Compare players': 'Two players side by side: their stats, whether they have played together or against each other, and how they rate against their league.',
+  'Player movement': 'Players who have changed clubs, worked out by matching names across clubs. Treat it as a lead, as two players can share a name.',
+  'Lapsed players': "Players who played in an earlier season but haven't played since. They may have stopped, or moved to a league this tracker doesn't cover.",
+  'Check player links': 'Everyone who has been in the same team as a player from the chosen club, and where those players are now. Useful for recruiting.',
+  'On fire players': 'Players on a hot streak right now: 3 or more games in a row named best on ground, and/or kicking 3+ goals.',
+  'Previous on-fire streaks': 'Every past hot streak on file, newest first, using the same rules.',
+  'Team rankings': 'Every team rated on one scale from its results and winning margins, so you can see how teams stack up even if they never played each other.',
+  'Ladders': 'Where each team finished, or sits right now, in one competition for one season, worked out from the results on file.',
+  'Finals chances': "Each team's chance of making finals, from playing out the rest of the season many times using current form. A guide, not a guarantee.",
+  'Compare teams': 'Two teams side by side: their head-to-head record and how many players the two squads share.',
+  'Squad progressions': 'How every squad has gone season to season: which teams are improving, the most improved of all time, and a club leaderboard.',
+  'Stability vs improvement': 'Whether squads that keep the same players together from year to year actually improve more than ones that change a lot.',
+  'Club pathway & retention': "One club's teams and divisions across every age group, and how many of its players come back each year.",
+  'Cohort trajectory': "One team's own story: the same group of players followed as they move up through the age groups.",
+  'Standout stats': "The leading team in each division for goals scored, fewest conceded, percentage, win rate and more.",
+  'Missing games': 'Which teams have had the most players missing games this season, compared with their usual squad.',
+  "Suggest next season's divisions": 'An estimate of how strong each club will be next year once players move up an age group, to help with early division planning.',
+  'Suggest divisions': 'Ranks teams on their grading-round results and suggests even divisions, flagging teams that look to be in the wrong one.',
+  'Home grown': 'Players who have only ever played for one club since 2022, and what share of each squad they make up.',
+  'Junior pathway': "How many of each club's Seniors and Reserves players have junior games on file, i.e. came through the junior grades since 2022.",
+  'Compare clubs': 'Two clubs side by side: number of players, home-grown share, junior pathway, player retention and Grand Final record.',
+  'Prediction accuracy': "How often the tracker's predicted winner has actually won, so you know how much to trust its forecasts.",
+  'Competition trends': 'Scoring across a competition: average scores, winning margins and close games through a season, compared across divisions, ages and years.',
+  'Biggest turnarounds': 'Games where the lead changed hands during the match: the biggest comebacks and collapses.',
+  'Merge players': 'Admin: combine duplicate records for the same player, such as a name typo or a player who changed clubs.',
+  'Manage clubs': 'Admin: link unrecognised team names to the right club, and set club nicknames.',
+};
+const PAGE_ABOUT_BY_PANEL = {
+  'panel-player-detail': "One player's full record since 2022: every game, goals, best-player votes, teams played for and form.",
+  'panel-team-detail': "One team's season: results, ladder form, quarter-by-quarter scoring and the players who played for it.",
+  'panel-game-detail': 'One game in full: the final score, quarter-by-quarter scores, goal kickers and best players for both sides.',
+  'panel-fixture-preview': "A preview of an upcoming game: each team's form, their past meetings and the predicted result.",
+};
+function addPageAbouts(){
+  document.querySelectorAll('main > section.panel').forEach(panel=> panel.querySelectorAll('h2').forEach((h2, i)=>{
+    const next = h2.nextElementSibling;
+    if(next && next.classList.contains('page-about')) return;
+    const text = PAGE_ABOUT[h2.textContent.trim()] || (i===0 && PAGE_ABOUT_BY_PANEL[panel.id]);
+    if(!text) return;
+    const p = document.createElement('p');
+    p.className = 'page-about';
+    p.innerHTML = `<strong>What this shows:</strong> ${text}`;
+    h2.after(p);
+  }));
 }
 
 
