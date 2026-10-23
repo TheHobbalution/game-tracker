@@ -455,7 +455,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 21102026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 22102026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -7430,8 +7430,10 @@ function getAgeGroupLabel(teamName){
   const name = teamName || '';
   // Most teams use the U16 shorthand, but a few are entered longhand ("Barwon Heads Under 18's"),
   // which previously fell through to 'Other' and left them out of every age-group grouping.
-  const uMatch = name.match(/\bU(?:nder)?\s*(\d{1,2})\b/i);
-  if(uMatch) return 'U' + uMatch[1];
+  // A half-year age ("Under 14.5's", CDFNL 2023-24) is the same grade later renamed "Under 15's",
+  // so it rounds up: 14.5 -> U15, keeping that competition in one age group across seasons.
+  const uMatch = name.match(/\bU(?:nder)?\s*(\d{1,2})(?:\.(\d))?\b/i);
+  if(uMatch) return 'U' + (uMatch[2] && uMatch[2] !== '0' ? parseInt(uMatch[1],10) + 1 : uMatch[1]);
   if(/reserves?/i.test(name)) return 'Reserves';
   if(/seniors?/i.test(name)) return 'Seniors';
   return 'Other';
@@ -8079,22 +8081,41 @@ function showToast(msg){
 // newer file exists on the server than whatever this browser has cached as "the app" — which is
 // exactly the scenario a hard refresh fixes, just detected and surfaced automatically instead of
 // requiring anyone to already know that trick.
+// BUG (fixed): the stored stamp used to be written only when it already matched, so after any
+// publish every returning device mismatched forever — reloading loaded the new file but the banner
+// came straight back. Now the stored stamp is paired with the build of the page that stored it:
+// a mismatch where THIS page's build differs from the stored one just means the new file loaded, so
+// it's accepted silently. Same build + different server file is offered once (pending); if the
+// next load still has that build, the server file is accepted as current rather than nagging again.
+// An open tab separately compares against the stamp it saw on its own first check.
+let _tabAppStamp = null;
 async function checkForAppUpdate(){
   try{
     const res = await fetch(location.pathname, { method:'HEAD', cache:'no-store' });
     if(!res.ok) return;
     const stamp = res.headers.get('etag') || res.headers.get('last-modified');
     if(!stamp) return; // GitHub Pages always sends one of these for a static file, but be defensive
-    const key = 'appPageStamp';
-    const seen = await window.storage.get(key, false);
-    if(seen && seen.value && seen.value !== stamp){
-      document.getElementById('updateBanner').classList.add('show');
-      // Deliberately NOT updating the stored stamp here — if the person dismisses the banner
-      // instead of reloading, the next check (or next visit) should still recognise this same
-      // newer version as new and offer it again, rather than silently forgetting about it.
+    const showBanner = ()=> document.getElementById('updateBanner').classList.add('show');
+    if(_tabAppStamp){
+      if(_tabAppStamp !== stamp) showBanner(); // published since this tab loaded
       return;
     }
-    await window.storage.set(key, stamp, false);
+    _tabAppStamp = stamp;
+    const build = (document.querySelector('.build-stamp')?.textContent || '').trim();
+    const key = 'appPageStamp';
+    const seen = await window.storage.get(key, false);
+    let stored = null;
+    if(seen && seen.value){
+      try { stored = JSON.parse(seen.value); } catch(e){ stored = null; }
+      if(!stored || typeof stored !== 'object') stored = { stamp: seen.value, build: null }; // pre-fix plain string
+    }
+    const accept = ()=> window.storage.set(key, JSON.stringify({ stamp, build }), false);
+    if(!stored || stored.stamp === stamp || stored.build !== build || stored.pending === stamp){
+      await accept();
+      return;
+    }
+    await window.storage.set(key, JSON.stringify({ stamp: stored.stamp, build, pending: stamp }), false);
+    showBanner();
   }catch(e){
     // Silent — this is a nice-to-have check layered on top of an app that already works
     // correctly once loaded; a failed version check (offline, a flaky request) is never a reason
@@ -10605,7 +10626,7 @@ function exportTeamPossibleLinksToXlsx(teamObj, results){
   const { playerList } = computeAggregates();
   const playerByKey = new Map(playerList.map(pl=>[pl.key, pl]));
   const latestYear = games.reduce((m,g)=>{ const y=getGameYear(g); return y&&y>m?y:m; }, 0);
-  const rows = results.map(r=>{
+  const rowFor = r=>{
     const pl = r.playerKey ? playerByKey.get(r.playerKey) : null;
     const pred = pl ? predictNextAgeGroup(pl.timeline, latestYear) : { expected:null, confidence:'none', reason:'' };
     return {
@@ -10628,24 +10649,62 @@ function exportTeamPossibleLinksToXlsx(teamObj, results){
     PlayHQProfile: r.playhqId ? `https://www.playhq.com/public/profile/${encodeURIComponent(r.playhqId)}?tenant=afl` : '',
     PlayHQId: r.playhqId || ''
     };
-  });
+  };
+  const rows = results.map(rowFor);
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  if(rows.length){
-    ws['!autofilter'] = { ref: ws['!ref'] };
-    ws['!cols'] = [
-      {wch:24},{wch:10},{wch:16},{wch:8},{wch:8},{wch:8},{wch:22},{wch:20},{wch:28},{wch:20},{wch:10},{wch:18},{wch:12},{wch:44},{wch:50},{wch:8},{wch:56},{wch:26}
-    ];
-    const headers = Object.keys(rows[0]);
+  // One sheet builder for the full list and every per-player tab: filter arrows on every heading
+  // (sortable/filterable on open in Excel and Google Sheets) and clickable PlayHQ links.
+  const sheetFrom = (sheetRows, widths)=>{
+    const sheet = XLSX.utils.json_to_sheet(sheetRows.length ? sheetRows : [{ Player:'(no possible links found)' }]);
+    if(!sheetRows.length) return sheet;
+    sheet['!autofilter'] = { ref: sheet['!ref'] };
+    sheet['!cols'] = widths;
+    const headers = Object.keys(sheetRows[0]);
     const linkCol = headers.indexOf('PlayHQProfile');
     if(linkCol >= 0){
-      rows.forEach((r, i)=>{
-        if(!r.PlayHQProfile) return;
+      sheetRows.forEach((row, i)=>{
+        if(!row.PlayHQProfile) return;
         const addr = XLSX.utils.encode_cell({ c: linkCol, r: i+1 });
-        if(ws[addr]) ws[addr].l = { Target: r.PlayHQProfile, Tooltip: `${r.Player} on PlayHQ` };
+        if(sheet[addr]) sheet[addr].l = { Target: row.PlayHQProfile, Tooltip: `${row.Player} on PlayHQ` };
       });
     }
-  }
+    return sheet;
+  };
+  const ws = sheetFrom(rows, [
+    {wch:24},{wch:10},{wch:16},{wch:8},{wch:8},{wch:8},{wch:22},{wch:20},{wch:28},{wch:20},{wch:10},{wch:18},{wch:12},{wch:44},{wch:50},{wch:8},{wch:56},{wch:26}
+  ]);
+
+  // Per-player tabs: for each member of this squad, only the possible links who played WITH THEM —
+  // a short, personal list to work through (and who to ask about each lead), instead of the full one.
+  const squadNames = [...new Set(getTeamScopedRoster(playerList, teamObj).map(m=>m.name).filter(Boolean))]
+    .sort((a,b)=> a.localeCompare(b));
+  const usedSheetNames = new Set(['read me','possible links']);
+  const sheetNameFor = name=>{
+    const base = (String(name).replace(/[\[\]*?\/\\:]/g, '').trim() || 'Player').slice(0, 28);
+    let n = base, i = 2;
+    while(usedSheetNames.has(n.toLowerCase())){ n = `${base.slice(0, 26)} ${i++}`; }
+    usedSheetNames.add(n.toLowerCase());
+    return n;
+  };
+  const playerTabs = [];
+  const noLinks = [];
+  squadNames.forEach(member=>{
+    const theirs = results.filter(r=> r.connections.some(c=> c.teammate === member))
+      .map(r=>{
+        const row = rowFor(r);
+        const mine = r.connections.filter(c=> c.teammate === member);
+        const others = new Set(r.connections.map(c=> c.teammate).filter(t=> t !== member));
+        const { ConnectedVia, ConnectionCount, ...rest } = row;
+        return { ...rest, PlayedWithThemIn: mine.map(c=> `${c.team} (${c.year})`).join('; '),
+          AlsoKnowsInSquad: others.size ? [...others].sort().join(', ') : '' };
+      })
+      .sort((a,b)=> (b.Strength||0) - (a.Strength||0));
+    if(!theirs.length){ noLinks.push(member); return; }
+    // PlayHQ columns last, after the two new ones, so the order matches the full list
+    const ordered = theirs.map(({ PlayHQProfile, PlayHQId, ...rest })=> ({ ...rest, PlayHQProfile, PlayHQId }));
+    playerTabs.push({ name: sheetNameFor(member), member, count: ordered.length,
+      sheet: sheetFrom(ordered, [{wch:24},{wch:10},{wch:16},{wch:8},{wch:8},{wch:8},{wch:22},{wch:20},{wch:28},{wch:20},{wch:10},{wch:18},{wch:12},{wch:44},{wch:40},{wch:40},{wch:56},{wch:26}]) });
+  });
   const exportedOn = new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' });
   const myClub = getClub(teamObj.name);
   const readme = buildLinksReadmeSheet([
@@ -10656,6 +10715,12 @@ function exportTeamPossibleLinksToXlsx(teamObj, results){
     ['', `Players who are NOT currently at ${myClub || 'this club'}, but have previously been teammates (same team, same season) with someone`],
     ['', `on the ${teamObj.name} squad. They are possible recruiting leads — players who already know someone here (${rows.length} found).`],
     ['', 'The list starts with the strongest leads first (highest Strength). Every column has a filter arrow in the header row to sort or filter.'],
+    ['', ''],
+    ['A tab for each squad player', ''],
+    ['', `After "Possible links" there is one tab per ${teamObj.name} player, listing only the leads who played WITH THAT PLAYER —`],
+    ['', 'a shorter, personal list (and the right person to ask about each lead). PlayedWithThemIn = the team(s) and season(s) they shared;'],
+    ['', 'AlsoKnowsInSquad = anyone else in this squad who also played with them.'],
+    ...(noLinks.length ? [['', `No tab for (no possible links found): ${noLinks.join(', ')}.`]] : []),
     ['', ''],
     ...trackedCompetitionsReadmeRows(),
     ...LINKS_README_GUIDE_NOTES,
@@ -10683,10 +10748,11 @@ function exportTeamPossibleLinksToXlsx(teamObj, results){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, readme, 'Read me');
   XLSX.utils.book_append_sheet(wb, ws, 'Possible links');
+  playerTabs.forEach(t=> XLSX.utils.book_append_sheet(wb, t.sheet, t.name));
   const safeName = (teamObj.name||'team').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase();
   XLSX.writeFile(wb, `possible-links-${safeName}.xlsx`);
   const withId = rows.filter(r=>r.PlayHQId).length;
-  showToast(`Exported ${rows.length} possible link${rows.length===1?'':'s'} — ${withId} with a PlayHQ profile link`);
+  showToast(`Exported ${rows.length} possible link${rows.length===1?'':'s'} — ${withId} with a PlayHQ profile link, plus a tab for each of ${playerTabs.length} squad players`);
 }
 
 function renderTeamPossibleLinks(teamObj, playerList){
