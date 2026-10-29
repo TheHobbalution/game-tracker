@@ -461,7 +461,7 @@
 <body>
 
 <header class="top">
-  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 26102026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
+  <h1>Game Stats Tracker<span>Player &amp; team stats — AFL Barwon FNL</span><span class="build-stamp">Build 29102026</span><span class="build-stamp" id="dataCoverageStamp"></span></h1>
   <div class="header-search">
     <input type="text" id="headerSearchInput" placeholder="Search players, teams, clubs...">
     <div id="headerSearchResults" class="search-dropdown"></div>
@@ -667,7 +667,7 @@
     <div class="tools-grid" style="max-width:700px;margin:0 auto;">
       <div class="tool-tile tool-tile-teal" id="toolTileClubsHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-teal" id="toolTileClubsJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
-      <div class="tool-tile tool-tile-teal" id="toolTileClubsPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileClubsPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club (or a whole league) across every age group, and year-on-year player retention by league.</div></div>
       <div class="tool-tile tool-tile-teal" id="toolTileCompareClubs"><div class="tool-tile-title">Compare clubs</div><div class="tool-tile-desc">Head-to-head: players, home-grown %, junior pathway, retention and Grand Final record.</div></div>
     </div>
   </section>
@@ -699,7 +699,7 @@
     <div class="tools-grid">
       <div class="tool-tile tool-tile-teal" id="toolTileToolsHomeGrown"><div class="tool-tile-title">Home grown</div><div class="tool-tile-desc">Players still at the club they first appeared for.</div></div>
       <div class="tool-tile tool-tile-teal" id="toolTileToolsJuniorPathway"><div class="tool-tile-title">Junior pathway</div><div class="tool-tile-desc">Of each club's Seniors/Reserves, how many have known junior history since 2022.</div></div>
-      <div class="tool-tile tool-tile-teal" id="toolTileToolsPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club's divisions across every age group, and year-on-year player retention.</div></div>
+      <div class="tool-tile tool-tile-teal" id="toolTileToolsPathwayRetention"><div class="tool-tile-title">Club pathway &amp; retention</div><div class="tool-tile-desc">One club (or a whole league) across every age group, and year-on-year player retention by league.</div></div>
       <div class="tool-tile tool-tile-teal" id="toolTileToolsCompareClubs"><div class="tool-tile-title">Compare clubs</div><div class="tool-tile-desc">Head-to-head: players, home-grown %, junior pathway, retention and Grand Final record.</div></div>
     </div>
     <div class="tools-section-label">Games &amp; fixtures</div>
@@ -1388,11 +1388,23 @@ function normalizeGameScoreField(side){
 // The same list lives in convert.js (applied when a scrape is converted) and game-tracker.html
 // (applied as games, fixtures and byes load, so existing data and backups are covered too) — keep
 // them in step. To use "Roo's" instead, swap the replacement text in both.
+// 2022 also had a handful of senior sides under a one-off name that PlayHQ changed from 2023 —
+// each is mapped to the 2023+ name. Junior spelling typos that flip between seasons are here too.
+// Pure case/space/punctuation variants ("Belmont LIons", "Corio FNC   Seniors", "St Mary's" vs
+// "St Marys") need no entry: unifyTeamNameSpellings handles those automatically.
 const TEAM_NAME_ALIASES = [
-  [/^Teesdale Roo['\u2019`]s\b/i, 'Teesdale Roos']
+  [/^Teesdale Roo['\u2019`]s\b/i, 'Teesdale Roos'],
+  [/^Belmont Lions Senior Men Lions$/i, 'Belmont Lions FNC Seniors'],   // 2022
+  [/^Werribee Centrals Reserves$/i, 'Werribee Centrals FNC Reserves'], // 2022
+  [/^Colac Reserves$/i, 'Colac Tigers Reserves'],                      // 2022
+  [/^St Albans FNC Senior Men$/i, 'St Albans Seniors'],                // 2022
+  [/^St Marys Rodgers U14$/i, 'St Marys Rogers U14'],                  // 2023 typo; Rogers 2022, 2024-26
+  [/^Torquay Millikan U14$/i, 'Torquay Milliken U14'],                 // 2022 typo; Milliken 2023-25
+  [/^Inverleigh Grundle U10$/i, 'Inverleigh Grundell U10']             // 2023 typo; Grundell 2024-26
 ];
 function canonicalTeamName(name, competitionRaw){
   if(typeof name !== 'string') return name;
+  name = name.replace(/\s+/g, ' ').trim(); // 2022 GDFL had "Corio FNC   Seniors", Lara 2023-25 "Lara  Seniors"
   // 2022's GDFL sides were entered as "Geelong West Giants Seniors" / "Geelong West Giants -
   // Reserves" — the first name identical to the Geelong FNL side the same season. From 2023 PlayHQ
   // calls them "GW Giants FNC …", so 2022 is brought into line by competition, letting the two
@@ -1403,6 +1415,47 @@ function canonicalTeamName(name, competitionRaw){
   }
   for(const [re, rep] of TEAM_NAME_ALIASES){ if(re.test(name)) return name.replace(re, rep); }
   return name;
+}
+// PlayHQ's team names drift in case and punctuation between seasons: "Belmont LIons FNC Reserves"
+// (2022) vs "Belmont Lions FNC Reserves", "St Mary's Bath U12" (2022) vs "St Marys Bath U12",
+// "East Geelong Mclure U9" vs "McLure". Stats were unaffected (teams are per season, clubs and
+// players resolve case-insensitively), but the same team showed under two names in player team
+// lists, awards, search and Team Comparison, and anything matching teams by name across seasons
+// split at the change. Names that are identical once case, spaces and punctuation are ignored
+// are collapsed onto the spelling from their latest season (most games breaks a tie). Two
+// spellings used in the SAME season are left alone, in case they really are different teams.
+function unifyTeamNameSpellings(list){
+  const keyOf = n => String(n).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const seen = new Map(); // key -> Map(spelling -> {years:Set, games})
+  const note = (n, y)=>{
+    if(typeof n !== 'string') return;
+    const k = keyOf(n);
+    if(!seen.has(k)) seen.set(k, new Map());
+    const m = seen.get(k);
+    if(!m.has(n)) m.set(n, { years:new Set(), games:0 });
+    const e = m.get(n); e.years.add(y); e.games++;
+  };
+  list.forEach(g=>{ if(g){ note(g.teamA && g.teamA.name, g.year); note(g.teamB && g.teamB.name, g.year); } });
+  const rename = new Map();
+  seen.forEach(m=>{
+    if(m.size < 2) return;
+    const all = [...m.values()].flatMap(e => [...e.years]);
+    if(new Set(all).size !== all.length) return; // two spellings share a season — leave them
+    const best = [...m.entries()].sort((a, b)=> Math.max(...b[1].years) - Math.max(...a[1].years) || b[1].games - a[1].games)[0][0];
+    m.forEach((_, n)=>{ if(n !== best) rename.set(n, best); });
+  });
+  if(!rename.size) return;
+  const fix = n => rename.get(n) || n;
+  list.forEach(g=>{
+    if(!g) return;
+    [g.teamA, g.teamB].forEach(side=>{
+      if(!side || !rename.has(side.name)) return;
+      if(typeof g.resultRaw === 'string') g.resultRaw = g.resultRaw.split(side.name).join(rename.get(side.name));
+      side.name = rename.get(side.name);
+    });
+    if(g.winner) g.winner = fix(g.winner);
+    if(g.forfeitWinner) g.forfeitWinner = fix(g.forfeitWinner);
+  });
 }
 function normalizeGameScores(list){
   if(!Array.isArray(list)) return list;
@@ -1418,6 +1471,7 @@ function normalizeGameScores(list){
       normalizeGameScoreField(g.teamB);
     }
   });
+  unifyTeamNameSpellings(list);
   return list;
 }
 
@@ -9723,7 +9777,7 @@ const PAGE_ABOUT = {
   'Compare teams': 'Two teams side by side: their head-to-head record and how many players the two squads share.',
   'Squad progressions': 'How every squad has gone season to season: which teams are improving, the most improved of all time, and a club leaderboard.',
   'Stability vs improvement': 'Whether squads that keep the same players together from year to year actually improve more than ones that change a lot.',
-  'Club pathway & retention': "One club's teams and divisions across every age group, and how many of its players come back each year.",
+  'Club pathway & retention': "One club's teams and divisions across every age group (or every club in one league side by side), and how many of its players come back each year, filterable by league.",
   'Cohort trajectory': "One team's own story: the same group of players followed as they move up through the age groups.",
   'Standout stats': "The leading team in each division for goals scored, fewest conceded, percentage, win rate and more.",
   'Missing games': 'Which teams have had the most players missing games this season, compared with their usual squad.',
@@ -17487,8 +17541,8 @@ function renderCohortTrajectoryInner(wrap, header){
 // each moved to a STRONGER division, held STEADY, or DROPPED BACK versus its own previous season.
 // Cohorts are de-duplicated so one squad aging up through several team names is a single row.
 let squadProgFilters = { mode:'season', tileGroup:'trend', year:null, ageGroup:'ALL', division:'ALL', trend:'ALL', sortKey:'trend', sortDir:'asc', impAge:'ALL', impClub:'ALL', impClubScope:'ONLY', direction:'ALL', impSortKey:'score', impSortDir:'desc', cohortThreshold:0.35,
-  clubSortKey:'avgScore', clubSortDir:'desc', pathwayClub:null, pathwayYear:null,
-  stabSortKey:'score', stabSortDir:'desc', stabAge:'ALL', stabSeason:'ALL', churnSortKey:'retentionPct', churnSortDir:'desc', churnAge:'ALL', churnYearMode:'latest', churnView:'byClub',
+  clubSortKey:'avgScore', clubSortDir:'desc', pathwayClub:null, pathwayYear:null, pathwayView:'club', pathwayLeague:null, pathwayLeagueYear:null,
+  stabSortKey:'score', stabSortDir:'desc', stabAge:'ALL', stabSeason:'ALL', churnSortKey:'retentionPct', churnSortDir:'desc', churnAge:'ALL', churnYearMode:'latest', churnView:'byClub', churnLeagues:[],
   // Stability vs improvement: multi-year (whole tracked span, per squad) is the default view —
   // stabSinceYear:null means "as far back as practical", which already means "from each squad's
   // first COMPETITIVE (graded) season" via isCompetitiveGrade inside computeSquadImprovement, not
@@ -17951,6 +18005,43 @@ function computeClubPathway(club, year){
   });
   return out.sort((a,b)=>gradeDisplayRank(a.ageGroup)-gradeDisplayRank(b.ageGroup));
 }
+
+// Club -> year -> Set of league codes (GFNL/BFNL/GDFL/CDFNL), read from the league named in that
+// club's division labels that season. Only Seniors/Reserves and the CDFNL junior grades carry a
+// league in their label — the shared AFL Barwon junior comps don't — so a club's league is really
+// "which league its senior sides play in", which is what people mean by "a Bellarine club". A club
+// with no league-labelled team that year (a junior-only club) gets JUNIOR_ONLY_LEAGUE instead.
+const JUNIOR_ONLY_LEAGUE = 'JUNIOR_ONLY';
+const _clubLeagueByYearCache = new Map();
+function computeClubLeagueByYear(){
+  const cacheKey = `${_aggVersion}`;
+  if(_clubLeagueByYearCache.has(cacheKey)) return _clubLeagueByYearCache.get(cacheKey);
+  const { teamList } = computeAggregates();
+  const out = {};
+  teamList.forEach(t=>{
+    const club = homeGrownClubKey(t.name);
+    if(!club || !t.year) return;
+    const byYear = out[club] = out[club] || {};
+    const set = byYear[t.year] = byYear[t.year] || new Set();
+    (t.divisions||[]).forEach(d=>{ const L = leagueFromDivisionLabel(d); if(L) set.add(L); });
+  });
+  Object.values(out).forEach(byYear=>Object.values(byYear).forEach(set=>{ if(!set.size) set.add(JUNIOR_ONLY_LEAGUE); }));
+  _clubLeagueByYearCache.set(cacheKey, out);
+  return out;
+}
+// The league(s) a club belonged to in one season. A year the club has nothing on file for falls
+// back to its nearest earlier season, then its nearest later one, so an averaged retention row
+// (which spans several years) still resolves to something sensible.
+function clubLeaguesInYear(club, year){
+  const byYear = computeClubLeagueByYear()[club];
+  if(!byYear) return new Set();
+  if(byYear[year]) return byYear[year];
+  const years = Object.keys(byYear).map(Number).sort((a,b)=>a-b);
+  const earlier = years.filter(y=>y<year), later = years.filter(y=>y>year);
+  const pick = earlier.length ? earlier[earlier.length-1] : later[0];
+  return pick!=null ? byYear[pick] : new Set();
+}
+const LEAGUE_FILTER_OPTIONS = [...Object.entries(LEAGUE_FULL_NAMES), [JUNIOR_ONLY_LEAGUE, 'Junior-only clubs']];
 
 // Club -> year -> age group -> Set of (lowercased) player names who turned out for that club,
 // that year, at that age group. Joint teams (e.g. "Newcomb / Belmont Power Lions") are INCLUDED —
@@ -19877,6 +19968,85 @@ function renderClubLeaderboard(wrap, header){
 
 function renderClubPathway(wrap, header, teamList){
   const f = squadProgFilters;
+  const toggleRow = `<div class="controls-row" style="margin-bottom:10px;gap:8px;">
+    <button class="pathway-view-toggle" data-view="club" style="${f.pathwayView!=='league'?'background:var(--gold);color:#1a1a1a;':''}">One club</button>
+    <button class="pathway-view-toggle" data-view="league" style="${f.pathwayView==='league'?'background:var(--gold);color:#1a1a1a;':''}">Whole league, club by club</button>
+  </div>`;
+  if(f.pathwayView==='league') renderClubPathwayLeague(wrap, header + toggleRow, teamList);
+  else renderClubPathwayClub(wrap, header + toggleRow, teamList);
+  wrap.querySelectorAll('.pathway-view-toggle').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.pathwayView = btn.dataset.view; renderSquadProgressions(); }; });
+}
+
+// Every club in ONE league side by side for one season — a row per club, a column per age group,
+// each cell the same 0-100% Level the single-club view shows. Clubs are placed in a league by
+// their Seniors/Reserves (see computeClubLeagueByYear), so a GDFL club's juniors still appear
+// under it even though they play in the shared AFL Barwon junior comps.
+function renderClubPathwayLeague(wrap, header, teamList){
+  const f = squadProgFilters;
+  const leagueByYear = computeClubLeagueByYear();
+  const years = [...new Set(teamList.map(t=>t.year).filter(Boolean))].sort((a,b)=>b-a);
+  if(!f.pathwayLeagueYear || !years.map(String).includes(String(f.pathwayLeagueYear))) f.pathwayLeagueYear = years[0] || null;
+  const year = Number(f.pathwayLeagueYear);
+  const leagueOpts = LEAGUE_FILTER_OPTIONS.filter(([code])=> Object.values(leagueByYear).some(byYear=>byYear[year] && byYear[year].has(code)));
+  if(!f.pathwayLeague || !leagueOpts.some(([c])=>c===f.pathwayLeague)) f.pathwayLeague = leagueOpts.length ? leagueOpts[0][0] : null;
+
+  const clubs = Object.keys(leagueByYear).filter(c=> leagueByYear[c][year] && leagueByYear[c][year].has(f.pathwayLeague)).sort();
+  const clubRows = clubs.map(club=>{
+    const byAge = {};
+    computeClubPathway(club, year).forEach(r=>{ byAge[r.ageGroup] = r; });
+    const fracs = Object.values(byAge).map(r=>r.levelFrac).filter(v=>v!=null);
+    const avg = fracs.length ? fracs.reduce((s,v)=>s+v,0)/fracs.length : null;
+    return { club, byAge, avg };
+  }).sort((a,b)=>(b.avg??-1)-(a.avg??-1));
+  const ageCols = [...new Set(clubRows.flatMap(r=>Object.keys(r.byAge)))].filter(a=>a!=='Other').sort((a,b)=>gradeDisplayRank(a)-gradeDisplayRank(b));
+  const levelColor = lf => lf==null ? 'var(--muted)' : lf>=0.66 ? 'var(--green)' : lf>=0.33 ? 'var(--gold)' : 'var(--red)';
+  const cellHtml = r => {
+    if(!r) return '<td class="num" style="color:var(--muted);" title="No team this season">·</td>';
+    const tip = `${r.teamNames.join(', ')}${r.divisions.length?' — '+r.divisions.join(', '):''} (${r.wins}-${r.losses}-${r.draws})${r.basis==='winpct'?' — ranked by win%':''}`.replace(/"/g,'&quot;');
+    if(r.levelFrac==null) return `<td class="num" style="color:var(--muted);" title="${tip}">n/c</td>`;
+    const pct = Math.round(r.levelFrac*100);
+    return `<td class="num" title="${tip}" style="color:${levelColor(r.levelFrac)};font-weight:600;">${pct}%${r.basis==='winpct'?'<sup style="font-weight:400;color:var(--muted);">w</sup>':''}${r.teamNames.length>1?`<div style="font-size:10.5px;font-weight:400;color:var(--muted);">${r.teamNames.length} teams</div>`:''}</td>`;
+  };
+  const leagueName = (leagueOpts.find(([c])=>c===f.pathwayLeague)||[])[1] || '';
+
+  wrap.innerHTML = `
+    ${header}
+    <p class="hint" style="margin:0 0 12px;">Every club in one league for one season, each age group side by side. Same 0–100% Level as the one-club view: 100% is that age group's top division, 0% the bottom (<sup>w</sup> means ranked by win% because that grade has no numbered divisions). A club with more than one team in an age group shows their average. Hover a cell for the team, division and record; click a club for its full breakdown. Sorted by each club's average Level across the age groups it fields.</p>
+    <p class="hint" style="margin:0 0 12px;">Clubs are grouped by the league their Seniors/Reserves play in that season. Junior grades are mostly one shared AFL Barwon competition, so a junior Level compares the club against every club at that age, not just this league.</p>
+    <div class="controls-row" style="margin-bottom:14px;gap:8px;flex-wrap:wrap;">
+      <select id="pathwayLeagueSel" ${leagueOpts.length?'':'disabled'}>${leagueOpts.map(([code,name])=>`<option value="${code}" ${f.pathwayLeague===code?'selected':''}>${name}</option>`).join('')}</select>
+      <select id="pathwayLeagueYearSel">${years.map(y=>`<option value="${y}" ${String(f.pathwayLeagueYear)===String(y)?'selected':''}>${y}</option>`).join('')}</select>
+    </div>
+    ${clubRows.length===0 ? `<div class="empty">No clubs found for ${leagueName||'this league'} in ${year}.</div>` : `
+    <div style="overflow-x:auto;">
+    <table><thead><tr><th>Club</th>${ageCols.map(a=>`<th class="num">${a}</th>`).join('')}<th class="num">Avg</th></tr></thead><tbody>
+    ${clubRows.map(r=>`<tr>
+      <td><span class="pathway-league-club" data-club="${r.club.replace(/"/g,'&quot;')}" style="cursor:pointer;color:var(--gold);">${r.club}</span></td>
+      ${ageCols.map(a=>cellHtml(r.byAge[a])).join('')}
+      <td class="num" style="color:${levelColor(r.avg)};font-weight:600;">${r.avg==null?'—':Math.round(r.avg*100)+'%'}</td>
+    </tr>`).join('')}
+    </tbody></table>
+    </div>`}
+  `;
+
+  document.getElementById('backToTeamsFromProg').onclick = backToTeamsFromRankings;
+  wrap.querySelectorAll('.prog-mode').forEach(btn=>{ btn.onclick = ()=>{ squadProgFilters.mode = btn.dataset.mode; renderSquadProgressions(); }; });
+  const leagueSel = document.getElementById('pathwayLeagueSel');
+  if(leagueSel) leagueSel.onchange = e=>{ squadProgFilters.pathwayLeague = e.target.value; renderSquadProgressions(); };
+  const yearSel = document.getElementById('pathwayLeagueYearSel');
+  if(yearSel) yearSel.onchange = e=>{ squadProgFilters.pathwayLeagueYear = e.target.value; renderSquadProgressions(); };
+  wrap.querySelectorAll('.pathway-league-club').forEach(el=>{
+    el.onclick = ()=>{
+      squadProgFilters.pathwayView = 'club';
+      squadProgFilters.pathwayClub = el.dataset.club;
+      squadProgFilters.pathwayYear = squadProgFilters.pathwayLeagueYear;
+      renderSquadProgressions();
+    };
+  });
+}
+
+function renderClubPathwayClub(wrap, header, teamList){
+  const f = squadProgFilters;
   const clubs = [...new Set(teamList.map(t=>homeGrownClubKey(t.name)).filter(Boolean))].sort();
   if(!f.pathwayClub || !clubs.includes(f.pathwayClub)) f.pathwayClub = clubs[0] || null;
   const years = [...new Set(teamList.filter(t=>homeGrownClubKey(t.name)===f.pathwayClub).map(t=>t.year).filter(Boolean))].sort((a,b)=>b-a);
@@ -20283,7 +20453,16 @@ function renderClubChurnByClub(wrap, header, toggleRow){
   // from the same rosters computeClubChurn itself builds from, so the option list can never offer
   // a year the computation doesn't actually have.
   const allChurnYears = [...new Set(Object.values(collapseClubYearRosters(computeClubYearRosters(getVisibleGames().filter(g=>g.teamA&&g.teamB)), f.churnAge)).flatMap(byYear=>Object.keys(byYear).map(Number)))].sort((a,b)=>b-a);
-  const rows = computeClubChurn(f.churnAge, f.churnYearMode);
+  // League filter — empty means every league. Applied after the churn numbers are computed, so it
+  // only narrows WHICH clubs are listed: "Moved clubs" still means moved anywhere in the
+  // competition, not just within the picked league(s). A club is placed by its league in the
+  // latest season of the row's transition.
+  const pickedLeagues = (f.churnLeagues||[]).filter(code=>LEAGUE_FILTER_OPTIONS.some(([c])=>c===code));
+  const rows = computeClubChurn(f.churnAge, f.churnYearMode).filter(r=>{
+    if(!pickedLeagues.length) return true;
+    const leagues = clubLeaguesInYear(r.club, r.latestYear);
+    return pickedLeagues.some(code=>leagues.has(code));
+  });
   const isAverageMode = f.churnYearMode==='all' || f.churnYearMode==='last3' || f.churnYearMode==='last5';
 
   const COLUMNS = [
@@ -20334,6 +20513,11 @@ function renderClubChurnByClub(wrap, header, toggleRow){
       </select>
       ${yearModeSelectHtml}
     </div>
+    <div class="controls-row" style="margin:-4px 0 14px;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:13px;">
+      <span style="color:var(--muted);">Leagues:</span>
+      <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="churn-league-all" ${pickedLeagues.length?'':'checked'}> All leagues</label>
+      ${LEAGUE_FILTER_OPTIONS.map(([code,name])=>`<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="churn-league-cb" value="${code}" ${pickedLeagues.includes(code)?'checked':''}> ${name}</label>`).join('')}
+    </div>
     ${rows.length===0 ? '<div class="empty">Not enough seasons on file yet for any club under this filter.</div>' : `
     <table><thead><tr>${thHtml}</tr></thead><tbody>
     ${rows.map(r=>`<tr>
@@ -20354,6 +20538,16 @@ function renderClubChurnByClub(wrap, header, toggleRow){
   if(churnAgeSel) churnAgeSel.onchange = e=>{ squadProgFilters.churnAge = e.target.value; renderSquadProgressions(); };
   const churnYearModeSel = document.getElementById('churnYearModeSel');
   if(churnYearModeSel) churnYearModeSel.onchange = e=>{ squadProgFilters.churnYearMode = e.target.value; renderSquadProgressions(); };
+  const churnLeagueAll = wrap.querySelector('.churn-league-all');
+  if(churnLeagueAll) churnLeagueAll.onchange = ()=>{ squadProgFilters.churnLeagues = []; renderSquadProgressions(); };
+  wrap.querySelectorAll('.churn-league-cb').forEach(cb=>{
+    cb.onchange = ()=>{
+      const picked = [...wrap.querySelectorAll('.churn-league-cb')].filter(x=>x.checked).map(x=>x.value);
+      // Ticking every league is the same as "All leagues", so collapse back to it.
+      squadProgFilters.churnLeagues = picked.length===LEAGUE_FILTER_OPTIONS.length ? [] : picked;
+      renderSquadProgressions();
+    };
+  });
   wrap.querySelectorAll('.churn-sort-th').forEach(th=>{
     th.onclick = ()=>{
       const key = th.dataset.sortKey;
